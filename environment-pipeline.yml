@@ -23,3 +23,4 @@ dependencies:
     - tqdm>=4.65
     - watchdog>=3.0
     - pytest>=7.0
+    - openpyxl>=3.1

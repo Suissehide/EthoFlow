@@ -9,12 +9,13 @@ L'app s'ouvre sur http://localhost:8501
 Pour exposer sur le LAN : ajouter --server.address=0.0.0.0
 """
 
+import subprocess
 import sys
-import yaml
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
-from pathlib import Path
-from datetime import datetime
+import yaml
 
 # Localisation des données (chemins relatifs au repo)
 ROOT = Path(__file__).resolve().parent.parent
@@ -23,7 +24,7 @@ RAW_DIR = DATA_ROOT / "raw"
 CROPPED_DIR = DATA_ROOT / "cropped"
 DLC_OUTPUT_DIR = DATA_ROOT / "dlc-output"
 VAME_OUTPUT_DIR = DATA_ROOT / "vame-output"
-RESULTS_DIR = DATA_ROOT / "results"
+SCRIPTS_DIR = ROOT / "scripts"
 
 
 # ============================================================
@@ -42,8 +43,16 @@ st.set_page_config(
 # Helpers
 # ============================================================
 
-def list_sessions():
-    """Liste les sessions présentes dans data/raw/ avec leur statut d'avancement."""
+def load_metadata(session_id: str) -> dict | None:
+    path = RAW_DIR / session_id / "metadata.yaml"
+    if not path.exists():
+        return None
+    with open(path) as f:
+        return yaml.safe_load(f)
+
+
+def list_sessions() -> pd.DataFrame:
+    """Liste les sessions, leur metadata et leur statut d'avancement."""
     if not RAW_DIR.exists():
         return pd.DataFrame()
 
@@ -52,27 +61,40 @@ def list_sessions():
         if not session_dir.is_dir() or session_dir.name.startswith("."):
             continue
         session_id = session_dir.name
-        metadata_file = session_dir / "metadata.yaml"
-        has_video = any(session_dir.glob("*.mp4")) or any(session_dir.glob("*.avi"))
+        meta = load_metadata(session_id) or {}
+        source_video = meta.get("source_video")
+        video_ok = bool(source_video and Path(source_video).exists())
+
+        n_animals = sum(
+            1 for a in meta.get("arenes", []) if a.get("mouse_id") is not None
+        )
 
         rows.append({
             "session_id": session_id,
-            "vidéo": "OK" if has_video else "manque",
-            "metadata": "OK" if metadata_file.exists() else "manque",
-            "cropped": "OK" if (CROPPED_DIR / session_id).exists() else "à faire",
-            "DLC": "OK" if (DLC_OUTPUT_DIR / session_id).exists() else "à faire",
-            "VAME": "OK" if (VAME_OUTPUT_DIR / session_id).exists() else "à faire",
+            "timepoint": meta.get("timepoint", "—"),
+            "date": meta.get("date", "—"),
+            "animaux": n_animals,
+            "vidéo": "OK" if video_ok else "manque",
+            "cropped": "OK" if (CROPPED_DIR / session_id).exists() else "—",
+            "DLC": "OK" if (DLC_OUTPUT_DIR / session_id).exists() else "—",
+            "VAME": "OK" if (VAME_OUTPUT_DIR / session_id).exists() else "—",
         })
     return pd.DataFrame(rows)
 
 
-def load_metadata(session_id: str):
-    """Charge le metadata.yaml d'une session, ou retourne None."""
-    path = RAW_DIR / session_id / "metadata.yaml"
-    if not path.exists():
-        return None
-    with open(path) as f:
-        return yaml.safe_load(f)
+def arenes_dataframe(meta: dict) -> pd.DataFrame:
+    rows = []
+    for ar in meta.get("arenes", []):
+        rows.append({
+            "Arène": ar.get("id"),
+            "MouseID": ar.get("mouse_id"),
+            "Condition": ar.get("condition"),
+            "Stress": "✓" if ar.get("stress") else "",
+            "ANGII": "✓" if ar.get("angii") else "",
+            "Coords": ar.get("coords") or "(à définir)",
+            "MouseTrialCode": ar.get("mouse_trial_code") or "",
+        })
+    return pd.DataFrame(rows)
 
 
 # ============================================================
@@ -86,7 +108,8 @@ page = st.sidebar.radio(
     "Navigation",
     [
         "Tableau de bord",
-        "Nouvelle session",
+        "Sync depuis Excel",
+        "Détails session",
         "Lancer pipeline",
         "Résultats",
         "À propos",
@@ -98,107 +121,106 @@ st.sidebar.caption(f"Racine des données : `{DATA_ROOT}`")
 
 
 # ============================================================
-# Page : Tableau de bord
+# Tableau de bord
 # ============================================================
 
 if page == "Tableau de bord":
     st.title("Tableau de bord")
-    st.caption("Vue d'ensemble des sessions présentes dans `data/raw/`")
+    st.caption("Sessions présentes et statut d'avancement du pipeline")
 
     df = list_sessions()
     if df.empty:
         st.info(
-            "Aucune session trouvée. Va dans **Nouvelle session** pour en créer une, "
-            "ou dépose manuellement une vidéo dans `data/raw/<session_id>/`."
+            "Aucune session synchronisée. Va dans **Sync depuis Excel** "
+            "pour générer les metadata à partir du fichier maître."
         )
     else:
-        # Stats rapides
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Sessions totales", len(df))
-        col2.metric("Croppées", (df["cropped"] == "OK").sum())
-        col3.metric("DLC", (df["DLC"] == "OK").sum())
-        col4.metric("VAME", (df["VAME"] == "OK").sum())
-
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Sessions", len(df))
+        c2.metric("Vidéos OK", (df["vidéo"] == "OK").sum())
+        c3.metric("Croppées", (df["cropped"] == "OK").sum())
+        c4.metric("DLC", (df["DLC"] == "OK").sum())
+        c5.metric("VAME", (df["VAME"] == "OK").sum())
         st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ============================================================
-# Page : Nouvelle session
+# Sync depuis Excel
 # ============================================================
 
-elif page == "Nouvelle session":
-    st.title("Créer une nouvelle session")
+elif page == "Sync depuis Excel":
+    st.title("Synchroniser depuis l'Excel maître")
     st.caption(
-        "Crée le dossier de session et le fichier `metadata.yaml`. "
-        "Tu pourras déposer la vidéo dedans ensuite."
+        "Lit le fichier `OpenField_trials_*.xlsx` et génère un `metadata.yaml` "
+        "par session dans `data/raw/`."
     )
 
-    with st.form("new_session"):
-        col1, col2 = st.columns(2)
-        with col1:
-            date = st.date_input("Date d'enregistrement", value=datetime.now())
-            projet = st.text_input("Projet", placeholder="projet-X")
-            chercheur = st.text_input("Chercheur", placeholder="nom.prenom")
-        with col2:
-            session_num = st.number_input("N° session du jour", min_value=1, value=1)
-            protocole = st.text_input("Protocole", value="openfield-15min")
-            fps = st.number_input("FPS", min_value=1, value=60)
+    default_excel = ROOT.parent / "data" / "OpenField_trials_C DUPLAA.xlsx"
+    default_videos = ROOT.parent / "data"
 
-        st.subheader("Arènes (4 par session)")
-        st.caption("Renseigne l'animal et la condition de chaque arène.")
+    excel_path = st.text_input("Chemin du fichier Excel", value=str(default_excel))
+    videos_dir = st.text_input("Dossier des vidéos (.mp4)", value=str(default_videos))
+    dry_run = st.checkbox("Dry-run (afficher sans écrire)", value=False)
 
-        arenes = []
-        for i in range(1, 5):
-            with st.expander(f"Arène {i}", expanded=(i == 1)):
-                ca, cb = st.columns(2)
-                with ca:
-                    animal_id = st.text_input(
-                        "Animal ID", key=f"animal_{i}", placeholder=f"M00{i}"
-                    )
-                with cb:
-                    condition = st.text_input(
-                        "Condition", key=f"cond_{i}", placeholder="control"
-                    )
-                arenes.append({
-                    "id": f"arene-{i}",
-                    "animal_id": animal_id,
-                    "condition": condition,
-                    "coords": None,  # à remplir manuellement ou via un outil de calibration
-                })
+    if st.button("Lancer le sync", type="primary"):
+        cmd = [
+            sys.executable, str(SCRIPTS_DIR / "sync_from_excel.py"),
+            "--excel", excel_path,
+            "--videos-dir", videos_dir,
+        ]
+        if dry_run:
+            cmd.append("--dry-run")
 
-        notes = st.text_area("Notes")
-
-        submitted = st.form_submit_button("Créer la session", type="primary")
-        if submitted:
-            if not projet or not chercheur:
-                st.error("Projet et chercheur sont obligatoires.")
-            else:
-                session_id = (
-                    f"{date.strftime('%Y-%m-%d')}_{projet}_session-{session_num:03d}"
-                )
-                session_dir = RAW_DIR / session_id
-                session_dir.mkdir(parents=True, exist_ok=True)
-
-                metadata = {
-                    "session_id": session_id,
-                    "date": date.strftime("%Y-%m-%d"),
-                    "projet": projet,
-                    "chercheur": chercheur,
-                    "protocole": protocole,
-                    "camera": {"resolution": "1920x1080", "fps": int(fps)},
-                    "arenes": arenes,
-                    "notes": notes,
-                }
-                with open(session_dir / "metadata.yaml", "w") as f:
-                    yaml.dump(metadata, f, allow_unicode=True, sort_keys=False)
-
-                st.success(f"Session créée : `{session_id}`")
-                st.info(f"Dépose maintenant la vidéo (.mp4) dans `{session_dir}`")
-                st.code(str(session_dir), language="text")
+        with st.status("Sync en cours...", expanded=True) as status:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            st.code(result.stdout or "(stdout vide)")
+            if result.stderr:
+                st.error(result.stderr)
+            ok = result.returncode == 0
+            status.update(
+                label="Sync terminé" if ok else "Sync échoué",
+                state="complete" if ok else "error",
+            )
 
 
 # ============================================================
-# Page : Lancer pipeline
+# Détails session
+# ============================================================
+
+elif page == "Détails session":
+    st.title("Détails d'une session")
+
+    df = list_sessions()
+    if df.empty:
+        st.info("Pas de session.")
+    else:
+        session = st.selectbox("Session", options=df["session_id"].tolist())
+        meta = load_metadata(session)
+        if meta is None:
+            st.error("metadata.yaml introuvable")
+        else:
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Timepoint", meta.get("timepoint", "—"))
+            c2.metric("Date", meta.get("date", "—"))
+            c3.metric("FPS", meta.get("camera", {}).get("fps", "—"))
+            c4.metric("Trial n°", meta.get("trial_no", "—"))
+
+            st.subheader("Arènes")
+            st.dataframe(arenes_dataframe(meta), use_container_width=True, hide_index=True)
+
+            with st.expander("metadata.yaml brut"):
+                st.code(yaml.dump(meta, allow_unicode=True, sort_keys=False), language="yaml")
+
+            sv = meta.get("source_video")
+            if sv:
+                if Path(sv).exists():
+                    st.success(f"Vidéo source localisée : `{sv}`")
+                else:
+                    st.warning(f"Vidéo source introuvable : `{sv}`")
+
+
+# ============================================================
+# Lancer pipeline
 # ============================================================
 
 elif page == "Lancer pipeline":
@@ -208,19 +230,15 @@ elif page == "Lancer pipeline":
     if df.empty:
         st.warning("Aucune session disponible.")
     else:
-        sessions = st.multiselect(
-            "Sessions à traiter",
-            options=df["session_id"].tolist(),
-            help="Sélectionne une ou plusieurs sessions.",
-        )
+        sessions = st.multiselect("Sessions à traiter", options=df["session_id"].tolist())
 
         st.subheader("Étapes")
-        col1, col2, col3 = st.columns(3)
-        with col1:
+        c1, c2, c3 = st.columns(3)
+        with c1:
             do_crop = st.checkbox("1. Crop des arènes", value=True)
-        with col2:
+        with c2:
             do_dlc = st.checkbox("2. Inférence DLC", value=True)
-        with col3:
+        with c3:
             do_vame = st.checkbox("3. Analyse VAME", value=True)
 
         st.markdown("---")
@@ -228,20 +246,23 @@ elif page == "Lancer pipeline":
             for session_id in sessions:
                 with st.status(f"Traitement de `{session_id}`...", expanded=True) as status:
                     if do_crop:
-                        st.write("→ Crop des 4 arènes")
-                        # TODO: subprocess.run([sys.executable, ROOT/"scripts/crop_arenes.py", session_id])
-                        st.write("(à implémenter — appel à `scripts/crop_arenes.py`)")
+                        st.write("→ Crop des arènes")
+                        result = subprocess.run(
+                            [sys.executable, str(SCRIPTS_DIR / "crop_arenes.py"), session_id],
+                            capture_output=True, text=True,
+                        )
+                        st.code(result.stdout or result.stderr or "(silencieux)")
                     if do_dlc:
-                        st.write("→ Inférence DeepLabCut")
-                        st.write("(à implémenter — appel à `scripts/run_dlc_inference.py`)")
+                        st.write("→ Inférence DLC (nécessite l'env conda 'dlc')")
+                        st.info("À implémenter via `conda run -n dlc python scripts/run_dlc_inference.py`")
                     if do_vame:
-                        st.write("→ Analyse VAME")
-                        st.write("(à implémenter — appel à `scripts/run_vame.py`)")
+                        st.write("→ Analyse VAME (nécessite l'env conda 'vame')")
+                        st.info("À implémenter via `conda run -n vame python scripts/run_vame.py`")
                     status.update(label=f"`{session_id}` terminé", state="complete")
 
 
 # ============================================================
-# Page : Résultats
+# Résultats
 # ============================================================
 
 elif page == "Résultats":
@@ -256,10 +277,10 @@ elif page == "Résultats":
             st.warning("Aucune session avec inférence DLC complète.")
         else:
             session = st.selectbox("Session", options=treated)
-            metadata = load_metadata(session)
-            if metadata:
-                st.subheader("Metadata")
-                st.json(metadata)
+            meta = load_metadata(session)
+            if meta:
+                st.subheader("Contexte")
+                st.dataframe(arenes_dataframe(meta), use_container_width=True, hide_index=True)
 
             st.subheader("Fichiers générés")
             tabs = st.tabs(["DLC", "VAME"])
@@ -282,7 +303,7 @@ elif page == "Résultats":
 
 
 # ============================================================
-# Page : À propos
+# À propos
 # ============================================================
 
 elif page == "À propos":
@@ -292,8 +313,9 @@ elif page == "À propos":
         **EthoFlow** est une interface web légère pour orchestrer
         l'analyse comportementale de souris avec **DeepLabCut** et **VAME**.
 
-        - Documentation complète : `docs/ETHOFLOW.md`
-        - Repo : (à pousser sur GitLab/GitHub)
+        - Documentation : `docs/ETHOFLOW.md`
+        - Source de vérité expérimentale : fichier Excel maître (`OpenField_trials_*.xlsx`)
+        - Workflow : Excel → sync → metadata.yaml → crop → DLC → VAME → résultats
 
         Stack : Python · Streamlit · OpenCV · DeepLabCut · VAME
         """

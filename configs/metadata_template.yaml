@@ -1,34 +1,47 @@
 # Template de metadata pour une session.
-# À copier dans data/raw/<session_id>/metadata.yaml et remplir.
+# En pratique, ce fichier est généré automatiquement par scripts/sync_from_excel.py
+# à partir du fichier Excel maître. Ce template sert de référence du schéma.
 
-session_id: 2026-05-04_projet-X_session-001
-date: 2026-05-04
-projet: projet-X
-chercheur: nom.prenom
-protocole: openfield-15min
+session_id: OF-M1-20251010-V01
+project: OF
+timepoint: M1                           # M1 ou M2
+date: '2025-10-10'
+trial_no: 1
+source_video: /chemin/absolu/vers/OF-M1-20251010-V01.mp4
 
 camera:
-  modele: ""
-  resolution: 1920x1080
-  fps: 60
+  fps: 25
+  width: 1024
+  height: 1080
 
 arenes:
-  - id: arene-1
-    coords: [0, 0, 960, 540]   # [x, y, w, h] en pixels
-    animal_id: M001
-    condition: control
-  - id: arene-2
-    coords: [960, 0, 960, 540]
-    animal_id: M002
-    condition: traitement-A
-  - id: arene-3
-    coords: [0, 540, 960, 540]
-    animal_id: M003
-    condition: control
-  - id: arene-4
-    coords: [960, 540, 960, 540]
-    animal_id: M004
-    condition: traitement-A
+  - id: A1
+    coords: null                        # [x, y, w, h] dans la vidéo source
+    mouse_trial_code: OF-M1-20251010-V01_A1_M15
+    mouse_id: 15
+    condition: SHAM                     # SHAM, CUS, SHAM+ANGII, CUS+ANGII
+    angii: false
+    stress: false
+  - id: A2
+    coords: null
+    mouse_trial_code: OF-M1-20251010-V01_A2_M16
+    mouse_id: 16
+    condition: SHAM
+    angii: false
+    stress: false
+  - id: A3
+    coords: null
+    mouse_trial_code: OF-M1-20251010-V01_A3_M17
+    mouse_id: 17
+    condition: SHAM
+    angii: false
+    stress: false
+  - id: A4
+    coords: null
+    mouse_trial_code: OF-M1-20251010-V01_A4_M18
+    mouse_id: 18
+    condition: SHAM
+    angii: false
+    stress: false
 
-notes: |
-  Toute observation utile (incident, comportement particulier, etc.)
+notes: 'MANIP 1'

@@ -3,7 +3,7 @@
 > **Stack** : DeepLabCut (estimation de pose) + VAME (segmentation comportementale)
 > **Plateforme** : Windows
 > **Public** : chercheurs non techniques (utilisation) + développeur successeur (maintenance)
-> **Volume cible** : ~100 vidéos / mois, 1080p 60fps, 10–20 min, 4 arènes par vidéo
+> **Volume cible** : ~100 vidéos / mois, 1024×1080 à 25 fps, 10–20 min, 4 arènes par vidéo
 
 ---
 
@@ -33,7 +33,7 @@ Chaque partie commence par **« objectif »** (ce qu'on veut obtenir) et **« pr
 [Acquisition]
     │
     ▼
-[Vidéo brute 1080p/60fps, 4 animaux dans 4 arènes]
+[Vidéo brute 1024×1080 à 25 fps, 4 animaux dans 4 arènes]
     │
     ▼
 [Crop des 4 arènes]  ───►  4 vidéos single-animal
@@ -182,7 +182,7 @@ Pour les scripts du pipeline (crop vidéo, organisation fichiers, interface web)
 conda deactivate
 conda create -n pipeline python=3.10 -y
 conda activate pipeline
-pip install opencv-python pandas numpy streamlit pyyaml tqdm
+pip install opencv-python pandas numpy streamlit pyyaml tqdm openpyxl
 ```
 
 ### 2.6 Récap des environnements
@@ -199,106 +199,128 @@ pip install opencv-python pandas numpy streamlit pyyaml tqdm
 
 **Objectif** : une structure de fichiers et une convention de nommage figées, valables pour les 5 prochaines années.
 
-> 🔑 **C'est la partie la plus importante de toute la doc.** Une convention bâclée maintenant = enfer permanent ensuite. À discuter et valider avec les chercheurs avant la première session enregistrée.
+> 🔑 **C'est la partie la plus importante de toute la doc.** Une convention bâclée maintenant = enfer permanent ensuite.
 
 ### 3.1 Arborescence cible
 
 ```
 C:\labo\
-├── ethoflow\                ← repo Git (code + cette doc)
+├── ethoflow\                 ← repo Git (code + cette doc)
 │   ├── scripts\
+│   ├── streamlit_app\
 │   ├── configs\
 │   ├── docs\
-│   └── README.md
+│   ├── README.md
+│   └── data\                 ← données de travail du pipeline
+│       ├── raw\              ← un dossier par session, contient metadata.yaml
+│       │   └── OF-M1-20251010-V01\
+│       │       └── metadata.yaml
+│       ├── cropped\          ← vidéos après crop des arènes (éphémère)
+│       ├── dlc-output\       ← fichiers .h5 / .csv issus de DLC
+│       ├── vame-output\      ← résultats VAME
+│       └── results\          ← figures et métriques finales
 │
-├── data\
-│   ├── raw\                  ← vidéos brutes (jamais modifiées)
-│   │   └── 2026-05-04_projet-X_session-001\
-│   │       ├── video.mp4
-│   │       └── metadata.yaml
-│   │
-│   ├── cropped\              ← vidéos après crop des 4 arènes
-│   ├── dlc-output\           ← fichiers .h5 / .csv issus de DLC
-│   ├── vame-output\          ← résultats VAME
-│   └── results\              ← figures et métriques finales
+├── data\                     ← acquisition brute (vidéos + Excel maître)
+│   ├── OpenField_trials_*.xlsx
+│   ├── OF-M1-20251010-V01.mp4
+│   └── ...
 │
 ├── dlc-projects\             ← projets DLC (modèles entraînés)
-│   └── souris-openfield-2026-05-04\
+│   └── souris-openfield-2026-XX-XX\
 │
 └── vame-projects\
-    └── souris-openfield-2026-05-04\
+    └── souris-openfield-2026-XX-XX\
 ```
 
-### 3.2 Convention de nommage des sessions
+> Note : les vidéos brutes restent à plat dans `data/`. C'est le format dans lequel les chercheurs les déposent et c'est très bien comme ça — `ethoflow/data/raw/<session>/metadata.yaml` référence chaque vidéo via son chemin absolu (clé `source_video`).
 
-Chaque enregistrement est une **session** identifiée par un dossier nommé :
+### 3.2 Convention de nommage des sessions (Open Field)
 
+Convention adoptée avec le labo, documentée dans le Codebook de l'Excel maître :
+
+| Niveau | Format | Exemple |
+|---|---|---|
+| **TrialCode** | `OF-<Timepoint>-<YYYYMMDD>-V<##>` | `OF-M1-20251010-V01` |
+| **ArenaCode** | `<TrialCode>_A<#>` | `OF-M1-20251010-V01_A3` |
+| **MouseTrialCode** | `<ArenaCode>_M<##>` | `OF-M1-20251010-V01_A3_M17` |
+
+**Règles** : zero-padding sur tous les compteurs (V01 et non V1), date sans séparateur, dashes entre composants, underscore pour la hiérarchie. Le tri alphabétique = tri chronologique + numérique.
+
+Le `TrialCode` sert de `session_id` dans EthoFlow. Les vidéos croppées prennent le format `<TrialCode>_<ArenaCode>.mp4`, par exemple `OF-M1-20251010-V01_A3.mp4`.
+
+### 3.3 Excel maître = source de vérité
+
+Les chercheurs maintiennent un fichier `OpenField_trials_<équipe>.xlsx` qui contient :
+
+- onglet **Codebook** : documentation du format
+- onglet **Subjects** : table des souris (MouseID, groupe baseline M1, groupe ANGII M2, stress)
+- onglet **Trials_Videos** : une ligne par vidéo (TrialCode, date, fps, dimensions, notes)
+- onglet **Arena_Mapping** : une ligne par (TrialCode, Arène) avec le MouseID assigné
+
+EthoFlow lit ce fichier et **ne le modifie jamais**. Le script `scripts/sync_from_excel.py` génère un `metadata.yaml` par session à partir de cet Excel.
+
+```bash
+conda activate ethoflow
+python scripts/sync_from_excel.py
+# ou via l'interface Streamlit, page "Sync depuis Excel"
 ```
-AAAA-MM-JJ_<projet>_session-NNN
-```
 
-Exemples :
+### 3.4 Schéma de métadonnée généré
 
-```
-2026-05-04_projet-X_session-001
-2026-05-04_projet-X_session-002
-2026-05-12_projet-Y_session-001
-```
-
-**Règles strictes** :
-
-- date au format ISO (`AAAA-MM-JJ`), avec tirets
-- pas d'espace, pas d'accent, pas de majuscule autres que celles déjà imposées
-- pas de caractère spécial sauf `-` et `_`
-- nom de projet court et stable (un projet = une équipe + un protocole)
-
-### 3.3 Schéma de métadonnée
-
-Chaque session contient un fichier `metadata.yaml` à la racine :
+Chaque session a un `data/raw/<session_id>/metadata.yaml` produit par le sync :
 
 ```yaml
-session_id: 2026-05-04_projet-X_session-001
-date: 2026-05-04
-projet: projet-X
-chercheur: nom.prenom
-protocole: openfield-15min
+session_id: OF-M1-20251010-V01
+project: OF
+timepoint: M1                # M1 ou M2
+date: '2025-10-10'
+trial_no: 1
+source_video: /chemin/absolu/vers/OF-M1-20251010-V01.mp4
 
 camera:
-  modele: <à remplir>
-  resolution: 1920x1080
-  fps: 60
+  fps: 25
+  width: 1024
+  height: 1080
 
 arenes:
-  - id: arene-1
-    coords: [x, y, w, h]   # rectangle de crop dans la vidéo source
-    animal_id: M001
-    condition: control
-  - id: arene-2
-    coords: [x, y, w, h]
-    animal_id: M002
-    condition: traitement-A
-  - id: arene-3
-    coords: [x, y, w, h]
-    animal_id: M003
-    condition: control
-  - id: arene-4
-    coords: [x, y, w, h]
-    animal_id: M004
-    condition: traitement-A
+  - id: A1
+    coords: null               # à définir : [x, y, w, h] dans la vidéo source
+    mouse_trial_code: OF-M1-20251010-V01_A1_M15
+    mouse_id: 15
+    condition: SHAM            # ou CUS, SHAM+ANGII, CUS+ANGII
+    angii: false
+    stress: false
+  - id: A2
+    coords: null
+    mouse_trial_code: OF-M1-20251010-V01_A2_M16
+    mouse_id: 16
+    condition: SHAM
+    angii: false
+    stress: false
+  # ... A3, A4
 
-notes: |
-  Toute observation utile (incident, comportement particulier, etc.)
+notes: 'MANIP 1'
 ```
 
-> Ce fichier est **rempli par le chercheur au moment de l'acquisition**. Il pilote toute la suite du pipeline. Sans lui, on ne sait pas quoi faire de la vidéo.
+Champs dérivés automatiquement par le sync :
+- `condition`, `angii`, `stress` → joints depuis la table Subjects via le MouseID + timepoint
+- `coords` → reste à `null` jusqu'à ce qu'on calibre la géométrie de la grille des 4 arènes (étape manuelle, une seule fois si la caméra ne bouge pas)
+- arènes vides (MouseID absent) → `mouse_id: null`, le pipeline les saute
 
-### 3.4 Sauvegarde et archivage
+### 3.5 Coordonnées des arènes
 
-À discuter et formaliser avec l'IT du labo :
+Les vidéos sont en 1024×1080 avec une grille de 4 arènes. Une fois la géométrie déterminée (typiquement une grille 2×2 où chaque arène fait ~512×540), enregistrer les coords dans :
 
-- les vidéos brutes (`data/raw/`) sont **immuables** et archivées sur un stockage redondé (NAS, serveur d'archivage du labo)
-- les résultats DLC et VAME (`data/dlc-output/`, `data/vame-output/`) sont aussi sauvegardés (ce sont des données dérivées mais coûteuses à recalculer)
-- les vidéos croppées (`data/cropped/`) sont **éphémères** — on peut les recalculer à tout moment, donc pas besoin de les sauvegarder
+- soit directement dans chaque `metadata.yaml` (si elles peuvent varier session par session)
+- soit dans `configs/pipeline_config.yaml` sous une clé `default_arenes_coords` qui pourra servir de fallback
+
+Si la caméra est strictement fixe, les coords sont identiques pour toutes les sessions et ce sont des constantes du `configs/`.
+
+### 3.6 Sauvegarde et archivage
+
+- `data/` (acquisitions brutes + Excel) : **immuable**, à archiver sur un stockage redondé
+- `ethoflow/data/dlc-output/`, `ethoflow/data/vame-output/` : sauvegarder, ce sont des données dérivées coûteuses à recalculer
+- `ethoflow/data/cropped/` : éphémère, recalculable à partir de la source — pas besoin de sauvegarder
 
 ---
 
@@ -331,13 +353,19 @@ Plus de keypoints = plus de précision pour VAME, mais aussi plus de temps de la
 
 Avant d'entraîner DLC, on crop les 4 arènes pour avoir 4 vidéos single-animal.
 
-Script à mettre dans `scripts/crop_arenes.py` (à écrire — on en fera un en phase 1 du projet). Logique :
+`scripts/crop_arenes.py` :
 
-1. Lit `metadata.yaml` de la session
-2. Pour chaque arène, extrait le rectangle de la vidéo source avec `ffmpeg` ou OpenCV
-3. Sauvegarde dans `data/cropped/<session_id>/arene-N.mp4`
+1. Lit `metadata.yaml` de la session (clé `source_video` + `arenes[].coords`)
+2. Pour chaque arène avec `mouse_id != null` et `coords` définies, extrait le rectangle avec ffmpeg
+3. Sauvegarde dans `data/cropped/<session_id>/<session_id>_<arene_id>.mp4`
+   ex : `data/cropped/OF-M1-20251010-V01/OF-M1-20251010-V01_A1.mp4`
 
-> Astuce : si les coordonnées des arènes sont stables d'une session à l'autre (caméra fixe, même setup), créer un fichier `configs/setup_default.yaml` avec les coords par défaut pour ne pas avoir à les retaper.
+```bash
+conda activate ethoflow
+python scripts/crop_arenes.py OF-M1-20251010-V01
+```
+
+> Astuce : caméra fixe = mêmes coords pour toutes les sessions. Définir une fois pour toutes dans `configs/pipeline_config.yaml` sous `default_arenes_coords`, et les copier dans chaque metadata.yaml (ou laisser un fallback dans le script).
 
 ### 4.3 Créer le projet DLC
 
@@ -404,7 +432,7 @@ Compte ~6 à 24 heures selon la GPU. À lancer la nuit.
 deeplabcut.evaluate_network(config_path, plotting=True)
 ```
 
-Cela produit des images annotées et une erreur en pixels. Cible : **erreur test < 5 pixels** sur 1080p. Si > 10 pixels, voir 4.10.
+Cela produit des images annotées et une erreur en pixels. Cible : **erreur test < 5 pixels** sur les vidéos croppées (~512×540). Si > 10 pixels, voir 4.10.
 
 ### 4.10 Refinement (raffiner si besoin)
 
