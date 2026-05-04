@@ -1,0 +1,21 @@
+# Environnement VAME.
+# À installer sur le poste de calcul. VAME a des dépendances incompatibles
+# avec DeepLabCut, d'où l'environnement séparé.
+#
+# Création :
+#   conda env create -f environment-vame.yml
+#   conda activate vame
+#
+# Note : le repo VAME (cloné à côté de ce projet) contient un VAME.yaml
+# de référence ; cette version-ci est plus minimale. Si l'install échoue,
+# se référer à VAME/VAME.yaml et au README VAME.
+
+name: vame
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - vame-py

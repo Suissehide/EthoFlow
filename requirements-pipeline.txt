@@ -1,0 +1,8 @@
+streamlit>=1.30
+opencv-python-headless>=4.8
+pandas>=2.0
+numpy>=1.24
+pyyaml>=6.0
+tqdm>=4.65
+watchdog>=3.0
+pytest>=7.0

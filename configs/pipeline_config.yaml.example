@@ -1,0 +1,21 @@
+# Configuration globale du pipeline.
+# Copier ce fichier en `pipeline_config.yaml` (sans .example) et adapter.
+
+# Chemin absolu vers le fichier config.yaml du projet DeepLabCut entraîné.
+# Exemple Windows :
+#   dlc_project_config: C:\labo\dlc-projects\souris-openfield-2026-05-04\config.yaml
+# Exemple Mac/Linux :
+#   dlc_project_config: /home/user/dlc-projects/souris-openfield-2026-05-04/config.yaml
+dlc_project_config: /CHEMIN/VERS/dlc-projects/souris-openfield-2026-05-04/config.yaml
+
+# Chemin absolu vers le fichier config.yaml du projet VAME initialisé.
+vame_project_config: /CHEMIN/VERS/vame-projects/souris-openfield-2026-05-04/config.yaml
+
+# Coordonnées par défaut des 4 arènes (si la caméra est fixe).
+# Format : [x, y, w, h] en pixels. À utiliser comme template lors
+# de la création d'un nouveau metadata.yaml.
+default_arenes_coords:
+  arene-1: [0, 0, 960, 540]
+  arene-2: [960, 0, 960, 540]
+  arene-3: [0, 540, 960, 540]
+  arene-4: [960, 540, 960, 540]

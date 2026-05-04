@@ -1,0 +1,34 @@
+# Template de metadata pour une session.
+# À copier dans data/raw/<session_id>/metadata.yaml et remplir.
+
+session_id: 2026-05-04_projet-X_session-001
+date: 2026-05-04
+projet: projet-X
+chercheur: nom.prenom
+protocole: openfield-15min
+
+camera:
+  modele: ""
+  resolution: 1920x1080
+  fps: 60
+
+arenes:
+  - id: arene-1
+    coords: [0, 0, 960, 540]   # [x, y, w, h] en pixels
+    animal_id: M001
+    condition: control
+  - id: arene-2
+    coords: [960, 0, 960, 540]
+    animal_id: M002
+    condition: traitement-A
+  - id: arene-3
+    coords: [0, 540, 960, 540]
+    animal_id: M003
+    condition: control
+  - id: arene-4
+    coords: [960, 540, 960, 540]
+    animal_id: M004
+    condition: traitement-A
+
+notes: |
+  Toute observation utile (incident, comportement particulier, etc.)

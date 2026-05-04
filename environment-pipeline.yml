@@ -1,0 +1,25 @@
+# Environnement pour les scripts d'orchestration et l'interface web Streamlit.
+# Léger, sans DeepLabCut ni VAME — utilisable sur n'importe quelle machine
+# (Mac, Linux, Windows, avec ou sans GPU) pour développer et tester l'UI.
+#
+# Création :
+#   conda env create -f environment-pipeline.yml
+#   conda activate pipeline-souris
+
+name: pipeline-souris
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - ffmpeg
+  - pip:
+    - streamlit>=1.30
+    - opencv-python>=4.8
+    - pandas>=2.0
+    - numpy>=1.24
+    - pyyaml>=6.0
+    - tqdm>=4.65
+    - watchdog>=3.0
+    - pytest>=7.0

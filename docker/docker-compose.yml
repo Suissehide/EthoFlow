@@ -1,0 +1,25 @@
+# Docker Compose pour lancer l'interface Streamlit en local.
+#
+# Usage (depuis la racine du repo, pas depuis docker/) :
+#   docker compose -f docker/docker-compose.yml up --build
+#
+# L'app est ensuite accessible sur http://localhost:8501
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: pipeline-souris
+    ports:
+      - "8501:8501"
+    volumes:
+      # Monte les dossiers de code en lecture seule pour itérer sans rebuild
+      - ../streamlit_app:/app/streamlit_app:ro
+      - ../scripts:/app/scripts:ro
+      - ../configs:/app/configs:ro
+      # Données en lecture/écriture
+      - ../data:/app/data
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

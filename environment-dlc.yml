@@ -1,0 +1,23 @@
+# Environnement DeepLabCut.
+# À installer UNIQUEMENT sur le poste de calcul équipé d'une GPU NVIDIA.
+# La version de PyTorch CUDA est gérée automatiquement par le pip install.
+#
+# Création :
+#   conda env create -f environment-dlc.yml
+#   conda activate dlc
+#
+# Vérification GPU :
+#   python -c "import torch; print(torch.cuda.is_available())"
+
+name: dlc
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+    - "deeplabcut[gui]"
+    # PyTorch sera installé en dépendance ; vérifier après l'install que
+    # la version CUDA est bien activée. Sinon, réinstaller avec :
+    # pip install torch --index-url https://download.pytorch.org/whl/cu121

@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.pytest_cache/
+.venv/
+env/
+venv/
+
+# Conda
+.conda/
+
+# Données — ne pas committer
+data/raw/*
+!data/raw/.gitkeep
+data/cropped/*
+!data/cropped/.gitkeep
+data/dlc-output/*
+!data/dlc-output/.gitkeep
+data/vame-output/*
+!data/vame-output/.gitkeep
+data/results/*
+!data/results/.gitkeep
+
+# Modèles entraînés — trop lourds pour Git
+dlc-projects/
+vame-projects/
+*.h5
+*.pickle
+*.pkl
+*.pt
+*.pth
+
+# Logs
+*.log
+logs/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+.docker/
