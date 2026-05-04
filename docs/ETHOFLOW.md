@@ -1,4 +1,4 @@
-# Pipeline d'analyse comportementale souris — Documentation
+# EthoFlow — pipeline d'analyse comportementale souris
 
 > **Stack** : DeepLabCut (estimation de pose) + VAME (segmentation comportementale)
 > **Plateforme** : Windows
@@ -125,8 +125,8 @@ git --version
 cd C:\
 mkdir labo
 cd labo
-git clone <URL-DU-REPO> pipeline-souris
-cd pipeline-souris
+git clone <URL-DU-REPO> ethoflow
+cd ethoflow
 ```
 
 L'arborescence cible du repo est décrite en partie 3.
@@ -205,7 +205,7 @@ pip install opencv-python pandas numpy streamlit pyyaml tqdm
 
 ```
 C:\labo\
-├── pipeline-souris\          ← repo Git (code + cette doc)
+├── ethoflow\                ← repo Git (code + cette doc)
 │   ├── scripts\
 │   ├── configs\
 │   ├── docs\
@@ -469,7 +469,7 @@ Créer un `lancer_pipeline.bat` à la racine du repo :
 ```bat
 @echo off
 call conda activate dlc
-cd C:\labo\pipeline-souris
+cd C:\labo\ethoflow
 python scripts\run_pipeline.py
 pause
 ```
@@ -563,8 +563,8 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 
-st.set_page_config(page_title="Pipeline souris", layout="wide")
-st.title("Pipeline d'analyse comportementale")
+st.set_page_config(page_title="EthoFlow", layout="wide")
+st.title("EthoFlow — analyse comportementale")
 
 # Sidebar : navigation
 page = st.sidebar.radio("Page", ["Sessions", "Nouvelle session", "Lancer pipeline", "Résultats"])

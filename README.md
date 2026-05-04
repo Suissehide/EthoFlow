@@ -1,4 +1,4 @@
-# Pipeline souris — analyse comportementale automatisée
+# EthoFlow — pipeline d'analyse comportementale souris
 
 Pipeline d'analyse comportementale de souris basé sur **DeepLabCut** (estimation de pose) et **VAME** (segmentation comportementale), avec une interface web **Streamlit** pour faciliter l'utilisation par les chercheurs.
 
@@ -19,7 +19,7 @@ Pour tester l'interface et la structure du pipeline sans installer DLC/VAME (qui
 ```bash
 # 1. Créer l'environnement utilitaires
 conda env create -f environment-pipeline.yml
-conda activate pipeline-souris
+conda activate ethoflow
 
 # 2. Lancer l'interface
 streamlit run streamlit_app/app.py
@@ -37,12 +37,12 @@ docker compose -f docker/docker-compose.yml up --build
 
 ## Installation complète (poste de production)
 
-Voir [`docs/PIPELINE_SOURIS_DOC.md`](docs/PIPELINE_SOURIS_DOC.md) pour la procédure complète : installation des drivers GPU, des trois environnements conda, configuration du modèle DLC et de VAME.
+Voir [`docs/ETHOFLOW.md`](docs/ETHOFLOW.md) pour la procédure complète : installation des drivers GPU, des trois environnements conda, configuration du modèle DLC et de VAME.
 
 ## Structure du repo
 
 ```
-pipeline-souris/
+ethoflow/
 ├── README.md                       # ce fichier
 ├── environment-pipeline.yml        # env conda pour scripts + UI
 ├── environment-dlc.yml             # env conda pour DeepLabCut
@@ -51,7 +51,7 @@ pipeline-souris/
 ├── .gitignore
 │
 ├── docs/
-│   └── PIPELINE_SOURIS_DOC.md      # doc utilisateur et technique complète
+│   └── ETHOFLOW.md                 # doc utilisateur et technique complète
 │
 ├── streamlit_app/
 │   └── app.py                      # interface web

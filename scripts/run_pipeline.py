@@ -11,7 +11,7 @@ Usage:
     python scripts/run_pipeline.py <session_id> --skip-vame # sauter VAME
 
 Note: ce script peut être appelé depuis n'importe quel env Python
-(typiquement 'pipeline-souris'), il invoque les bons envs en sous-processus.
+(typiquement 'ethoflow'), il invoque les bons envs en sous-processus.
 """
 import argparse
 import subprocess
@@ -47,14 +47,14 @@ def run_in_env(env_name: str, script: str, session_id: str) -> int:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pipeline souris orchestrateur")
+    parser = argparse.ArgumentParser(description="EthoFlow — orchestrateur du pipeline")
     parser.add_argument("session_id", nargs="?", help="ID de session à traiter")
     parser.add_argument("--all", action="store_true",
                         help="Traiter toutes les sessions non traitées")
     parser.add_argument("--skip-crop", action="store_true")
     parser.add_argument("--skip-dlc", action="store_true")
     parser.add_argument("--skip-vame", action="store_true")
-    parser.add_argument("--env-pipeline", default="pipeline-souris",
+    parser.add_argument("--env-pipeline", default="ethoflow",
                         help="Nom de l'env conda pour les scripts utilitaires")
     parser.add_argument("--env-dlc", default="dlc",
                         help="Nom de l'env conda DeepLabCut")

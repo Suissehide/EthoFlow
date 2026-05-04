@@ -3,7 +3,7 @@ Tests basiques pour vérifier que la structure du repo est cohérente.
 À enrichir au fur et à mesure que les scripts sont implémentés.
 
 Lancement :
-    conda activate pipeline-souris
+    conda activate ethoflow
     pytest tests/
 """
 from pathlib import Path

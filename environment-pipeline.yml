@@ -4,9 +4,9 @@
 #
 # Création :
 #   conda env create -f environment-pipeline.yml
-#   conda activate pipeline-souris
+#   conda activate ethoflow
 
-name: pipeline-souris
+name: ethoflow
 channels:
   - conda-forge
   - defaults

@@ -1,8 +1,8 @@
 """
-Pipeline souris — interface web Streamlit.
+EthoFlow — interface web Streamlit.
 
 Lancement :
-    conda activate pipeline-souris
+    conda activate ethoflow
     streamlit run streamlit_app/app.py
 
 L'app s'ouvre sur http://localhost:8501
@@ -31,7 +31,7 @@ RESULTS_DIR = DATA_ROOT / "results"
 # ============================================================
 
 st.set_page_config(
-    page_title="Pipeline Souris",
+    page_title="EthoFlow",
     page_icon="🐭",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -79,7 +79,7 @@ def load_metadata(session_id: str):
 # Sidebar
 # ============================================================
 
-st.sidebar.title("🐭 Pipeline Souris")
+st.sidebar.title("🐭 EthoFlow")
 st.sidebar.caption("Analyse comportementale automatisée")
 
 page = st.sidebar.radio(
@@ -289,10 +289,10 @@ elif page == "À propos":
     st.title("À propos")
     st.markdown(
         """
-        **Pipeline souris** est une interface web légère pour orchestrer
+        **EthoFlow** est une interface web légère pour orchestrer
         l'analyse comportementale de souris avec **DeepLabCut** et **VAME**.
 
-        - Documentation complète : `docs/PIPELINE_SOURIS_DOC.md`
+        - Documentation complète : `docs/ETHOFLOW.md`
         - Repo : (à pousser sur GitLab/GitHub)
 
         Stack : Python · Streamlit · OpenCV · DeepLabCut · VAME

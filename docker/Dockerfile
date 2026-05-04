@@ -6,9 +6,9 @@
 # de calcul Windows.
 #
 # Build :
-#   docker build -t pipeline-souris -f docker/Dockerfile .
+#   docker build -t ethoflow -f docker/Dockerfile .
 # Run :
-#   docker run -p 8501:8501 -v $(pwd)/data:/app/data pipeline-souris
+#   docker run -p 8501:8501 -v $(pwd)/data:/app/data ethoflow
 # Ou via compose :
 #   docker compose -f docker/docker-compose.yml up
 
