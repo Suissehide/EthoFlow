@@ -69,14 +69,21 @@ def list_sessions() -> pd.DataFrame:
             1 for a in meta.get("arenes", []) if a.get("mouse_id") is not None
         )
 
+        # Une session est "splittée" si on trouve des .h5 nommés <session>_A*.h5
+        dlc_dir = DLC_OUTPUT_DIR / session_id
+        split_done = (
+            dlc_dir.exists()
+            and any(dlc_dir.glob(f"{session_id}_A*.h5"))
+        )
+
         rows.append({
             "session_id": session_id,
             "timepoint": meta.get("timepoint", "—"),
             "date": meta.get("date", "—"),
             "animaux": n_animals,
             "vidéo": "OK" if video_ok else "manque",
-            "cropped": "OK" if (CROPPED_DIR / session_id).exists() else "—",
             "DLC": "OK" if (DLC_OUTPUT_DIR / session_id).exists() else "—",
+            "split": "OK" if split_done else "—",
             "VAME": "OK" if (VAME_OUTPUT_DIR / session_id).exists() else "—",
         })
     return pd.DataFrame(rows)
@@ -138,8 +145,8 @@ if page == "Tableau de bord":
         c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Sessions", len(df))
         c2.metric("Vidéos OK", (df["vidéo"] == "OK").sum())
-        c3.metric("Croppées", (df["cropped"] == "OK").sum())
-        c4.metric("DLC", (df["DLC"] == "OK").sum())
+        c3.metric("DLC", (df["DLC"] == "OK").sum())
+        c4.metric("Split arènes", (df["split"] == "OK").sum())
         c5.metric("VAME", (df["VAME"] == "OK").sum())
         st.dataframe(df, use_container_width=True, hide_index=True)
 
@@ -235,29 +242,42 @@ elif page == "Lancer pipeline":
         st.subheader("Étapes")
         c1, c2, c3 = st.columns(3)
         with c1:
-            do_crop = st.checkbox("1. Crop des arènes", value=True)
+            do_dlc = st.checkbox("1. Inférence DLC (multi-animal)", value=True)
         with c2:
-            do_dlc = st.checkbox("2. Inférence DLC", value=True)
+            do_assign = st.checkbox("2. Split par arène", value=True)
         with c3:
             do_vame = st.checkbox("3. Analyse VAME", value=True)
+
+        st.caption(
+            "Étape optionnelle de pré-cropping (utile uniquement pour la "
+            "labellisation d'un modèle custom) :"
+        )
+        do_crop = st.checkbox("Pré-crop des 4 arènes (optionnel)", value=False)
 
         st.markdown("---")
         if st.button("Lancer le pipeline", type="primary", disabled=not sessions):
             for session_id in sessions:
                 with st.status(f"Traitement de `{session_id}`...", expanded=True) as status:
                     if do_crop:
-                        st.write("→ Crop des arènes")
+                        st.write("→ Pré-crop des arènes (optionnel)")
                         result = subprocess.run(
                             [sys.executable, str(SCRIPTS_DIR / "crop_arenes.py"), session_id],
                             capture_output=True, text=True,
                         )
                         st.code(result.stdout or result.stderr or "(silencieux)")
                     if do_dlc:
-                        st.write("→ Inférence DLC (nécessite l'env conda 'dlc')")
-                        st.info("À implémenter via `conda run -n dlc python scripts/run_dlc_inference.py`")
+                        st.write("→ Inférence DLC multi-animal (env conda 'dlc')")
+                        st.info("À déclencher via `conda run -n dlc python scripts/run_dlc_inference.py`")
+                    if do_assign:
+                        st.write("→ Assignation arènes")
+                        result = subprocess.run(
+                            [sys.executable, str(SCRIPTS_DIR / "assign_arenas.py"), session_id],
+                            capture_output=True, text=True,
+                        )
+                        st.code(result.stdout or result.stderr or "(silencieux)")
                     if do_vame:
-                        st.write("→ Analyse VAME (nécessite l'env conda 'vame')")
-                        st.info("À implémenter via `conda run -n vame python scripts/run_vame.py`")
+                        st.write("→ Analyse VAME (env conda 'vame')")
+                        st.info("À déclencher via `conda run -n vame python scripts/run_vame.py`")
                     status.update(label=f"`{session_id}` terminé", state="complete")
 
 

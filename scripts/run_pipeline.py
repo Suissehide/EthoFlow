@@ -1,17 +1,19 @@
 """
 Orchestrateur du pipeline complet.
 
-Enchaîne crop → DLC → VAME pour une ou plusieurs sessions.
+Enchaîne par défaut : DLC (multi-animal) → assign_arenas → VAME.
 Gère le passage entre les environnements conda automatiquement
 en utilisant `conda run` (à condition que conda soit dans le PATH).
 
+Le crop des vidéos en 4 single-animal n'est pas dans le chemin par défaut :
+il sert uniquement aux étapes de labellisation / fine-tuning de modèle DLC,
+pas à l'inférence de prod. Activable via `--crop-first`.
+
 Usage:
     python scripts/run_pipeline.py <session_id>
-    python scripts/run_pipeline.py --all                    # toutes les sessions non traitées
-    python scripts/run_pipeline.py <session_id> --skip-vame # sauter VAME
-
-Note: ce script peut être appelé depuis n'importe quel env Python
-(typiquement 'ethoflow'), il invoque les bons envs en sous-processus.
+    python scripts/run_pipeline.py --all                    # sessions non traitées
+    python scripts/run_pipeline.py <session_id> --skip-vame
+    python scripts/run_pipeline.py <session_id> --crop-first   # bonus: cropper avant
 """
 import argparse
 import subprocess
@@ -51,8 +53,11 @@ def main():
     parser.add_argument("session_id", nargs="?", help="ID de session à traiter")
     parser.add_argument("--all", action="store_true",
                         help="Traiter toutes les sessions non traitées")
-    parser.add_argument("--skip-crop", action="store_true")
+    parser.add_argument("--crop-first", action="store_true",
+                        help="(Optionnel) cropper en 4 vidéos avant DLC — pour labellisation")
     parser.add_argument("--skip-dlc", action="store_true")
+    parser.add_argument("--skip-assign", action="store_true",
+                        help="Ne pas splitter la sortie DLC par arène")
     parser.add_argument("--skip-vame", action="store_true")
     parser.add_argument("--env-pipeline", default="ethoflow",
                         help="Nom de l'env conda pour les scripts utilitaires")
@@ -77,7 +82,7 @@ def main():
     for session_id in sessions:
         print(f"\n{'='*60}\nSession : {session_id}\n{'='*60}")
 
-        if not args.skip_crop:
+        if args.crop_first:
             rc = run_in_env(args.env_pipeline, "crop_arenes.py", session_id)
             if rc != 0:
                 print(f"❌ Crop a échoué pour {session_id}", file=sys.stderr)
@@ -87,6 +92,12 @@ def main():
             rc = run_in_env(args.env_dlc, "run_dlc_inference.py", session_id)
             if rc != 0:
                 print(f"❌ DLC a échoué pour {session_id}", file=sys.stderr)
+                continue
+
+        if not args.skip_assign:
+            rc = run_in_env(args.env_pipeline, "assign_arenas.py", session_id)
+            if rc != 0:
+                print(f"❌ assign_arenas a échoué pour {session_id}", file=sys.stderr)
                 continue
 
         if not args.skip_vame:

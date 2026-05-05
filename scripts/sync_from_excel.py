@@ -18,7 +18,7 @@ Usage:
     python scripts/sync_from_excel.py --dry-run    # affiche sans écrire
 
 Defaults:
-    --excel       : ../data/OpenField_trials_C DUPLAA.xlsx (frère du repo)
+    --excel       : ../data/OpenField_trials_CDUPLAA.xlsx
     --videos-dir  : ../data/                                (.mp4 à plat)
 
 Pré-requis :

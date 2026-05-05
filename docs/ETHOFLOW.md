@@ -349,9 +349,9 @@ Avec les chercheurs, choisir 8 à 12 points anatomiques. Suggestion classique po
 
 Plus de keypoints = plus de précision pour VAME, mais aussi plus de temps de labellisation. 8–10 est un bon compromis.
 
-### 4.2 Crop des arènes
+### 4.2 Crop des arènes (optionnel — uniquement pour labellisation)
 
-Avant d'entraîner DLC, on crop les 4 arènes pour avoir 4 vidéos single-animal.
+> ⚠️ Le pipeline d'inférence par défaut **ne crope pas** : DLC tourne en multi-animal directement sur la vidéo source, et `assign_arenas.py` splitte la sortie par arène. Cette section ne sert qu'au cas où on veut **labelliser** ou **fine-tuner** un modèle custom — la GUI DLC est plus simple en single-animal.
 
 `scripts/crop_arenes.py` :
 
@@ -365,7 +365,7 @@ conda activate ethoflow
 python scripts/crop_arenes.py OF-M1-20251010-V01
 ```
 
-> Astuce : caméra fixe = mêmes coords pour toutes les sessions. Définir une fois pour toutes dans `configs/pipeline_config.yaml` sous `default_arenes_coords`, et les copier dans chaque metadata.yaml (ou laisser un fallback dans le script).
+> Astuce : caméra fixe = mêmes coords pour toutes les sessions. Définir une fois pour toutes dans `configs/pipeline_config.yaml` sous `default_arenes_coords`, et les copier dans chaque metadata.yaml.
 
 ### 4.3 Créer le projet DLC
 
@@ -456,39 +456,54 @@ Une à deux passes de refinement suffisent généralement.
 
 ## 5. Pipeline d'inférence quotidien
 
-**Objectif** : à partir d'une vidéo brute déposée par un chercheur, produire automatiquement les fichiers DLC.
+**Objectif** : à partir d'une vidéo brute, produire automatiquement les trajectoires DLC par arène, prêtes pour VAME.
 
-**Pré-requis** : partie 4 terminée, modèle DLC entraîné et évalué.
+**Pré-requis** : partie 3 terminée (sync Excel), modèle DLC dispo (SuperAnimal par défaut, ou modèle custom entraîné en partie 4).
 
 ### 5.1 Workflow
 
 ```
-Chercheur dépose video.mp4 + metadata.yaml dans data/raw/<session_id>/
+data/<TrialCode>.mp4 + ethoflow/data/raw/<TrialCode>/metadata.yaml
                           │
                           ▼
-        Script de pipeline (à lancer manuellement ou via .bat)
+              run_dlc_inference.py  (env: dlc)
+              SuperAnimal multi-animal sur la vidéo entière
                           │
-              ┌───────────┴───────────┐
-              ▼                       ▼
-      crop_arenes.py            run_dlc_inference.py
-              │                       │
-              └───────────┬───────────┘
                           ▼
-              Fichiers .h5 dans data/dlc-output/<session_id>/
+              ethoflow/data/dlc-output/<TrialCode>/<une>.h5  (4 tracks)
+                          │
+                          ▼
+              assign_arenas.py  (env: ethoflow)
+              centroïde de chaque track → arène contenante
+                          │
+                          ▼
+              <TrialCode>_A1.h5, <TrialCode>_A2.h5, ...   (single-animal)
+                          │
+                          ▼
+              run_vame.py  (env: vame)
+                          │
+                          ▼
+              ethoflow/data/vame-output/<TrialCode>/
 ```
 
-### 5.2 Script de pipeline (à écrire)
+### 5.2 Pourquoi pas de crop dans le pipeline ?
 
-À placer dans `scripts/run_pipeline.py`. Pseudo-code :
+Avec DLC 3.x et SuperAnimal, le détecteur multi-animal trouve les 4 souris en une seule passe sur la vidéo source. Comme les arènes sont physiquement séparées, l'identité d'un track est triviale à résoudre par sa position : `assign_arenas.py` calcule le centroïde de chaque track sur toute la vidéo et le matche au rectangle de l'arène correspondante. Pas besoin de re-encoder 4 sous-vidéos.
 
-```python
-# 1. Lire la liste des sessions non encore traitées
-# 2. Pour chaque session :
-#    a. Charger metadata.yaml
-#    b. Crop des 4 arènes -> data/cropped/<session>/
-#    c. Inférence DLC -> data/dlc-output/<session>/
-#    d. Mettre à jour un journal pour ne pas retraiter
+Le crop reste disponible (`scripts/crop_arenes.py`) pour les phases de labellisation — voir partie 4.2.
+
+### 5.3 Orchestrateur
+
+`scripts/run_pipeline.py` enchaîne les étapes en utilisant `conda run -n <env>` pour gérer le passage entre environnements :
+
+```bash
+conda activate ethoflow
+python scripts/run_pipeline.py OF-M1-20251010-V01
+# ou pour traiter toutes les sessions non traitées :
+python scripts/run_pipeline.py --all
 ```
+
+Options utiles : `--skip-vame`, `--skip-assign`, `--crop-first` (bonus pour labellisation).
 
 ### 5.3 Lancement par les chercheurs
 
