@@ -29,6 +29,15 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
 DLC_OUTPUT_DIR = ROOT / "data" / "dlc-output"
+CONFIG_PATH = ROOT / "configs" / "pipeline_config.yaml"
+
+
+def load_default_coords() -> dict:
+    if not CONFIG_PATH.exists():
+        return {}
+    with open(CONFIG_PATH) as f:
+        config = yaml.safe_load(f) or {}
+    return config.get("default_arenes_coords", {}) or {}
 
 
 def find_multianimal_h5(session_dlc_dir: Path) -> Path:
@@ -91,10 +100,18 @@ def assign_arenas(session_id: str, threshold: float = 0.6) -> None:
         metadata = yaml.safe_load(f)
     arenes = metadata.get("arenes", [])
 
+    # Fallback : compléter les coords manquantes avec default_arenes_coords
+    default_coords = load_default_coords()
+    for ar in arenes:
+        if not ar.get("coords"):
+            fallback = default_coords.get(ar.get("id"))
+            if fallback:
+                ar["coords"] = fallback
+
     if not any(ar.get("coords") for ar in arenes):
         raise ValueError(
-            "Aucune arène n'a de coords dans le metadata.yaml. "
-            "Définis-les avant de lancer ce script."
+            "Aucune arène n'a de coords (ni metadata.yaml, ni default_arenes_coords). "
+            "Lance `python scripts/calibrate_arenes.py` pour les définir."
         )
 
     session_dlc_dir = DLC_OUTPUT_DIR / session_id

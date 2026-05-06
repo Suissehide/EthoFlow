@@ -42,6 +42,16 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
 CROPPED_DIR = ROOT / "data" / "cropped"
+CONFIG_PATH = ROOT / "configs" / "pipeline_config.yaml"
+
+
+def load_default_coords() -> dict:
+    """Charge default_arenes_coords depuis pipeline_config.yaml si présent."""
+    if not CONFIG_PATH.exists():
+        return {}
+    with open(CONFIG_PATH) as f:
+        config = yaml.safe_load(f) or {}
+    return config.get("default_arenes_coords", {}) or {}
 
 
 def crop_arenes(session_id: str) -> None:
@@ -80,6 +90,10 @@ def crop_arenes(session_id: str) -> None:
     if not arenes:
         raise ValueError("Pas d'arènes dans le metadata.yaml")
 
+    default_coords = load_default_coords()
+    if default_coords:
+        print(f"Coords par défaut chargées depuis {CONFIG_PATH.name}")
+
     n_cropped = n_skipped = 0
     for arene in arenes:
         arene_id = arene["id"]
@@ -90,10 +104,10 @@ def crop_arenes(session_id: str) -> None:
             n_skipped += 1
             continue
 
-        coords = arene.get("coords")
+        coords = arene.get("coords") or default_coords.get(arene_id)
         if not coords:
-            print(f"⚠️  {arene_id} : coords manquantes, skip "
-                  f"(à définir dans metadata.yaml)")
+            print(f"⚠️  {arene_id} : pas de coords (ni metadata, ni default), skip. "
+                  f"Lancer `calibrate_arenes.py` pour les définir.")
             n_skipped += 1
             continue
 
