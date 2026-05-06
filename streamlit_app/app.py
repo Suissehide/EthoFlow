@@ -162,7 +162,7 @@ elif page == "Sync depuis Excel":
         "par session dans `data/raw/`."
     )
 
-    default_excel = ROOT.parent / "data" / "OpenField_trials_C DUPLAA.xlsx"
+    default_excel = ROOT.parent / "data" / "OpenField_trials_CDUPLAA.xlsx"
     default_videos = ROOT.parent / "data"
 
     excel_path = st.text_input("Chemin du fichier Excel", value=str(default_excel))

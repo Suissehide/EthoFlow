@@ -36,7 +36,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_RAW = ROOT / "data" / "raw"
-DEFAULT_EXCEL = ROOT.parent / "data" / "OpenField_trials_C DUPLAA.xlsx"
+DEFAULT_EXCEL = ROOT.parent / "data" / "OpenField_trials_CDUPLAA.xlsx"
 DEFAULT_VIDEOS = ROOT.parent / "data"
 
 
