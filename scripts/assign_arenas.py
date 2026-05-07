@@ -67,8 +67,15 @@ def find_multianimal_h5(session_dlc_dir: Path) -> Path:
     return multianimal[0]
 
 
-def compute_centroid(df_individual: pd.DataFrame, threshold: float) -> tuple[float, float]:
-    """Centroïde médian d'un individu — utilise les détections > threshold."""
+def compute_centroid(df_individual: pd.DataFrame, threshold: float) -> tuple[float, float, int]:
+    """
+    Centroïde médian d'un individu — utilise les détections > threshold.
+    Retourne (cx, cy, n_valid) où n_valid = nombre total de (frame, keypoint)
+    valides ayant servi au calcul.
+
+    Robuste aux colonnes multi-niveau (scorer × bodyparts × coords) :
+    on convertit en numpy et on fait la médiane sur tout d'un coup.
+    """
     coords_levels = df_individual.columns.names
     if "coords" not in coords_levels:
         raise ValueError(
@@ -76,19 +83,28 @@ def compute_centroid(df_individual: pd.DataFrame, threshold: float) -> tuple[flo
             f"trouvé : {coords_levels}"
         )
 
-    xs = df_individual.xs("x", level="coords", axis=1)
-    ys = df_individual.xs("y", level="coords", axis=1)
-    likes = df_individual.xs("likelihood", level="coords", axis=1)
+    xs = df_individual.xs("x", level="coords", axis=1).to_numpy()
+    ys = df_individual.xs("y", level="coords", axis=1).to_numpy()
+    likes = df_individual.xs("likelihood", level="coords", axis=1).to_numpy()
 
     mask = likes > threshold
-    cx = xs.where(mask).stack().median()
-    cy = ys.where(mask).stack().median()
+    n_valid = int(np.sum(mask & ~np.isnan(xs) & ~np.isnan(ys)))
+    if n_valid == 0:
+        raise ValueError(
+            f"0 détection > {threshold} (track sans données fiables)"
+        )
 
-    if pd.isna(cx) or pd.isna(cy):
+    xs_masked = np.where(mask, xs, np.nan)
+    ys_masked = np.where(mask, ys, np.nan)
+
+    cx = float(np.nanmedian(xs_masked))
+    cy = float(np.nanmedian(ys_masked))
+
+    if np.isnan(cx) or np.isnan(cy):
         raise ValueError(
             f"Pas assez de détections > {threshold} pour calculer un centroïde"
         )
-    return float(cx), float(cy)
+    return cx, cy, n_valid
 
 
 def find_arena(cx: float, cy: float, arenes: list[dict]) -> dict | None:
@@ -203,25 +219,34 @@ def assign_arenas(
         )
 
     individuals = list(df.columns.get_level_values("individuals").unique())
-    print(f"Individus détectés : {individuals}")
+    print(f"Individus détectés : {len(individuals)} ({individuals})")
 
-    used_arenas: set[str] = set()
+    # Calcul des centroïdes pour TOUS les individus, puis tri par fiabilité
+    # (n_valid décroissant) : ça met les 4 vraies souris en tête, les
+    # détections fantômes (ghosts à très peu de frames valides) à la fin.
+    candidates = []
     for ind in individuals:
         sub = df.xs(ind, level="individuals", axis=1)
         try:
-            cx, cy = compute_centroid(sub, threshold)
+            cx, cy, n_valid = compute_centroid(sub, threshold)
         except ValueError as e:
             print(f"  ⚠️  {ind} : {e}, skip")
             continue
+        candidates.append((n_valid, ind, sub, cx, cy))
 
+    candidates.sort(key=lambda c: -c[0])
+
+    used_arenas: set[str] = set()
+    for n_valid, ind, sub, cx, cy in candidates:
         arena = find_arena(cx, cy, arenes)
         if arena is None:
-            print(f"  ⚠️  {ind} : centroïde ({cx:.0f}, {cy:.0f}) hors de toute arène, skip")
+            print(f"  ⚠️  {ind} ({n_valid} pts valides) : centroïde "
+                  f"({cx:.0f}, {cy:.0f}) hors de toute arène, skip")
             continue
 
         if arena["id"] in used_arenas:
-            print(f"  ⚠️  {ind} : arène {arena['id']} déjà attribuée, skip "
-                  f"(probable doublon de détection)")
+            print(f"  ⚠️  {ind} ({n_valid} pts valides) : arène {arena['id']} "
+                  f"déjà attribuée, skip (doublon de détection)")
             continue
         used_arenas.add(arena["id"])
 
