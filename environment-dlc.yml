@@ -31,3 +31,16 @@ dependencies:
       - torchvision
       - --pre
       - deeplabcut[gui,modelzoo]
+
+# ⚠️ APRÈS création de l'env, sur Windows ou Linux avec GPU NVIDIA :
+# vérifier que torch a bien la build CUDA. Si `torch.__version__` finit
+# par '+cpu' (cas fréquent sur Windows) OU si tu as un GPU Blackwell
+# (RTX 50xx, sm_120) qu'aucune build stable ne supporte encore, faire :
+#
+#     conda activate dlc
+#     pip uninstall torch torchvision torchaudio -y
+#     pip install --pre torch torchvision torchaudio \
+#         --index-url https://download.pytorch.org/whl/nightly/cu128
+#
+# Test final (doit afficher le nom de ta GPU) :
+#     python -c "import torch; x = torch.randn(1024,1024,device='cuda'); print(torch.cuda.get_device_name(0))"

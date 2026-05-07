@@ -86,6 +86,21 @@ conda activate dlc
 python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 ```
 
+> ⚠️ **Si `cuda.is_available()` renvoie `False` ou si la torch installée finit par `+cpu`** (piège fréquent sur Windows), ou si tu as une **GPU Blackwell** (RTX 50xx, sm_120), réinstalle PyTorch nightly avec CUDA 12.8 :
+>
+> ```bash
+> conda activate dlc
+> pip uninstall torch torchvision torchaudio -y
+> pip install --pre torch torchvision torchaudio \
+>     --index-url https://download.pytorch.org/whl/nightly/cu128
+> ```
+>
+> Test final (doit afficher le nom de ta GPU) :
+>
+> ```bash
+> python -c "import torch; x = torch.randn(1024,1024,device='cuda'); print(torch.cuda.get_device_name(0))"
+> ```
+
 ### 4. Récupérer les données brutes
 
 EthoFlow ne stocke pas les vidéos ni l'Excel maître dans le repo Git (trop lourd). Il faut les copier à part dans `~/Inserm/data/` :
