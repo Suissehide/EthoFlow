@@ -1,5 +1,5 @@
 """
-Inférence DeepLabCut sur la vidéo source d'une session.
+Inférence DeepLabCut sur la vidéo source d'une (ou plusieurs) session(s).
 
 Deux modes :
 
@@ -13,6 +13,9 @@ Deux modes :
 
 Usage:
     python scripts/run_dlc_inference.py <session_id>
+    python scripts/run_dlc_inference.py <s1> <s2> <s3>          # plusieurs
+    python scripts/run_dlc_inference.py --all                   # toutes les sessions non traitées
+    python scripts/run_dlc_inference.py --all --skip-existing   # idem, par sécurité
     python scripts/run_dlc_inference.py <session_id> --mode custom
     python scripts/run_dlc_inference.py <session_id> --video-adapt
 
@@ -50,6 +53,21 @@ def get_source_video(metadata: dict) -> Path:
     if not path.exists():
         raise FileNotFoundError(f"Vidéo source introuvable : {path}")
     return path
+
+
+def is_processed(session_id: str) -> bool:
+    """Vrai si une sortie DLC (.h5) existe déjà pour cette session."""
+    out = DLC_OUTPUT_DIR / session_id
+    return out.exists() and any(out.glob("*.h5"))
+
+
+def list_unprocessed_sessions() -> list[str]:
+    if not RAW_DIR.exists():
+        return []
+    return sorted(
+        d.name for d in RAW_DIR.iterdir()
+        if d.is_dir() and not d.name.startswith(".") and not is_processed(d.name)
+    )
 
 
 def run_superanimal(
@@ -133,8 +151,12 @@ def run_custom(session_id: str) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Inférence DLC sur une session.")
-    parser.add_argument("session_id")
+    parser = argparse.ArgumentParser(description="Inférence DLC sur une ou plusieurs sessions.")
+    parser.add_argument("session_ids", nargs="*", help="Un ou plusieurs session_id à traiter")
+    parser.add_argument("--all", action="store_true",
+                        help="Traiter toutes les sessions de data/raw/ qui n'ont pas encore de sortie DLC")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="Ignorer les sessions qui ont déjà une sortie DLC (utile en combinaison avec une liste)")
     parser.add_argument("--mode", choices=["superanimal", "custom"], default="superanimal")
     parser.add_argument("--superanimal-name", default="superanimal_topviewmouse")
     parser.add_argument("--superanimal-model", default="hrnet_w32")
@@ -143,17 +165,46 @@ if __name__ == "__main__":
                         help="Active le fine-tuning court (plus précis, plus lent)")
     args = parser.parse_args()
 
-    try:
-        if args.mode == "superanimal":
-            run_superanimal(
-                args.session_id,
-                superanimal_name=args.superanimal_name,
-                model_name=args.superanimal_model,
-                detector_name=args.superanimal_detector,
-                video_adapt=args.video_adapt,
-            )
-        else:
-            run_custom(args.session_id)
-    except (FileNotFoundError, ValueError) as e:
-        print(f"❌ {e}", file=sys.stderr)
+    # Collecte de la liste de sessions à traiter
+    if args.all:
+        sessions = list_unprocessed_sessions()
+        if not sessions:
+            print("Aucune session à traiter (toutes ont déjà une sortie DLC).")
+            sys.exit(0)
+        print(f"{len(sessions)} session(s) non traitée(s) : {sessions}\n")
+    elif args.session_ids:
+        sessions = list(args.session_ids)
+        if args.skip_existing:
+            sessions = [s for s in sessions if not is_processed(s)]
+            if not sessions:
+                print("Toutes les sessions demandées sont déjà traitées.")
+                sys.exit(0)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+    n_ok = n_fail = 0
+    for i, session_id in enumerate(sessions, 1):
+        print(f"\n{'='*60}\n[{i}/{len(sessions)}] {session_id}\n{'='*60}")
+        try:
+            if args.mode == "superanimal":
+                run_superanimal(
+                    session_id,
+                    superanimal_name=args.superanimal_name,
+                    model_name=args.superanimal_model,
+                    detector_name=args.superanimal_detector,
+                    video_adapt=args.video_adapt,
+                )
+            else:
+                run_custom(session_id)
+            n_ok += 1
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ {session_id} : {e}", file=sys.stderr)
+            n_fail += 1
+            # On continue sur les autres sessions plutôt que d'aborter le batch
+            continue
+
+    if len(sessions) > 1:
+        print(f"\n{'='*60}\nBatch terminé : {n_ok} OK, {n_fail} échec(s) sur {len(sessions)}\n{'='*60}")
+    if n_fail > 0:
         sys.exit(1)
