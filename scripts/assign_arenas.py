@@ -130,6 +130,7 @@ def clean_individual(
     3. Laisse les trous plus longs en NaN (vraies absences à laisser à VAME)
 
     Renvoie (df_clean, stats) où stats résume les frames touchées.
+    Toutes les valeurs n_* sont en (frame × keypoint) ; total_slots = n_frames * n_keypoints.
     """
     df = df.copy()
     n_frames = len(df)
@@ -143,13 +144,16 @@ def clean_individual(
         bp, coord = col[-2], col[-1]
         by_bp[bp][coord] = col
 
+    valid_bps = [bp for bp, c in by_bp.items() if all(k in c for k in ("x", "y", "likelihood"))]
+    n_keypoints = len(valid_bps)
+    total_slots = n_frames * n_keypoints  # max possible (frame × keypoint) tuples
+
     n_low_likelihood = 0
     n_filled = 0
     n_remaining_nan = 0
 
-    for bp, coords in by_bp.items():
-        if not all(c in coords for c in ("x", "y", "likelihood")):
-            continue
+    for bp in valid_bps:
+        coords = by_bp[bp]
         x_col, y_col, l_col = coords["x"], coords["y"], coords["likelihood"]
 
         # Étape 1 : low-likelihood → NaN
@@ -172,6 +176,8 @@ def clean_individual(
 
     stats = {
         "n_frames": n_frames,
+        "n_keypoints": n_keypoints,
+        "total_slots": total_slots,
         "n_low_likelihood": n_low_likelihood,
         "n_interpolated": n_filled,
         "n_remaining_nan": n_remaining_nan,
@@ -253,9 +259,6 @@ def assign_arenas(
         # Nettoyage avant écriture : interpolation des trous courts
         if do_clean:
             sub_clean, stats = clean_individual(sub, threshold, interp_limit)
-            clean_pct_kept = (
-                100 * (1 - stats["n_remaining_nan"] / max(stats["n_frames"], 1))
-            )
         else:
             sub_clean = sub
             stats = None
@@ -265,11 +268,17 @@ def assign_arenas(
         sub_clean.to_hdf(out_path, key="df", mode="w")
         mouse_label = f"M{mouse_id:02d}" if isinstance(mouse_id, int) else "—"
         msg = (f"  ✓ {ind:>12s} → {arena['id']} ({mouse_label})  "
-               f"centroïde ({cx:.0f}, {cy:.0f})  → {out_path.name}")
+               f"n_valid={n_valid}  centroïde ({cx:.0f}, {cy:.0f})  → {out_path.name}")
         if stats is not None:
-            msg += (f"\n         clean: {stats['n_low_likelihood']:>5d} pts low-lk → NaN, "
-                    f"{stats['n_interpolated']:>5d} interpolés, "
-                    f"{stats['n_remaining_nan']:>5d} NaN restants ({clean_pct_kept:.1f}% utiles)")
+            total = max(stats["total_slots"], 1)
+            pct_low = 100 * stats["n_low_likelihood"] / total
+            pct_interp = 100 * stats["n_interpolated"] / total
+            pct_remaining = 100 * stats["n_remaining_nan"] / total
+            pct_useful = 100 - pct_remaining
+            msg += (f"\n         clean ({stats['n_keypoints']} kp × {stats['n_frames']} frames): "
+                    f"{pct_low:.1f}% low-lk → NaN, "
+                    f"{pct_interp:.1f}% interpolés, "
+                    f"{pct_useful:.1f}% utilisables au final")
         print(msg)
 
     expected = {ar["id"] for ar in arenes if ar.get("mouse_id") is not None}
