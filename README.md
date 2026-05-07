@@ -1,98 +1,206 @@
 # EthoFlow — pipeline d'analyse comportementale souris
 
-Pipeline d'analyse comportementale de souris basé sur **DeepLabCut** (estimation de pose) et **VAME** (segmentation comportementale), avec une interface web **Streamlit** pour faciliter l'utilisation par les chercheurs.
+Pipeline d'analyse comportementale de souris basé sur **DeepLabCut** (estimation de pose) et **VAME** (segmentation comportementale), avec une interface web **Streamlit** pour faciliter l'utilisation par les chercheurs non-techniques.
 
 ## Architecture
 
 ```
-Vidéo brute → Crop des 4 arènes → Inférence DLC → Analyse VAME → Résultats
-                                       ↑
-                                Modèle DLC entraîné
+data/<TrialCode>.mp4 + Excel maître
+        │
+        ▼
+[sync_from_excel.py]   →  ethoflow/data/raw/<TrialCode>/metadata.yaml
+        │
+        ▼
+[run_dlc_inference.py — env dlc]   →  .h5 multi-animal
+        │
+        ▼
+[assign_arenas.py]   →  4 .h5 single-animal (un par arène)
+        │
+        ▼
+[run_vame.py — env vame]   →  segmentation comportementale
 ```
 
-Les chercheurs interagissent avec le pipeline via l'interface Streamlit ; le code Python tourne en local sur le poste de calcul Windows.
+Les chercheurs interagissent via l'interface Streamlit ; le code tourne en local sur le poste de calcul.
 
-## Quick start (local, sans GPU)
+## Setup sur une nouvelle machine
 
-Pour tester l'interface et la structure du pipeline sans installer DLC/VAME (qui nécessitent une GPU sérieuse) :
+### 1. Pré-requis système
+
+- **macOS / Linux / Windows** (tout fonctionne, recommandation : Linux ou macOS pour le dev, Windows acceptable en prod)
+- **GPU NVIDIA** fortement recommandé pour l'entraînement DLC et l'inférence VAME (CUDA 12+). Apple Silicon (MPS) marche pour l'inférence légère et le dev.
+- **Miniconda** : https://docs.conda.io/projects/miniconda/
+- **Git** : https://git-scm.com
+- **ffmpeg** dans le PATH (vient avec l'env conda `ethoflow`)
+
+### 2. Cloner les repos
 
 ```bash
-# 1. Créer l'environnement utilitaires
-conda env create -f environment-pipeline.yml
-conda activate ethoflow
+mkdir -p ~/Inserm && cd ~/Inserm
 
-# 2. Lancer l'interface
+# le repo de pipeline
+git clone <URL_ETHOFLOW> ethoflow
+
+# (optionnel) sources DeepLabCut et VAME pour pouvoir lire le code,
+# voir les exemples, etc. — pas requis pour faire tourner le pipeline.
+git clone --depth 1 https://github.com/DeepLabCut/DeepLabCut.git
+git clone --depth 1 https://github.com/LINCellularNeuroscience/VAME.git
+```
+
+Tu te retrouves avec :
+
+```
+~/Inserm/
+├── ethoflow/        ← le repo
+├── DeepLabCut/      ← source DLC (pour référence)
+└── VAME/            ← source VAME (pour référence)
+```
+
+### 3. Installer les environnements conda
+
+Trois envs séparés (DLC, VAME et le reste ont des dépendances incompatibles) :
+
+```bash
+cd ~/Inserm/ethoflow
+
+# env utilitaires (orchestration, Streamlit, scripts) — toujours nécessaire
+conda env create -f environment-pipeline.yml
+
+# env DeepLabCut — sur la machine où on fait l'inférence/entraînement
+conda env create -f environment-dlc.yml
+
+# env VAME — sur la machine d'analyse
+conda env create -f environment-vame.yml
+```
+
+Sur Apple Silicon, vérifie que MPS est dispo pour DLC :
+
+```bash
+conda activate dlc
+python -c "import torch; print('MPS:', torch.backends.mps.is_available())"
+```
+
+Sur GPU NVIDIA :
+
+```bash
+conda activate dlc
+python -c "import torch; print('CUDA:', torch.cuda.is_available())"
+```
+
+### 4. Récupérer les données brutes
+
+EthoFlow ne stocke pas les vidéos ni l'Excel maître dans le repo Git (trop lourd). Il faut les copier à part dans `~/Inserm/data/` :
+
+```
+~/Inserm/data/
+├── OpenField_trials_CDUPLAA.xlsx
+├── OF-M1-20251010-V01.mp4
+├── OF-M1-20251010-V02.mp4
+└── ...
+```
+
+Sources possibles :
+- NAS du labo (chemin à demander à C. Duplaa)
+- Disque dur USB
+- `scp` depuis l'ancienne machine : `scp -r user@machine:~/Documents/Inserm/data ~/Inserm/`
+
+### 5. Synchroniser les metadata depuis l'Excel
+
+Une fois les vidéos en place :
+
+```bash
+conda activate ethoflow
+cd ~/Inserm/ethoflow
+python scripts/sync_from_excel.py
+```
+
+Ça génère un `metadata.yaml` par session dans `data/raw/<TrialCode>/`. Vérifie qu'au moins un fichier a `source_video: /chemin/correct/...mp4`.
+
+### 6. (Si calibration nécessaire) Calibrer les arènes
+
+Les coordonnées des 4 arènes sont stockées dans `configs/pipeline_config.yaml` et sont **versionnées Git**. Si tu utilises le même setup caméra qu'avant, **tu n'as rien à faire**. Sinon :
+
+```bash
+python scripts/calibrate_arenes.py --session OF-M1-20251010-V01
+```
+
+Une fenêtre s'ouvre, tu dessines les 4 rectangles à la souris (dans l'ordre A1 → A2 → A3 → A4), ENTRÉE valide, et les nouvelles coords écrasent l'ancienne calibration dans le yaml.
+
+### 7. Tester que tout marche
+
+```bash
 streamlit run streamlit_app/app.py
 ```
 
-L'app s'ouvre sur http://localhost:8501.
+L'interface s'ouvre sur http://localhost:8501. Tu dois voir tes 10 sessions dans le tableau de bord avec leur timepoint M1/M2 et le statut « vidéo: OK ».
 
-## Quick start (Docker)
+## Quick start après setup
 
-Alternative sans avoir à installer conda :
+Workflow standard pour traiter une session :
 
 ```bash
-docker compose -f docker/docker-compose.yml up --build
+conda activate ethoflow
+python scripts/run_pipeline.py OF-M1-20251010-V01
+# → DLC → assign_arenas → VAME en chaîne
 ```
 
-## Installation complète (poste de production)
-
-Voir [`docs/ETHOFLOW.md`](docs/ETHOFLOW.md) pour la procédure complète : installation des drivers GPU, des trois environnements conda, configuration du modèle DLC et de VAME.
+Ou via l'UI Streamlit, page « Lancer pipeline ».
 
 ## Structure du repo
 
 ```
 ethoflow/
-├── README.md                       # ce fichier
-├── environment-pipeline.yml        # env conda pour scripts + UI
-├── environment-dlc.yml             # env conda pour DeepLabCut
-├── environment-vame.yml            # env conda pour VAME
-├── requirements-pipeline.txt       # deps pour Docker / pip
-├── .gitignore
+├── README.md                          # ce fichier
+├── docs/ETHOFLOW.md                   # doc complète, conventions, troubleshooting
 │
-├── docs/
-│   └── ETHOFLOW.md                 # doc utilisateur et technique complète
+├── environment-pipeline.yml           # env conda 'ethoflow' (orchestration)
+├── environment-dlc.yml                # env conda 'dlc' (DeepLabCut 3.x)
+├── environment-vame.yml               # env conda 'vame' (VAME)
+├── requirements-pipeline.txt          # deps Docker / pip
 │
-├── streamlit_app/
-│   └── app.py                      # interface web
+├── streamlit_app/app.py               # interface web
 │
 ├── scripts/
-│   ├── crop_arenes.py              # crop des 4 arènes par vidéo
-│   ├── run_dlc_inference.py        # inférence DLC sur vidéos croppées
-│   ├── run_vame.py                 # analyse VAME
-│   └── run_pipeline.py             # orchestrateur
+│   ├── sync_from_excel.py             # Excel → metadata.yaml
+│   ├── calibrate_arenes.py            # GUI : tracer les 4 ROI d'arène
+│   ├── crop_arenes.py                 # crop optionnel (pour labellisation)
+│   ├── run_dlc_inference.py           # SuperAnimal multi-animal ou modèle custom
+│   ├── assign_arenas.py               # split DLC multi-animal → 4 .h5 par arène
+│   ├── run_vame.py                    # analyse VAME (squelette)
+│   └── run_pipeline.py                # orchestrateur tout-en-un
 │
 ├── configs/
-│   ├── pipeline_config.yaml.example
-│   └── metadata_template.yaml      # template à copier pour chaque session
+│   ├── pipeline_config.yaml           # coords arènes + chemins modèles
+│   ├── pipeline_config.yaml.example   # template
+│   └── metadata_template.yaml         # exemple de schéma metadata
 │
-├── docker/
-│   ├── Dockerfile
-│   └── docker-compose.yml
+├── docker/                            # Dockerfile + docker-compose pour le Streamlit
+├── tests/                             # tests basiques pytest
 │
-├── tests/
-│   └── test_skeleton.py
-│
-└── data/                           # gitignored — données locales
-    ├── raw/                        # vidéos brutes + metadata.yaml
-    ├── cropped/                    # vidéos après crop des arènes
-    ├── dlc-output/                 # sorties DLC (.h5, .csv)
-    ├── vame-output/                # sorties VAME
-    └── results/                    # figures et métriques
+└── data/                              # GITIGNORED — données locales
+    ├── raw/<TrialCode>/metadata.yaml  # généré par sync_from_excel.py
+    ├── cropped/                       # éphémère
+    ├── dlc-output/
+    ├── vame-output/
+    └── results/
 ```
 
-## Workflow type
+## Ce qui n'est PAS dans le repo (gitignored)
 
-1. Le chercheur enregistre une vidéo et la dépose dans `data/raw/<session_id>/`
-2. Il remplit `metadata.yaml` (animal IDs, conditions, coords des arènes) — possible via l'UI Streamlit
-3. Il lance le pipeline depuis l'UI
-4. Les résultats apparaissent dans `data/dlc-output/` et `data/vame-output/`
+- Les vidéos brutes (~100 MB chacune × 100/mois)
+- Le fichier Excel maître (source de vérité, vit avec les données)
+- Les sorties DLC/VAME (.h5, .pkl, etc.)
+- Les modèles DLC entraînés (`dlc-projects/`, `vame-projects/` — chemins à configurer dans `configs/pipeline_config.yaml`)
+
+Pour dupliquer un setup complet sur une nouvelle machine, il faut donc :
+1. Cloner le repo (ce README)
+2. Copier le dossier `data/` (acquisitions brutes + Excel) à part
+3. Copier ou refaire le projet DLC entraîné (dossier `dlc-projects/`)
 
 ## Liens utiles
 
 - DeepLabCut : https://deeplabcut.github.io/DeepLabCut/
 - VAME : https://github.com/LINCellularNeuroscience/VAME
-- Streamlit : https://streamlit.io/
+- Doc complète : [`docs/ETHOFLOW.md`](docs/ETHOFLOW.md)
 
 ## Licence
 
