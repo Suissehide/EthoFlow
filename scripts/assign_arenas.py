@@ -51,6 +51,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
 DLC_OUTPUT_DIR = ROOT / "data" / "dlc-output"
+VAME_INPUT_DIR = ROOT / "data" / "vame-input"
 CONFIG_PATH = ROOT / "configs" / "pipeline_config.yaml"
 
 
@@ -261,8 +262,12 @@ def assign_arenas(
         )
 
     session_dlc_dir = DLC_OUTPUT_DIR / session_id
+    session_out_dir = VAME_INPUT_DIR / session_id
+    session_out_dir.mkdir(parents=True, exist_ok=True)
+
     h5_path = find_multianimal_h5(session_dlc_dir)
     print(f"Source DLC : {h5_path.name}")
+    print(f"Sortie     : {session_out_dir}")
 
     df = pd.read_hdf(h5_path)
     if "individuals" not in df.columns.names:
@@ -301,7 +306,7 @@ def assign_arenas(
 
         mouse_id = ar.get("mouse_id")
         mouse_label = f"M{mouse_id:02d}" if isinstance(mouse_id, int) else "—"
-        out_path = session_dlc_dir / f"{session_id}_{ar_id}.h5"
+        out_path = session_out_dir / f"{session_id}_{ar_id}.h5"
         sub_clean.to_hdf(out_path, key="df", mode="w")
         n_assigned += 1
 
@@ -337,9 +342,37 @@ def assign_arenas(
     print(f"\n✅ {n_assigned}/{len(valid_arenes)} arène(s) assignée(s)")
 
 
+def list_dlc_processed_sessions() -> list[str]:
+    """Sessions qui ont une sortie DLC multi-animal (donc prêtes à être assignées)."""
+    if not DLC_OUTPUT_DIR.exists():
+        return []
+    sessions = []
+    for d in sorted(DLC_OUTPUT_DIR.iterdir()):
+        if not d.is_dir() or d.name.startswith("."):
+            continue
+        # Au moins un .h5 multi-animal (pas un fichier déjà splitté _Aн)
+        h5s = [c for c in d.glob("*.h5") if not c.stem.endswith(("_A1", "_A2", "_A3", "_A4"))]
+        if h5s:
+            sessions.append(d.name)
+    return sessions
+
+
+def is_assigned(session_id: str) -> bool:
+    """Vrai si VAME_INPUT_DIR/<session>/ contient déjà des .h5 single-animal."""
+    out = VAME_INPUT_DIR / session_id
+    return out.exists() and any(out.glob(f"{session_id}_A*.h5"))
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("session_id")
+    parser.add_argument("session_ids", nargs="*",
+                        help="Un ou plusieurs session_id à traiter")
+    parser.add_argument("--all", action="store_true",
+                        help="Traiter toutes les sessions ayant une sortie DLC, "
+                             "qu'elles aient déjà été assignées ou non (réécrase)")
+    parser.add_argument("--all-new", action="store_true",
+                        help="Traiter uniquement les sessions DLC qui n'ont pas "
+                             "encore de sortie dans data/vame-input/")
     parser.add_argument("--likelihood-threshold", type=float, default=0.6,
                         help="Seuil de confiance — détections en dessous → NaN (défaut 0.6)")
     parser.add_argument("--interp-limit", type=int, default=25,
@@ -347,13 +380,44 @@ if __name__ == "__main__":
     parser.add_argument("--no-clean", action="store_true",
                         help="Désactive complètement le nettoyage (low-lk → NaN, interpolation)")
     args = parser.parse_args()
-    try:
-        assign_arenas(
-            args.session_id,
-            threshold=args.likelihood_threshold,
-            interp_limit=args.interp_limit,
-            do_clean=not args.no_clean,
-        )
-    except (FileNotFoundError, ValueError) as e:
-        print(f"❌ {e}", file=sys.stderr)
+
+    # Collecte de la liste de sessions
+    if args.all:
+        sessions = list_dlc_processed_sessions()
+    elif args.all_new:
+        sessions = [s for s in list_dlc_processed_sessions() if not is_assigned(s)]
+    elif args.session_ids:
+        sessions = list(args.session_ids)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+    if not sessions:
+        print("Aucune session à traiter.")
+        sys.exit(0)
+
+    if len(sessions) > 1:
+        print(f"{len(sessions)} session(s) à traiter : {sessions}\n")
+
+    n_ok = n_fail = 0
+    for i, session_id in enumerate(sessions, 1):
+        if len(sessions) > 1:
+            print(f"\n{'='*60}\n[{i}/{len(sessions)}] {session_id}\n{'='*60}")
+        try:
+            assign_arenas(
+                session_id,
+                threshold=args.likelihood_threshold,
+                interp_limit=args.interp_limit,
+                do_clean=not args.no_clean,
+            )
+            n_ok += 1
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ {session_id} : {e}", file=sys.stderr)
+            n_fail += 1
+            continue
+
+    if len(sessions) > 1:
+        print(f"\n{'='*60}\nBatch terminé : {n_ok} OK, {n_fail} échec(s) sur "
+              f"{len(sessions)}\n{'='*60}")
+    if n_fail > 0:
         sys.exit(1)

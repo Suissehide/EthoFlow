@@ -20,6 +20,8 @@ data/cropped/*
 !data/cropped/.gitkeep
 data/dlc-output/*
 !data/dlc-output/.gitkeep
+data/vame-input/*
+!data/vame-input/.gitkeep
 data/vame-output/*
 !data/vame-output/.gitkeep
 data/results/*

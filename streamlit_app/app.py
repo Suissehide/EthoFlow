@@ -23,6 +23,7 @@ DATA_ROOT = ROOT / "data"
 RAW_DIR = DATA_ROOT / "raw"
 CROPPED_DIR = DATA_ROOT / "cropped"
 DLC_OUTPUT_DIR = DATA_ROOT / "dlc-output"
+VAME_INPUT_DIR = DATA_ROOT / "vame-input"
 VAME_OUTPUT_DIR = DATA_ROOT / "vame-output"
 SCRIPTS_DIR = ROOT / "scripts"
 
@@ -70,10 +71,11 @@ def list_sessions() -> pd.DataFrame:
         )
 
         # Une session est "splittée" si on trouve des .h5 nommés <session>_A*.h5
-        dlc_dir = DLC_OUTPUT_DIR / session_id
+        # dans data/vame-input/<session>/
+        vame_input_session = VAME_INPUT_DIR / session_id
         split_done = (
-            dlc_dir.exists()
-            and any(dlc_dir.glob(f"{session_id}_A*.h5"))
+            vame_input_session.exists()
+            and any(vame_input_session.glob(f"{session_id}_A*.h5"))
         )
 
         rows.append({
