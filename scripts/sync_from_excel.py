@@ -40,6 +40,24 @@ DEFAULT_EXCEL = ROOT.parent / "data" / "OpenField_trials_CDUPLAA.xlsx"
 DEFAULT_VIDEOS = ROOT.parent / "data"
 
 
+def fallback_from_codebook(mouse_id: int, timepoint: str) -> dict:
+    """
+    Règle de groupe par défaut, documentée dans le Codebook de l'Excel :
+        MouseIDs 1–10  : CUS   à M1, CUS+ANGII   à M2 (stress = oui)
+        MouseIDs 11–18 : SHAM  à M1, SHAM+ANGII à M2 (stress = non)
+
+    Utilisée comme fallback quand la feuille Subjects renvoie NaN — par exemple
+    si les formules `=IF(A2<=10,"CUS","SHAM")` n'ont pas été ré-évaluées par
+    Excel (cas typique : édition via openpyxl sans recalcul).
+    """
+    is_stress = mouse_id <= 10
+    if timepoint == "M1":
+        condition = "CUS" if is_stress else "SHAM"
+    else:
+        condition = "CUS+ANGII" if is_stress else "SHAM+ANGII"
+    return {"condition": condition, "stress": is_stress, "angii": timepoint == "M2"}
+
+
 def derive_arena_info(mouse_id, timepoint: str, subjects: pd.DataFrame) -> dict:
     """Dérive condition / ANGII / stress pour une souris à un timepoint."""
     if pd.isna(mouse_id):
@@ -52,21 +70,33 @@ def derive_arena_info(mouse_id, timepoint: str, subjects: pd.DataFrame) -> dict:
 
     mid = int(mouse_id)
     row = subjects[subjects["MouseID"] == mid]
-    if row.empty:
-        return {"mouse_id": mid, "condition": None, "angii": None, "stress": None}
 
-    if timepoint == "M1":
-        condition = row["Baseline group (M1)"].iloc[0]
-    else:
-        condition = row["ANGII group (M2)"].iloc[0]
+    # Tentative 1 : lire la valeur depuis la feuille Subjects
+    condition = None
+    stress = None
+    if not row.empty:
+        col = "Baseline group (M1)" if timepoint == "M1" else "ANGII group (M2)"
+        condition_raw = row[col].iloc[0]
+        if pd.notna(condition_raw):
+            condition = str(condition_raw)
 
-    stress_raw = row["Stress (CUS?)"].iloc[0]
-    stress = (str(stress_raw).strip().lower() == "yes")
+        stress_raw = row["Stress (CUS?)"].iloc[0]
+        if pd.notna(stress_raw):
+            stress = str(stress_raw).strip().lower() == "yes"
+
+    # Tentative 2 : fallback sur la règle du Codebook si une info manque
+    if condition is None or stress is None:
+        fb = fallback_from_codebook(mid, timepoint)
+        if condition is None:
+            condition = fb["condition"]
+        if stress is None:
+            stress = fb["stress"]
+
     angii = isinstance(condition, str) and "ANGII" in condition
 
     return {
         "mouse_id": mid,
-        "condition": str(condition) if pd.notna(condition) else None,
+        "condition": condition,
         "angii": angii,
         "stress": stress,
     }
