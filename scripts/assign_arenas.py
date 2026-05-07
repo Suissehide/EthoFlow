@@ -1,15 +1,26 @@
 """
-Assigne chaque track DLC multi-animal à une arène, et split en .h5 single-animal.
+Assigne chaque frame DLC multi-animal à une arène, et split en .h5 single-animal.
 
-Logique :
+Logique (assignation **par-frame**, robuste au tracker bancal) :
 1. Lit le `.h5` multi-animal produit par SuperAnimal (ou un modèle DLC ma-)
-2. Pour chaque individu détecté, calcule un centroïde médian (toutes frames,
-   tous keypoints, filtrés par likelihood)
-3. Trouve l'arène dont le rectangle contient ce centroïde
+2. Pour chaque individu × chaque frame, calcule sa position (centroïde) et
+   sa qualité (likelihood moyenne sur les keypoints valides)
+3. Pour chaque arène, construit un track single-animal en piochant à chaque
+   frame la position du meilleur individu qui s'y trouve (en termes de
+   likelihood). Si aucun individu n'est dans l'arène à une frame donnée,
+   cette frame reste NaN.
 4. **Nettoie** chaque track : low-likelihood → NaN, puis interpolation
    linéaire des trous courts (≤ interp-limit frames)
 5. Écrit un fichier `<session>_<arene>.h5` single-animal par arène, dans
    `data/dlc-output/<session>/`
+
+Pourquoi par-frame plutôt que par track entier : le tracker multi-animal
+de SuperAnimal mélange souvent les identités des souris au cours d'une
+vidéo. Avec une assignation par centroïde global, plusieurs tracks peuvent
+revendiquer la même arène (et une autre arène se retrouve sans rien). Vu
+que les arènes sont physiquement séparées (les souris ne peuvent pas
+changer de boîte), la position à chaque frame est un signal parfaitement
+fiable pour l'assignation.
 
 Le nettoyage évite les trous dans les coordonnées (typique quand le détecteur
 de SuperAnimal perd une souris immobile pendant quelques frames) — VAME
@@ -67,55 +78,91 @@ def find_multianimal_h5(session_dlc_dir: Path) -> Path:
     return multianimal[0]
 
 
-def compute_centroid(df_individual: pd.DataFrame, threshold: float) -> tuple[float, float, int]:
+def per_frame_centroids(sub: pd.DataFrame, threshold: float):
     """
-    Centroïde médian d'un individu — utilise les détections > threshold.
-    Retourne (cx, cy, n_valid) où n_valid = nombre total de (frame, keypoint)
-    valides ayant servi au calcul.
+    Pour un individu donné, calcule à chaque frame :
+    - cx, cy : centroïde des keypoints valides (likelihood > threshold)
+    - mean_lk : likelihood moyenne des keypoints valides (sert de qualité)
 
-    Robuste aux colonnes multi-niveau (scorer × bodyparts × coords) :
-    on convertit en numpy et on fait la médiane sur tout d'un coup.
+    Renvoie 3 ndarray de shape (n_frames,) — NaN aux frames sans détection.
     """
-    coords_levels = df_individual.columns.names
-    if "coords" not in coords_levels:
-        raise ValueError(
-            f"Colonnes attendues avec un niveau 'coords' (x/y/likelihood), "
-            f"trouvé : {coords_levels}"
-        )
-
-    xs = df_individual.xs("x", level="coords", axis=1).to_numpy()
-    ys = df_individual.xs("y", level="coords", axis=1).to_numpy()
-    likes = df_individual.xs("likelihood", level="coords", axis=1).to_numpy()
+    xs = sub.xs("x", level="coords", axis=1).to_numpy()
+    ys = sub.xs("y", level="coords", axis=1).to_numpy()
+    likes = sub.xs("likelihood", level="coords", axis=1).to_numpy()
 
     mask = likes > threshold
-    n_valid = int(np.sum(mask & ~np.isnan(xs) & ~np.isnan(ys)))
-    if n_valid == 0:
-        raise ValueError(
-            f"0 détection > {threshold} (track sans données fiables)"
-        )
-
     xs_masked = np.where(mask, xs, np.nan)
     ys_masked = np.where(mask, ys, np.nan)
+    likes_masked = np.where(mask, likes, np.nan)
 
-    cx = float(np.nanmedian(xs_masked))
-    cy = float(np.nanmedian(ys_masked))
-
-    if np.isnan(cx) or np.isnan(cy):
-        raise ValueError(
-            f"Pas assez de détections > {threshold} pour calculer un centroïde"
-        )
-    return cx, cy, n_valid
+    with np.errstate(invalid="ignore", all="ignore"):
+        cx = np.nanmedian(xs_masked, axis=1)
+        cy = np.nanmedian(ys_masked, axis=1)
+        mean_lk = np.nanmean(likes_masked, axis=1)
+    return cx, cy, mean_lk
 
 
-def find_arena(cx: float, cy: float, arenes: list[dict]) -> dict | None:
-    for ar in arenes:
-        coords = ar.get("coords")
-        if not coords:
-            continue
-        x, y, w, h = coords
-        if x <= cx < x + w and y <= cy < y + h:
-            return ar
-    return None
+def build_per_arena_tracks(
+    df: pd.DataFrame,
+    arenes: list[dict],
+    threshold: float,
+) -> tuple[dict[str, pd.DataFrame], dict[str, dict[str, int]]]:
+    """
+    Construit un track single-animal par arène, en parcourant tous les
+    individus et en attribuant chaque frame à son arène contenante.
+    Si plusieurs individus revendiquent la même arène à la même frame,
+    on garde celui dont la likelihood moyenne est la plus haute.
+
+    Renvoie (per_arena_dfs, source_counts) où source_counts[arena_id][ind]
+    indique combien de frames ont été contribuées par chaque individu.
+    """
+    individuals = list(df.columns.get_level_values("individuals").unique())
+    n_frames = len(df)
+
+    # Schéma de colonnes single-animal : on prend celui d'un individu pris
+    # au hasard, en supprimant le niveau 'individuals'
+    sample_sub = df.xs(individuals[0], level="individuals", axis=1)
+    out_columns = sample_sub.columns
+    n_cols = len(out_columns)
+
+    valid_arenes = [ar for ar in arenes if ar.get("coords")]
+
+    # Buffers numpy par arène : data + qualité courante (-inf au départ)
+    arena_data: dict[str, np.ndarray] = {
+        ar["id"]: np.full((n_frames, n_cols), np.nan) for ar in valid_arenes
+    }
+    arena_quality: dict[str, np.ndarray] = {
+        ar["id"]: np.full(n_frames, -np.inf) for ar in valid_arenes
+    }
+    source_counts: dict[str, dict[str, int]] = {
+        ar["id"]: defaultdict(int) for ar in valid_arenes
+    }
+
+    for ind in individuals:
+        sub = df.xs(ind, level="individuals", axis=1)
+        sub_arr = sub.to_numpy()  # (n_frames, n_cols)
+        cx, cy, mean_lk = per_frame_centroids(sub, threshold)
+
+        for ar in valid_arenes:
+            x, y, w, h = ar["coords"]
+            in_arena = (
+                (cx >= x) & (cx < x + w) &
+                (cy >= y) & (cy < y + h)
+            )
+            current_q = arena_quality[ar["id"]]
+            # On améliore l'attribution si in_arena ET likelihood meilleure
+            better = in_arena & (mean_lk > current_q)
+            if better.any():
+                arena_data[ar["id"]][better] = sub_arr[better]
+                arena_quality[ar["id"]][better] = mean_lk[better]
+                source_counts[ar["id"]][ind] += int(better.sum())
+
+    # Conversion numpy → DataFrame (avec mêmes index/colonnes que la source)
+    result = {
+        ar_id: pd.DataFrame(data, index=df.index, columns=out_columns)
+        for ar_id, data in arena_data.items()
+    }
+    return result, source_counts
 
 
 def clean_individual(
@@ -226,68 +273,68 @@ def assign_arenas(
 
     individuals = list(df.columns.get_level_values("individuals").unique())
     print(f"Individus détectés : {len(individuals)} ({individuals})")
+    print("Assignation par-frame (un track peut contribuer à plusieurs arènes).\n")
 
-    # Calcul des centroïdes pour TOUS les individus, puis tri par fiabilité
-    # (n_valid décroissant) : ça met les 4 vraies souris en tête, les
-    # détections fantômes (ghosts à très peu de frames valides) à la fin.
-    candidates = []
-    for ind in individuals:
-        sub = df.xs(ind, level="individuals", axis=1)
-        try:
-            cx, cy, n_valid = compute_centroid(sub, threshold)
-        except ValueError as e:
-            print(f"  ⚠️  {ind} : {e}, skip")
-            continue
-        candidates.append((n_valid, ind, sub, cx, cy))
+    valid_arenes = [ar for ar in arenes if ar.get("coords")]
+    arena_dfs, source_counts = build_per_arena_tracks(df, valid_arenes, threshold)
 
-    candidates.sort(key=lambda c: -c[0])
+    n_assigned = 0
+    n_frames_total = len(df)
+    for ar in valid_arenes:
+        ar_id = ar["id"]
+        sub = arena_dfs[ar_id]
+        # Nombre de frames qui ont au moins une donnée non-NaN
+        any_data = ~sub.isna().all(axis=1)
+        n_filled = int(any_data.sum())
 
-    used_arenas: set[str] = set()
-    for n_valid, ind, sub, cx, cy in candidates:
-        arena = find_arena(cx, cy, arenes)
-        if arena is None:
-            print(f"  ⚠️  {ind} ({n_valid} pts valides) : centroïde "
-                  f"({cx:.0f}, {cy:.0f}) hors de toute arène, skip")
+        if n_filled == 0:
+            print(f"  ⚠️  {ar_id} : 0 frames assignées — aucune souris détectée "
+                  f"dans cette zone")
             continue
 
-        if arena["id"] in used_arenas:
-            print(f"  ⚠️  {ind} ({n_valid} pts valides) : arène {arena['id']} "
-                  f"déjà attribuée, skip (doublon de détection)")
-            continue
-        used_arenas.add(arena["id"])
-
-        # Nettoyage avant écriture : interpolation des trous courts
+        # Nettoyage avant écriture : low-lk → NaN, interpolation des trous courts
         if do_clean:
             sub_clean, stats = clean_individual(sub, threshold, interp_limit)
         else:
             sub_clean = sub
             stats = None
 
-        mouse_id = arena.get("mouse_id")
-        out_path = session_dlc_dir / f"{session_id}_{arena['id']}.h5"
-        sub_clean.to_hdf(out_path, key="df", mode="w")
+        mouse_id = ar.get("mouse_id")
         mouse_label = f"M{mouse_id:02d}" if isinstance(mouse_id, int) else "—"
-        msg = (f"  ✓ {ind:>12s} → {arena['id']} ({mouse_label})  "
-               f"n_valid={n_valid}  centroïde ({cx:.0f}, {cy:.0f})  → {out_path.name}")
+        out_path = session_dlc_dir / f"{session_id}_{ar_id}.h5"
+        sub_clean.to_hdf(out_path, key="df", mode="w")
+        n_assigned += 1
+
+        # Détail des sources : quels individus ont contribué à cette arène
+        sc = source_counts[ar_id]
+        sources_sorted = sorted(sc.items(), key=lambda x: -x[1])
+        sources_str = ", ".join(f"{k}:{v}" for k, v in sources_sorted)
+
+        pct_filled = 100 * n_filled / n_frames_total
+        msg = (f"  ✓ {ar_id} ({mouse_label})  "
+               f"{n_filled}/{n_frames_total} frames couvertes ({pct_filled:.1f}%)  "
+               f"→ {out_path.name}\n"
+               f"         sources : {sources_str}")
         if stats is not None:
             total = max(stats["total_slots"], 1)
             pct_low = 100 * stats["n_low_likelihood"] / total
             pct_interp = 100 * stats["n_interpolated"] / total
-            pct_remaining = 100 * stats["n_remaining_nan"] / total
-            pct_useful = 100 - pct_remaining
+            pct_useful = 100 - 100 * stats["n_remaining_nan"] / total
             msg += (f"\n         clean ({stats['n_keypoints']} kp × {stats['n_frames']} frames): "
                     f"{pct_low:.1f}% low-lk → NaN, "
                     f"{pct_interp:.1f}% interpolés, "
                     f"{pct_useful:.1f}% utilisables au final")
         print(msg)
 
-    expected = {ar["id"] for ar in arenes if ar.get("mouse_id") is not None}
-    missing = expected - used_arenas
+    expected = {ar["id"] for ar in valid_arenes if ar.get("mouse_id") is not None}
+    found = {ar["id"] for ar in valid_arenes
+             if not arena_dfs[ar["id"]].isna().all(axis=1).all()}
+    missing = expected - found
     if missing:
         print(f"\n⚠️  Arènes attendues non couvertes : {sorted(missing)} "
-              f"(souris non détectée ?)")
+              f"(souris non détectée — vérifier la calibration et la vidéo annotée)")
 
-    print(f"\n✅ {len(used_arenas)} arène(s) assignée(s)")
+    print(f"\n✅ {n_assigned}/{len(valid_arenes)} arène(s) assignée(s)")
 
 
 if __name__ == "__main__":
