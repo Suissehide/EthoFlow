@@ -1,21 +1,24 @@
-# Environnement VAME.
-# À installer sur le poste de calcul. VAME a des dépendances incompatibles
-# avec DeepLabCut, d'où l'environnement séparé.
+# Environnement VAME (version moderne `vame-py` sur PyPI).
+#
+# IMPORTANT : vame-py requiert Python >= 3.11 (>= 3.12 pour la 0.14+).
+# On reste sur 3.11 pour la stabilité ; bump à 3.12 si tu veux la dernière VAME.
+#
+# À ne pas confondre avec le repo cloné `VAME/` (l'ancien fork
+# LINCellularNeuroscience, py 3.7, plus maintenu de la même façon).
 #
 # Création :
 #   conda env create -f environment-vame.yml
 #   conda activate vame
 #
-# Note : le repo VAME (cloné à côté de ce projet) contient un VAME.yaml
-# de référence ; cette version-ci est plus minimale. Si l'install échoue,
-# se référer à VAME/VAME.yaml et au README VAME.
+# Vérification :
+#   python -c "import vame; print(vame.__version__)"
 
 name: vame
 channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.10
+  - python=3.11
   - pip
   - pip:
     - vame-py
