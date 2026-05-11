@@ -124,6 +124,7 @@ def run_superanimal_cropped(
     video_adapt: bool = False,
     likelihood_threshold: float = 0.6,
     interp_limit: int = 25,
+    output_dir: Path | None = None,
 ) -> None:
     """
     Inférence SuperAnimal single-animal sur les vidéos déjà croppées d'une session.
@@ -186,7 +187,8 @@ def run_superanimal_cropped(
     )
 
     # Post-traitement : flatten + clean + déplacement vers vame-input
-    out_dir = VAME_INPUT_DIR / session_id
+    base_out = Path(output_dir) if output_dir else VAME_INPUT_DIR
+    out_dir = base_out / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nPost-traitement → {out_dir}\n")
 
@@ -279,6 +281,10 @@ if __name__ == "__main__":
                         help="(mode single-animal) seuil de likelihood pour le nettoyage")
     parser.add_argument("--interp-limit", type=int, default=25,
                         help="(mode single-animal) taille max d'un trou interpolable, en frames")
+    parser.add_argument("--output-dir", type=Path, default=None,
+                        help="(mode single-animal) dossier de sortie alternatif "
+                             "(défaut: data/vame-input/). Utile pour comparer "
+                             "plusieurs runs sans écraser.")
     args = parser.parse_args()
 
     # Collecte de la liste de sessions à traiter
@@ -320,6 +326,7 @@ if __name__ == "__main__":
                     video_adapt=args.video_adapt,
                     likelihood_threshold=args.likelihood_threshold,
                     interp_limit=args.interp_limit,
+                    output_dir=args.output_dir,
                 )
             else:
                 run_custom(session_id)

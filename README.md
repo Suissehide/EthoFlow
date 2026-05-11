@@ -4,21 +4,33 @@ Pipeline d'analyse comportementale de souris basé sur **DeepLabCut** (estimatio
 
 ## Architecture
 
+Deux chemins équivalents, à choisir selon le contexte. Le pipeline démarre toujours par `sync_from_excel.py` qui génère les `metadata.yaml`, et se termine par VAME qui consomme `data/vame-input/`.
+
+**Chemin A — Multi-animal (rapide, sans pré-traitement vidéo)** :
+
 ```
-data/<TrialCode>.mp4 + Excel maître
-        │
-        ▼
-[sync_from_excel.py]   →  ethoflow/data/raw/<TrialCode>/metadata.yaml
-        │
-        ▼
-[run_dlc_inference.py — env dlc]   →  .h5 multi-animal
-        │
-        ▼
-[assign_arenas.py]   →  4 .h5 single-animal (un par arène)
-        │
-        ▼
-[run_vame.py — env vame]   →  segmentation comportementale
+[sync_from_excel.py]   →  metadata.yaml par session
+        ↓
+[run_dlc_inference.py --mode superanimal]   →  data/dlc-output/  (1 .h5 multi-animal par vidéo)
+        ↓
+[assign_arenas.py]   →  data/vame-input/  (4 .h5 single-animal par session, recomposés par position)
+        ↓
+[run_vame.py]   →  data/vame-output/
 ```
+
+**Chemin B — Single-animal (vidéos pré-croppées, plus simple pour labellisation)** :
+
+```
+[sync_from_excel.py]   →  metadata.yaml par session
+        ↓
+[crop_arenes.py]   →  data/cropped/  (4 vidéos single-animal par session)
+        ↓
+[run_dlc_inference.py --mode single-animal]   →  data/vame-input/  (4 .h5 directs)
+        ↓
+[run_vame.py]   →  data/vame-output/
+```
+
+Différence : le chemin A garde les vidéos brutes intactes et utilise un tracker multi-animal (avec gestion des fragmentations par `assign_arenas`) ; le chemin B re-encode chaque arène en vidéo single-animal et lance DLC en mode `max_individuals=1` (pas de tracker inter-animal, sortie plus simple). Le chemin B est aussi celui à utiliser si tu veux **labelliser ou fine-tuner un modèle DLC custom** : les vidéos croppées single-animal sont infiniment plus simples à annoter.
 
 Les chercheurs interagissent via l'interface Streamlit ; le code tourne en local sur le poste de calcul.
 
@@ -150,15 +162,51 @@ L'interface s'ouvre sur http://localhost:8501. Tu dois voir tes 10 sessions dans
 
 ## Quick start après setup
 
-Workflow standard pour traiter une session :
+### Chemin A — Multi-animal (recommandé pour la prod)
+
+Sortie : `data/vame-input/<session>/<session>_A{1..4}.h5`
 
 ```bash
+# Inférence DLC multi-animal sur la vidéo entière (env: dlc)
+conda activate dlc
+python scripts/run_dlc_inference.py OF-M1-20251010-V01
+# ou en batch : python scripts/run_dlc_inference.py --all
+
+# Split par arène + nettoyage (env: ethoflow)
 conda activate ethoflow
-python scripts/run_pipeline.py OF-M1-20251010-V01
-# → DLC → assign_arenas → VAME en chaîne
+python scripts/assign_arenas.py OF-M1-20251010-V01
+# ou en batch : python scripts/assign_arenas.py --all-new
 ```
 
-Ou via l'UI Streamlit, page « Lancer pipeline ».
+### Chemin B — Single-animal sur vidéos croppées
+
+Sortie : `data/vame-input/<session>/<session>_A{1..4}.h5` (même structure)
+
+```bash
+# 1. Crop des 4 arènes par vidéo (env: ethoflow, calibration déjà dans pipeline_config.yaml)
+conda activate ethoflow
+python scripts/crop_arenes.py --all
+
+# 2. DLC single-animal sur les vidéos croppées (env: dlc)
+conda activate dlc
+python scripts/run_dlc_inference.py --mode single-animal --all
+```
+
+### Comparer les deux chemins
+
+Pour préserver les résultats des deux approches dans des dossiers séparés :
+
+```bash
+# Garde la sortie multi-animal d'abord, puis écris le single-animal ailleurs
+python scripts/run_dlc_inference.py --mode single-animal --all \
+       --output-dir data/vame-input-single
+```
+
+Tu te retrouves avec :
+- `data/vame-input/` — résultats du chemin A (multi-animal + assign_arenas)
+- `data/vame-input-single/` — résultats du chemin B (single-animal cropped)
+
+Tu lances VAME en pointant sur l'un ou l'autre pour comparer les motifs comportementaux.
 
 ## Structure du repo
 

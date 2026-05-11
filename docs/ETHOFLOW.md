@@ -460,37 +460,65 @@ Une à deux passes de refinement suffisent généralement.
 
 **Pré-requis** : partie 3 terminée (sync Excel), modèle DLC dispo (SuperAnimal par défaut, ou modèle custom entraîné en partie 4).
 
-### 5.1 Workflow
+### 5.1 Deux workflows possibles
+
+EthoFlow supporte deux chemins équivalents qui aboutissent au même format de sortie (`data/vame-input/<session>/<session>_A{1..4}.h5`).
+
+**Chemin A — Multi-animal sur vidéo entière** *(le plus rapide en pratique, recommandé pour la prod)* :
 
 ```
 data/<TrialCode>.mp4 + ethoflow/data/raw/<TrialCode>/metadata.yaml
-                          │
-                          ▼
-              run_dlc_inference.py  (env: dlc)
-              SuperAnimal multi-animal sur la vidéo entière
-                          │
-                          ▼
-              ethoflow/data/dlc-output/<TrialCode>/<une>.h5  (4 tracks)
-                          │
-                          ▼
-              assign_arenas.py  (env: ethoflow)
-              centroïde de chaque track → arène contenante
-                          │
-                          ▼
-              <TrialCode>_A1.h5, <TrialCode>_A2.h5, ...   (single-animal)
-                          │
-                          ▼
-              run_vame.py  (env: vame)
-                          │
-                          ▼
-              ethoflow/data/vame-output/<TrialCode>/
+        ↓
+run_dlc_inference.py --mode superanimal           (env: dlc)
+        ↓  data/dlc-output/<TrialCode>/<...>.h5   (multi-animal, 4 tracks fragmentés)
+assign_arenas.py                                  (env: ethoflow)
+   par-frame voting → 4 tracks single-animal recomposés
+        ↓  data/vame-input/<TrialCode>/<TrialCode>_A1..4.h5
+run_vame.py                                       (env: vame)
+        ↓  data/vame-output/<TrialCode>/
 ```
 
-### 5.2 Pourquoi pas de crop dans le pipeline ?
+**Chemin B — Single-animal sur vidéos pré-croppées** *(plus simple si tu veux labelliser/fine-tuner)* :
 
-Avec DLC 3.x et SuperAnimal, le détecteur multi-animal trouve les 4 souris en une seule passe sur la vidéo source. Comme les arènes sont physiquement séparées, l'identité d'un track est triviale à résoudre par sa position : `assign_arenas.py` calcule le centroïde de chaque track sur toute la vidéo et le matche au rectangle de l'arène correspondante. Pas besoin de re-encoder 4 sous-vidéos.
+```
+data/<TrialCode>.mp4 + metadata.yaml
+        ↓
+crop_arenes.py                                    (env: ethoflow)
+   ffmpeg crop des 4 rectangles d'arène
+        ↓  data/cropped/<TrialCode>/<TrialCode>_A{1..4}.mp4
+run_dlc_inference.py --mode single-animal         (env: dlc)
+   SuperAnimal avec max_individuals=1, pas de tracker inter-animal,
+   puis flatten + nettoyage automatique
+        ↓  data/vame-input/<TrialCode>/<TrialCode>_A1..4.h5
+run_vame.py                                       (env: vame)
+        ↓  data/vame-output/<TrialCode>/
+```
 
-Le crop reste disponible (`scripts/crop_arenes.py`) pour les phases de labellisation — voir partie 4.2.
+### 5.2 Quel chemin choisir ?
+
+| Critère | Chemin A (multi) | Chemin B (cropped single) |
+|---|---|---|
+| Pré-traitement vidéo | aucun | crop ffmpeg (~2 min/session) |
+| Tracker | multi-animal SuperAnimal | single-animal (max_individuals=1) |
+| Gestion des fragmentations de tracker | requise (`assign_arenas` par-frame) | non-applicable |
+| Temps inférence (RTX 5080) | ~54 min/vidéo | ~5-15 min/vidéo croppée × 4 ≈ 20-60 min/session |
+| Adapté à la labellisation custom | non | oui, vidéos single-animal labellisables dans la GUI DLC |
+| Inspection visuelle d'une arène | vidéo annotée multi-animal complète | vidéo annotée single-animal par arène |
+
+En pratique, A est souvent un peu plus rapide bout-à-bout, et n'altère pas les vidéos sources. B est conceptuellement plus simple et obligatoire si tu veux entraîner ton propre modèle DLC.
+
+Pour **comparer les deux** (utile pour le pilote), utilise `--output-dir` :
+
+```bash
+python scripts/run_dlc_inference.py --mode single-animal --all \
+       --output-dir data/vame-input-single
+```
+
+Tu te retrouves avec `data/vame-input/` (chemin A) et `data/vame-input-single/` (chemin B) côte à côte.
+
+### 5.3 Pourquoi pas de crop dans le chemin A ?
+
+Avec DLC 3.x et SuperAnimal, le détecteur multi-animal trouve les 4 souris en une seule passe sur la vidéo source. Le tracker fragmente parfois les identités (animal0 piste M17 puis M18 puis M17…), mais comme les arènes sont physiquement séparées, `assign_arenas.py` recompose des tracks propres en votant par frame : à chaque instant, on prend la souris de meilleure likelihood qui est dans le rectangle de l'arène. Pas besoin de re-encoder 4 sous-vidéos.
 
 ### 5.3 Orchestrateur
 

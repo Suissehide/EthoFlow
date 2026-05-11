@@ -1,20 +1,20 @@
 """
 Crop des 4 arènes d'une vidéo brute en N vidéos single-animal.
 
-⚠️  Outil OPTIONNEL, hors du pipeline d'inférence par défaut.
+Utilisé dans deux flows :
 
-Le pipeline standard fait de l'inférence DLC multi-animal directement sur
-la vidéo entière, puis utilise `assign_arenas.py` pour splitter la sortie.
-Pas besoin de cropper la vidéo source pour ça.
+1. **Chemin B (single-animal cropped)** : `run_dlc_inference.py --mode single-animal`
+   lit les vidéos produites ici pour faire l'inférence DLC arène par arène.
+2. **Labellisation / fine-tuning de modèle DLC custom** : la GUI DLC est plus
+   simple à utiliser sur des vidéos single-animal que sur multi-animal.
 
-Ce script reste utile pour :
-- la labellisation manuelle dans la GUI DLC (plus simple en single-animal)
-- le fine-tuning ou l'entraînement d'un modèle custom
-- l'inspection visuelle d'une arène isolée pour debug
+(Le chemin A — multi-animal sur vidéo entière + assign_arenas — n'utilise pas
+crop_arenes.)
 
 Lit le `metadata.yaml` de la session pour récupérer le chemin de la vidéo
-source et les coordonnées des arènes, puis utilise ffmpeg pour extraire
-chaque ROI dans une vidéo séparée.
+source et les coordonnées des arènes (ou retombe sur les
+`default_arenes_coords` de `pipeline_config.yaml`), puis utilise ffmpeg
+pour extraire chaque ROI dans une vidéo séparée.
 
 Convention de nommage des sorties :
     data/cropped/<session_id>/<session_id>_<arene_id>.mp4
@@ -24,9 +24,9 @@ Les arènes vides (mouse_id == null) sont ignorées.
 
 Usage:
     python scripts/crop_arenes.py <session_id>
-
-Exemple:
-    python scripts/crop_arenes.py OF-M1-20251010-V01
+    python scripts/crop_arenes.py <s1> <s2> <s3>     # plusieurs sessions
+    python scripts/crop_arenes.py --all              # toutes les sessions
+    python scripts/crop_arenes.py --all-new          # uniquement celles sans crop
 
 Requirements:
     - ffmpeg installé et accessible dans le PATH
