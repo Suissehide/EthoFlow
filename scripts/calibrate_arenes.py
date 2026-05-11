@@ -78,7 +78,8 @@ def extract_frame(video_path: Path, frame_idx: int | None) -> "cv2.Mat":
     return frame
 
 
-WINDOW = "Calibration arenes — clic-glisser, U=annuler, ENTREE=valider, ESC=quitter"
+# NB: pas de caractere non-ASCII ici, sinon OpenCV affiche du mojibake sur Windows
+WINDOW = "Calibration arenes - drag to draw, U=undo, R=reset, ENTER=ok, ESC=cancel"
 
 # Couleurs BGR pour chaque arène (visuellement distinctes)
 ARENA_COLORS = [
@@ -110,14 +111,15 @@ def _render(frame, rects, drag, n_target):
         next_color = ARENA_COLORS[len(rects) % len(ARENA_COLORS)]
         cv2.rectangle(display, (x0, y0), (x1, y1), next_color, 1, cv2.LINE_AA)
 
-    # Bannière statut en haut
+    # Banniere statut en haut (pas d'UTF-8 non-ASCII : cv2.putText n'affiche
+    # qu'ASCII proprement)
     n = len(rects)
     if n < n_target:
-        msg = f"Dessine A{n + 1}  ({n}/{n_target})"
+        msg = f"Draw A{n + 1}  ({n}/{n_target})"
         bg = (40, 40, 40)
         fg = ARENA_COLORS[n % len(ARENA_COLORS)]
     else:
-        msg = f"OK ({n}/{n_target}) — ENTREE pour valider, U pour annuler le dernier"
+        msg = f"OK ({n}/{n_target}) - ENTER to validate, U to undo last"
         bg = (0, 80, 0)
         fg = (200, 255, 200)
 
