@@ -87,6 +87,13 @@ def load_config_pointer() -> str:
     return CONFIG_POINTER.read_text().strip()
 
 
+def load_vame_config() -> dict:
+    """vame-py 0.13 attend un config: dict (pas un chemin) dans la plupart des appels."""
+    import vame
+    path = load_config_pointer()
+    return vame.read_config(path)
+
+
 def detect_pose_ref_index(h5_path: Path) -> list[int]:
     """Trouve les indices de nose et tail_base parmi les keypoints du .h5."""
     import pandas as pd
@@ -141,13 +148,20 @@ def cmd_setup(args) -> None:
     poses = [str(p) for _, p in pairs]
 
     print(f"\nCréation du projet VAME '{args.project_name}' dans {VAME_PROJECTS_DIR}...")
-    config_path = vame.init_new_project(
-        project=args.project_name,
-        videos=videos,
+    # vame-py 0.13 : init_new_project retourne (config_path, config_dict)
+    result = vame.init_new_project(
+        project_name=args.project_name,
         poses_estimations=poses,
+        source_software="DeepLabCut",
         working_directory=str(VAME_PROJECTS_DIR),
-        videotype=".mp4",
+        videos=videos,
+        video_type=".mp4",
     )
+    # Compatibilité défensive : ancienne API renvoyait juste un chemin
+    if isinstance(result, tuple):
+        config_path = result[0]
+    else:
+        config_path = result
     save_config_pointer(config_path)
     print(f"\n✅ Projet VAME créé.\n   config.yaml : {config_path}")
     print("\nLe `config.yaml` contient les hyperparamètres du modèle. Tu peux\n"
@@ -170,7 +184,7 @@ def cmd_align(args) -> None:
     """
     import vame
     import pandas as pd
-    config = load_config_pointer()
+    config = load_vame_config()
 
     pairs = find_pairs(VAME_INPUT_DIR, CROPPED_DIR)
     df = pd.read_hdf(pairs[0][1])
@@ -199,35 +213,33 @@ def cmd_align(args) -> None:
 
 def cmd_trainset(args) -> None:
     import vame
-    vame.create_trainset(load_config_pointer())
+    vame.create_trainset(load_vame_config())
     print("\n✅ Trainset créé. Étape suivante : python scripts/run_vame.py train")
 
 
 def cmd_train(args) -> None:
     import vame
-    config = load_config_pointer()
     print("Entraînement du VAE — peut prendre plusieurs heures sur GPU.")
     print("Les hyperparamètres sont dans le config.yaml du projet VAME.")
-    vame.train_model(config)
+    vame.train_model(load_vame_config())
     print("\n✅ Entraînement terminé.")
 
 
 def cmd_evaluate(args) -> None:
     import vame
-    vame.evaluate_model(load_config_pointer())
+    vame.evaluate_model(load_vame_config())
     print("\n✅ Évaluation terminée — vois les figures dans le dossier du projet.")
 
 
 def cmd_segment(args) -> None:
     """vame-py >= 0.x : `pose_segmentation` renommée en `segment_session`."""
     import vame
-    config = load_config_pointer()
     print("Segmentation des poses en motifs comportementaux...")
-    vame.segment_session(config)
+    vame.segment_session(load_vame_config())
     print("\n✅ Segmentation terminée.")
     print("\nÉtapes optionnelles :")
-    print(f'  - python -c "import vame; vame.motif_videos(\\"{config}\\", videoType=\\".mp4\\")"')
-    print(f'  - python -c "import vame; vame.community(\\"{config}\\")"')
+    print(f'  - python -c "import vame; vame.motif_videos(vame.read_config(\\"{load_config_pointer()}\\"))"')
+    print(f'  - python -c "import vame; vame.community(vame.read_config(\\"{load_config_pointer()}\\"))"')
 
 
 def cmd_info(args) -> None:
