@@ -55,3 +55,4 @@ Thumbs.db
 
 # Docker
 .docker/
+.vame_config_path
