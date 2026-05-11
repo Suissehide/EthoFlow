@@ -156,16 +156,45 @@ def cmd_setup(args) -> None:
 
 
 def cmd_align(args) -> None:
+    """
+    vame-py >= 0.x : remplacé par `preprocessing` qui regroupe alignement
+    égocentrique + filtrage outliers + lissage. Signature probable :
+        vame.preprocessing(
+            config,
+            centered_reference_keypoint=<nom kp queue>,
+            orientation_reference_keypoint=<nom kp nez>,
+        )
+    Si la signature diffère sur ta version, lance :
+        python -c "import vame; help(vame.preprocessing)"
+    et corrige les noms d'arguments dans la fonction ci-dessous.
+    """
     import vame
+    import pandas as pd
     config = load_config_pointer()
-    # Le pose_ref_index est calé sur le premier .h5 trouvé (tous les fichiers
-    # partagent la même structure de keypoints en sortie SuperAnimal)
+
     pairs = find_pairs(VAME_INPUT_DIR, CROPPED_DIR)
-    pose_ref_index = detect_pose_ref_index(pairs[0][1])
-    print(f"\nAlignement égocentrique avec pose_ref_index = {pose_ref_index}...")
-    vame.egocentric_alignment(config, pose_ref_index=pose_ref_index)
-    print("\n✅ Alignement terminé. Étape suivante : "
-          "python scripts/run_vame.py trainset")
+    df = pd.read_hdf(pairs[0][1])
+    bp = df.columns.get_level_values("bodyparts").unique().tolist()
+
+    def find(candidates, default):
+        for name in candidates:
+            if name in bp:
+                return name
+        return default
+
+    nose_kp = find(["nose", "Nose", "Snout", "snout"], bp[0])
+    tail_kp = find(["tail_base", "tailbase", "Tailbase", "TailBase", "tail"],
+                   bp[len(bp) // 2])
+
+    print(f"  → keypoints détectés : {bp}")
+    print(f"  → reference keypoints : center={tail_kp}, orientation={nose_kp}")
+    vame.preprocessing(
+        config,
+        centered_reference_keypoint=tail_kp,
+        orientation_reference_keypoint=nose_kp,
+    )
+    print("\n✅ Preprocessing (alignement + filtrage) terminé. "
+          "Étape suivante : python scripts/run_vame.py trainset")
 
 
 def cmd_trainset(args) -> None:
@@ -190,14 +219,15 @@ def cmd_evaluate(args) -> None:
 
 
 def cmd_segment(args) -> None:
+    """vame-py >= 0.x : `pose_segmentation` renommée en `segment_session`."""
     import vame
     config = load_config_pointer()
     print("Segmentation des poses en motifs comportementaux...")
-    vame.pose_segmentation(config)
+    vame.segment_session(config)
     print("\n✅ Segmentation terminée.")
     print("\nÉtapes optionnelles :")
-    print("  - python -c 'import vame; vame.motif_videos(\"%s\", videoType=\".mp4\")'" % config)
-    print("  - python -c 'import vame; vame.community(\"%s\", show_umap=True)'" % config)
+    print(f'  - python -c "import vame; vame.motif_videos(\\"{config}\\", videoType=\\".mp4\\")"')
+    print(f'  - python -c "import vame; vame.community(\\"{config}\\")"')
 
 
 def cmd_info(args) -> None:
