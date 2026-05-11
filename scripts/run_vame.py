@@ -202,12 +202,27 @@ def cmd_align(args) -> None:
 
     print(f"  → keypoints détectés : {bp}")
     print(f"  → reference keypoints : center={tail_kp}, orientation={nose_kp}")
+
+    steps = {
+        "run_lowconf_cleaning":     not args.no_lowconf_cleaning,
+        "run_egocentric_alignment": not args.no_alignment,
+        "run_outlier_cleaning":     not args.no_outlier_cleaning,
+        "run_savgol_filtering":     not args.no_savgol,
+        "run_rescaling":            args.rescaling,
+    }
+    enabled = [k for k, v in steps.items() if v]
+    skipped = [k for k, v in steps.items() if not v]
+    print(f"  → étapes actives : {enabled}")
+    if skipped:
+        print(f"  → étapes désactivées : {skipped}")
+
     vame.preprocessing(
         config,
         centered_reference_keypoint=tail_kp,
         orientation_reference_keypoint=nose_kp,
+        **steps,
     )
-    print("\n✅ Preprocessing (alignement + filtrage) terminé. "
+    print("\n✅ Preprocessing terminé. "
           "Étape suivante : python scripts/run_vame.py trainset")
 
 
@@ -283,7 +298,19 @@ def main() -> None:
     p_setup.add_argument("--cropped-dir", default=None,
                          help="Dossier des vidéos croppées (défaut: data/cropped/)")
 
-    sub.add_parser("align",    help="Alignement égocentrique")
+    p_align = sub.add_parser("align", help="Preprocessing VAME (alignement + nettoyage)")
+    p_align.add_argument("--no-lowconf-cleaning", action="store_true",
+                         help="Skip le nettoyage low-confidence (seuil 0.99 par défaut, "
+                              "trop strict pour SuperAnimal — déjà fait par notre pipeline)")
+    p_align.add_argument("--no-alignment", action="store_true",
+                         help="Skip l'alignement égocentrique")
+    p_align.add_argument("--no-outlier-cleaning", action="store_true",
+                         help="Skip le nettoyage des outliers IQR")
+    p_align.add_argument("--no-savgol", action="store_true",
+                         help="Skip le filtre Savitzky-Golay (qui crashe sur NaN — "
+                              "à activer si trop de trous)")
+    p_align.add_argument("--rescaling", action="store_true",
+                         help="Activer le rescaling (désactivé par défaut)")
     sub.add_parser("trainset", help="Création du trainset")
     sub.add_parser("train",    help="Entraînement du VAE (long)")
     sub.add_parser("evaluate", help="Évaluation du modèle")
