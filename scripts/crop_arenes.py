@@ -131,8 +131,63 @@ def crop_arenes(session_id: str) -> None:
           f"{n_skipped} ignorée(s) — {output_dir}")
 
 
+def list_all_sessions() -> list[str]:
+    """Sessions présentes dans data/raw/."""
+    if not RAW_DIR.exists():
+        return []
+    return sorted(
+        d.name for d in RAW_DIR.iterdir()
+        if d.is_dir() and not d.name.startswith(".")
+    )
+
+
+def is_cropped(session_id: str) -> bool:
+    """Vrai si data/cropped/<session>/ contient déjà au moins une .mp4."""
+    out = CROPPED_DIR / session_id
+    return out.exists() and any(out.glob("*.mp4"))
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print(__doc__)
+    import argparse
+    parser = argparse.ArgumentParser(description="Crop des arènes — single ou batch.")
+    parser.add_argument("session_ids", nargs="*",
+                        help="Un ou plusieurs session_id")
+    parser.add_argument("--all", action="store_true",
+                        help="Traiter toutes les sessions de data/raw/")
+    parser.add_argument("--all-new", action="store_true",
+                        help="Traiter uniquement les sessions sans crop existant")
+    args = parser.parse_args()
+
+    if args.all:
+        sessions = list_all_sessions()
+    elif args.all_new:
+        sessions = [s for s in list_all_sessions() if not is_cropped(s)]
+    elif args.session_ids:
+        sessions = list(args.session_ids)
+    else:
+        parser.print_help()
         sys.exit(1)
-    crop_arenes(sys.argv[1])
+
+    if not sessions:
+        print("Aucune session à traiter.")
+        sys.exit(0)
+
+    if len(sessions) > 1:
+        print(f"{len(sessions)} session(s) à cropper : {sessions}\n")
+
+    n_ok = n_fail = 0
+    for i, session_id in enumerate(sessions, 1):
+        if len(sessions) > 1:
+            print(f"\n{'='*60}\n[{i}/{len(sessions)}] {session_id}\n{'='*60}")
+        try:
+            crop_arenes(session_id)
+            n_ok += 1
+        except (FileNotFoundError, ValueError, RuntimeError, subprocess.CalledProcessError) as e:
+            print(f"❌ {session_id} : {e}", file=sys.stderr)
+            n_fail += 1
+            continue
+
+    if len(sessions) > 1:
+        print(f"\n✅ Batch terminé : {n_ok} OK, {n_fail} échec(s) sur {len(sessions)}")
+    if n_fail > 0:
+        sys.exit(1)

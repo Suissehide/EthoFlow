@@ -33,7 +33,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
+CROPPED_DIR = ROOT / "data" / "cropped"
 DLC_OUTPUT_DIR = ROOT / "data" / "dlc-output"
+VAME_INPUT_DIR = ROOT / "data" / "vame-input"
 PIPELINE_CONFIG = ROOT / "configs" / "pipeline_config.yaml"
 
 
@@ -114,6 +116,110 @@ def run_superanimal(
           f"{session_id}` pour splitter par arène.")
 
 
+def run_superanimal_cropped(
+    session_id: str,
+    superanimal_name: str = "superanimal_topviewmouse",
+    model_name: str = "hrnet_w32",
+    detector_name: str = "fasterrcnn_resnet50_fpn_v2",
+    video_adapt: bool = False,
+    likelihood_threshold: float = 0.6,
+    interp_limit: int = 25,
+) -> None:
+    """
+    Inférence SuperAnimal single-animal sur les vidéos déjà croppées d'une session.
+
+    Pré-requis : avoir lancé `crop_arenes.py <session>` avant, pour avoir
+    `data/cropped/<session>/<session>_A*.mp4`.
+
+    Pour chaque vidéo croppée :
+    1. Inférence SuperAnimal avec max_individuals=1 (pas de tracking inter-animal,
+       beaucoup plus simple)
+    2. Aplatissement du h5 (suppression du niveau 'individuals')
+    3. Nettoyage (low-lk → NaN, interpolation des trous courts)
+    4. Écriture dans data/vame-input/<session>/<session>_<arene>.h5
+
+    Pas d'`assign_arenas` à faire ensuite — la sortie va directement à VAME.
+    """
+    try:
+        import deeplabcut
+    except ImportError:
+        print(
+            "❌ DeepLabCut non installé. Active l'env conda 'dlc' :\n"
+            "   conda activate dlc",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    import pandas as pd
+    # Réutilise la fonction de nettoyage d'assign_arenas
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from assign_arenas import clean_individual
+
+    cropped_dir = CROPPED_DIR / session_id
+    videos = sorted(cropped_dir.glob(f"{session_id}_A*.mp4"))
+    if not videos:
+        raise FileNotFoundError(
+            f"Aucune vidéo croppée dans {cropped_dir}.\n"
+            f"   Lance d'abord (env ethoflow) :\n"
+            f"   conda activate ethoflow && python scripts/crop_arenes.py {session_id}"
+        )
+
+    print(f"Vidéos croppées trouvées ({len(videos)}) : {[v.name for v in videos]}")
+
+    # Sortie temporaire des h5 bruts (sera nettoyée et déplacée après)
+    temp_dest = DLC_OUTPUT_DIR / session_id / "cropped-raw"
+    temp_dest.mkdir(parents=True, exist_ok=True)
+
+    print(f"SuperAnimal single-animal (max_individuals=1)")
+    print(f"  modèle    : {model_name}")
+    print(f"  détecteur : {detector_name}")
+
+    deeplabcut.video_inference_superanimal(
+        [str(v) for v in videos],
+        superanimal_name=superanimal_name,
+        model_name=model_name,
+        detector_name=detector_name,
+        videotype="mp4",
+        video_adapt=video_adapt,
+        max_individuals=1,
+        dest_folder=str(temp_dest),
+    )
+
+    # Post-traitement : flatten + clean + déplacement vers vame-input
+    out_dir = VAME_INPUT_DIR / session_id
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"\nPost-traitement → {out_dir}\n")
+
+    for video in videos:
+        # Cherche le h5 produit par DLC pour cette vidéo (préfixe = video.stem)
+        h5_candidates = list(temp_dest.glob(f"{video.stem}*.h5"))
+        h5_candidates = [c for c in h5_candidates if "filtered" not in c.stem]
+        if not h5_candidates:
+            print(f"  ⚠️  {video.stem} : pas de .h5 produit")
+            continue
+        produced_h5 = h5_candidates[0]
+        df = pd.read_hdf(produced_h5)
+
+        # Aplatissement : drop le niveau 'individuals' (max 1 individu)
+        if "individuals" in df.columns.names:
+            df = df.droplevel("individuals", axis=1)
+
+        # Nettoyage
+        df_clean, stats = clean_individual(df, likelihood_threshold, interp_limit)
+
+        # Nom de sortie : <session>_<arene>.h5 (arene = suffixe de video.stem)
+        arena_suffix = video.stem.rsplit("_", 1)[-1]  # "..._A1" → "A1"
+        out_path = out_dir / f"{session_id}_{arena_suffix}.h5"
+        df_clean.to_hdf(out_path, key="df", mode="w")
+
+        total = stats.get("total_slots") or 1
+        pct_useful = 100 - 100 * stats["n_remaining_nan"] / total
+        print(f"  ✓ {arena_suffix} → {out_path.name}  "
+              f"({pct_useful:.1f}% utilisables après nettoyage)")
+
+    print(f"\n✅ Single-animal cropped terminé : {out_dir}")
+
+
 def run_custom(session_id: str) -> None:
     try:
         import deeplabcut
@@ -157,12 +263,22 @@ if __name__ == "__main__":
                         help="Traiter toutes les sessions de data/raw/ qui n'ont pas encore de sortie DLC")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Ignorer les sessions qui ont déjà une sortie DLC (utile en combinaison avec une liste)")
-    parser.add_argument("--mode", choices=["superanimal", "custom"], default="superanimal")
+    parser.add_argument("--mode",
+                        choices=["superanimal", "single-animal", "custom"],
+                        default="superanimal",
+                        help="superanimal: multi-animal sur vidéo entière ; "
+                             "single-animal: SuperAnimal sur vidéos déjà croppées "
+                             "(une souris par vidéo, sortie directe vers vame-input/) ; "
+                             "custom: modèle DLC custom configuré dans pipeline_config.yaml")
     parser.add_argument("--superanimal-name", default="superanimal_topviewmouse")
     parser.add_argument("--superanimal-model", default="hrnet_w32")
     parser.add_argument("--superanimal-detector", default="fasterrcnn_resnet50_fpn_v2")
     parser.add_argument("--video-adapt", action="store_true",
                         help="Active le fine-tuning court (plus précis, plus lent)")
+    parser.add_argument("--likelihood-threshold", type=float, default=0.6,
+                        help="(mode single-animal) seuil de likelihood pour le nettoyage")
+    parser.add_argument("--interp-limit", type=int, default=25,
+                        help="(mode single-animal) taille max d'un trou interpolable, en frames")
     args = parser.parse_args()
 
     # Collecte de la liste de sessions à traiter
@@ -194,6 +310,16 @@ if __name__ == "__main__":
                     model_name=args.superanimal_model,
                     detector_name=args.superanimal_detector,
                     video_adapt=args.video_adapt,
+                )
+            elif args.mode == "single-animal":
+                run_superanimal_cropped(
+                    session_id,
+                    superanimal_name=args.superanimal_name,
+                    model_name=args.superanimal_model,
+                    detector_name=args.superanimal_detector,
+                    video_adapt=args.video_adapt,
+                    likelihood_threshold=args.likelihood_threshold,
+                    interp_limit=args.interp_limit,
                 )
             else:
                 run_custom(session_id)
