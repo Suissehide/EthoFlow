@@ -212,7 +212,8 @@ def run_superanimal_cropped(
         # Nom de sortie : <session>_<arene>.h5 (arene = suffixe de video.stem)
         arena_suffix = video.stem.rsplit("_", 1)[-1]  # "..._A1" → "A1"
         out_path = out_dir / f"{session_id}_{arena_suffix}.h5"
-        df_clean.to_hdf(out_path, key="df", mode="w")
+        # key="df_with_missing" est la convention DLC, requise par VAME / movement
+        df_clean.to_hdf(out_path, key="df_with_missing", mode="w", format="table")
 
         total = stats.get("total_slots") or 1
         pct_useful = 100 - 100 * stats["n_remaining_nan"] / total

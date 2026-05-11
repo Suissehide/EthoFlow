@@ -104,7 +104,8 @@ def post_process(
         df_clean, stats = clean_individual(df, likelihood_threshold, interp_limit)
 
         out_path = out_dir / f"{session_id}_{arena_id}.h5"
-        df_clean.to_hdf(out_path, key="df", mode="w")
+        # key="df_with_missing" est la convention DLC, requise par VAME / movement
+        df_clean.to_hdf(out_path, key="df_with_missing", mode="w", format="table")
 
         total = stats.get("total_slots") or 1
         pct_useful = 100 - 100 * stats["n_remaining_nan"] / total

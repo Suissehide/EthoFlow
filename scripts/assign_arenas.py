@@ -307,7 +307,8 @@ def assign_arenas(
         mouse_id = ar.get("mouse_id")
         mouse_label = f"M{mouse_id:02d}" if isinstance(mouse_id, int) else "—"
         out_path = session_out_dir / f"{session_id}_{ar_id}.h5"
-        sub_clean.to_hdf(out_path, key="df", mode="w")
+        # key="df_with_missing" est la convention DLC, requise par VAME / movement
+        sub_clean.to_hdf(out_path, key="df_with_missing", mode="w", format="table")
         n_assigned += 1
 
         # Détail des sources : quels individus ont contribué à cette arène
