@@ -143,6 +143,28 @@ def cmd_setup(args) -> None:
     if len(pairs) > 5:
         print(f"  ... (+{len(pairs) - 5} autres)")
 
+    # Auto-rekey : VAME (via movement) attend la clé HDF5 'df_with_missing'.
+    # Les .h5 produits avant le fix avaient key='df' et VAME crashe dessus.
+    # On corrige en place avant d'appeler init_new_project.
+    if not args.no_auto_rekey:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        try:
+            from rekey_h5 import is_already_correct, rekey
+        except ImportError as e:
+            print(f"⚠️  Impossible d'importer rekey_h5 ({e}), skip auto-rekey",
+                  file=sys.stderr)
+        else:
+            to_fix = [h for _, h in pairs if not is_already_correct(h)]
+            if to_fix:
+                print(f"\n🔧 Auto-rekey : {len(to_fix)} fichier(s) à corriger "
+                      f"(ancienne clé 'df' → 'df_with_missing')")
+                for h in to_fix:
+                    status = rekey(h)
+                    if status == "rekeyed":
+                        print(f"   ✓ {h.name}")
+                    else:
+                        print(f"   ⚠️  {h.name} : {status}", file=sys.stderr)
+
     VAME_PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
 
     # Refus d'écraser un projet existant — sauf avec --force, qui supprime
@@ -348,6 +370,9 @@ def main() -> None:
                          help="Dossier des vidéos croppées (défaut: data/cropped/)")
     p_setup.add_argument("--force", action="store_true",
                          help="Supprimer un projet du même nom s'il existe déjà")
+    p_setup.add_argument("--no-auto-rekey", action="store_true",
+                         help="Ne pas re-clé-er automatiquement les .h5 à la "
+                              "clé 'df_with_missing' (par défaut auto-corrigé)")
     copy_grp = p_setup.add_mutually_exclusive_group()
     copy_grp.add_argument("--copy-videos", dest="copy_videos",
                           action="store_const", const=True, default=None,
