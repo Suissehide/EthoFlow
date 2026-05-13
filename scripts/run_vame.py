@@ -144,6 +144,22 @@ def cmd_setup(args) -> None:
         print(f"  ... (+{len(pairs) - 5} autres)")
 
     VAME_PROJECTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # Refus d'écraser un projet existant — sauf avec --force, qui supprime
+    # tout le dossier (utile pour rattraper une tentative ratée qui a laissé
+    # un dossier sans config.yaml)
+    project_dir = VAME_PROJECTS_DIR / args.project_name
+    if project_dir.exists():
+        if not args.force:
+            print(f"❌ Projet déjà présent : {project_dir}\n"
+                  f"   Choisis un autre --project-name, ou relance avec --force "
+                  f"pour écraser (le dossier sera supprimé).",
+                  file=sys.stderr)
+            sys.exit(1)
+        import shutil
+        print(f"⚠️  --force : suppression de {project_dir}")
+        shutil.rmtree(project_dir)
+
     videos = [str(v) for v, _ in pairs]
     poses = [str(p) for _, p in pairs]
 
@@ -316,6 +332,8 @@ def main() -> None:
                          help="Dossier des .h5 (défaut: data/vame-input/)")
     p_setup.add_argument("--cropped-dir", default=None,
                          help="Dossier des vidéos croppées (défaut: data/cropped/)")
+    p_setup.add_argument("--force", action="store_true",
+                         help="Supprimer un projet du même nom s'il existe déjà")
 
     p_align = sub.add_parser("align", help="Preprocessing VAME (alignement + nettoyage)")
     p_align.add_argument("--no-lowconf-cleaning", action="store_true",
