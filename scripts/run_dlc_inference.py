@@ -57,18 +57,36 @@ def get_source_video(metadata: dict) -> Path:
     return path
 
 
-def is_processed(session_id: str) -> bool:
-    """Vrai si une sortie DLC (.h5) existe déjà pour cette session."""
+def is_processed(session_id: str, mode: str = "superanimal") -> bool:
+    """Vrai si une sortie DLC existe déjà pour cette session, dans le mode donné.
+
+    - superanimal (multi-animal) : .h5 directement dans dlc-output/<session>/
+    - single-animal               : .h5 dans dlc-output/<session>/cropped-raw/
+                                    OU .h5 finaux dans vame-input/<session>/
+    - custom                      : .h5 dans dlc-output/<session>/
+    """
+    if mode == "single-animal":
+        cropped_raw = DLC_OUTPUT_DIR / session_id / "cropped-raw"
+        if cropped_raw.exists() and any(cropped_raw.glob("*.h5")):
+            return True
+        vame_session = VAME_INPUT_DIR / session_id
+        if vame_session.exists() and any(vame_session.glob(f"{session_id}_A*.h5")):
+            return True
+        return False
+
+    # multi-animal / custom : .h5 directement à la racine de dlc-output/<session>/
     out = DLC_OUTPUT_DIR / session_id
-    return out.exists() and any(out.glob("*.h5"))
+    if not out.exists():
+        return False
+    return any(f.suffix == ".h5" for f in out.iterdir() if f.is_file())
 
 
-def list_unprocessed_sessions() -> list[str]:
+def list_unprocessed_sessions(mode: str = "superanimal") -> list[str]:
     if not RAW_DIR.exists():
         return []
     return sorted(
         d.name for d in RAW_DIR.iterdir()
-        if d.is_dir() and not d.name.startswith(".") and not is_processed(d.name)
+        if d.is_dir() and not d.name.startswith(".") and not is_processed(d.name, mode)
     )
 
 
@@ -288,17 +306,21 @@ if __name__ == "__main__":
                              "plusieurs runs sans écraser.")
     args = parser.parse_args()
 
-    # Collecte de la liste de sessions à traiter
+    # Collecte de la liste de sessions à traiter (mode-aware : pour
+    # single-animal, on regarde cropped-raw/ ; pour multi-animal, on regarde
+    # le .h5 à la racine de dlc-output/<session>/)
     if args.all:
-        sessions = list_unprocessed_sessions()
+        sessions = list_unprocessed_sessions(args.mode)
         if not sessions:
-            print("Aucune session à traiter (toutes ont déjà une sortie DLC).")
+            print(f"Aucune session à traiter en mode '{args.mode}' "
+                  f"(toutes ont déjà une sortie).")
             sys.exit(0)
-        print(f"{len(sessions)} session(s) non traitée(s) : {sessions}\n")
+        print(f"{len(sessions)} session(s) non traitée(s) en mode "
+              f"'{args.mode}' : {sessions}\n")
     elif args.session_ids:
         sessions = list(args.session_ids)
         if args.skip_existing:
-            sessions = [s for s in sessions if not is_processed(s)]
+            sessions = [s for s in sessions if not is_processed(s, args.mode)]
             if not sessions:
                 print("Toutes les sessions demandées sont déjà traitées.")
                 sys.exit(0)
