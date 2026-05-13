@@ -283,8 +283,62 @@ def cmd_align(args) -> None:
           "Étape suivante : python scripts/run_vame.py trainset")
 
 
+def _ensure_position_processed(project_path: Path) -> None:
+    """
+    VAME's create_trainset attend une variable 'position_processed' dans chaque
+    .nc de data/processed/. Cette variable est normalement créée par la dernière
+    étape de preprocessing (savgol_filtering en général). Si on a désactivé
+    savgol (pour éviter les crashes sur NaN), cette variable manque.
+
+    On la fabrique ici à partir de 'position_egocentric_aligned' en bouchant
+    les NaN (forward-fill + backward-fill + 0 pour les bords).
+    """
+    import shutil
+    import xarray as xr
+
+    processed_dir = project_path / "data" / "processed"
+    if not processed_dir.exists():
+        return
+
+    n_fixed = 0
+    for nc_path in sorted(processed_dir.glob("*.nc")):
+        with xr.open_dataset(nc_path) as ds:
+            if "position_processed" in ds.data_vars:
+                continue
+            if "position_egocentric_aligned" not in ds.data_vars:
+                print(f"  ⚠️  {nc_path.name} : ni 'position_processed' ni "
+                      f"'position_egocentric_aligned', skip", file=sys.stderr)
+                continue
+            aligned = ds["position_egocentric_aligned"]
+            # Remplit dans cet ordre : ffill → bfill → 0 (pour tout NaN au début)
+            filled = aligned.ffill(dim="time").bfill(dim="time").fillna(0.0)
+            new_ds = ds.assign(position_processed=filled).load()
+
+        # to_netcdf ne peut pas écrire dans un fichier ouvert : écris dans tmp
+        # puis remplace.
+        tmp = nc_path.with_suffix(".nc.tmp")
+        new_ds.to_netcdf(tmp)
+        new_ds.close()
+        shutil.move(str(tmp), str(nc_path))
+        n_fixed += 1
+        print(f"  ✓ {nc_path.name} : position_processed créé "
+              f"(NaN remplis avec ffill+bfill+0)")
+
+    if n_fixed:
+        print(f"\n→ {n_fixed} fichier(s) augmenté(s) avec position_processed.")
+
+
 def cmd_trainset(args) -> None:
     import vame
+    config_path = load_config_pointer()
+    project_path = Path(config_path).parent
+
+    # Bouche le trou si savgol n'a pas tourné (cas typique : --no-savgol pour
+    # éviter le crash sur NaN). Idempotent — ne fait rien si position_processed
+    # existe déjà.
+    print("Vérification de 'position_processed' dans les .nc preprocessés...")
+    _ensure_position_processed(project_path)
+
     vame.create_trainset(load_vame_config())
     print("\n✅ Trainset créé. Étape suivante : python scripts/run_vame.py train")
 
