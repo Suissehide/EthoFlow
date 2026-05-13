@@ -185,7 +185,8 @@ def select_arenas(frame, n_target: int = 4) -> list[tuple[int, int, int, int]]:
     return rects
 
 
-def save_coords(coords: dict[str, list[int]]) -> None:
+def save_coords_default(coords: dict[str, list[int]]) -> None:
+    """Sauve dans configs/pipeline_config.yaml (default pour toutes les sessions)."""
     config = {}
     if CONFIG_PATH.exists():
         with open(CONFIG_PATH) as f:
@@ -194,7 +195,31 @@ def save_coords(coords: dict[str, list[int]]) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CONFIG_PATH, "w") as f:
         yaml.dump(config, f, sort_keys=False, allow_unicode=True)
-    print(f"\n✅ Coords sauvées dans {CONFIG_PATH}")
+    print(f"\n✅ Coords sauvées dans {CONFIG_PATH} (default global)")
+    for k, v in coords.items():
+        print(f"   {k}: {v}")
+
+
+def save_coords_to_session(session_id: str, coords: dict[str, list[int]]) -> None:
+    """Sauve dans la metadata.yaml de la session — override le default pour celle-ci uniquement."""
+    meta_path = RAW_DIR / session_id / "metadata.yaml"
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Metadata absent : {meta_path}")
+    with open(meta_path) as f:
+        meta = yaml.safe_load(f) or {}
+
+    arenes = meta.get("arenes", [])
+    if not arenes:
+        raise ValueError(f"Pas d'arènes dans {meta_path}")
+
+    for ar in arenes:
+        ar_id = ar.get("id")
+        if ar_id in coords:
+            ar["coords"] = coords[ar_id]
+
+    with open(meta_path, "w") as f:
+        yaml.dump(meta, f, sort_keys=False, allow_unicode=True, default_flow_style=False)
+    print(f"\n✅ Coords sauvées dans {meta_path} (override local pour {session_id})")
     for k, v in coords.items():
         print(f"   {k}: {v}")
 
@@ -205,6 +230,11 @@ def main():
     parser.add_argument("--session", help="Session ID (utilise sa source_video)")
     parser.add_argument("--frame", type=int, default=None,
                         help="Numéro de frame à afficher (défaut : milieu)")
+    parser.add_argument("--save-to", choices=["default", "session"], default="default",
+                        help="Où sauver : 'default' = configs/pipeline_config.yaml "
+                             "(utilisé par toutes les sessions sans coords) ; "
+                             "'session' = metadata.yaml de --session (override local). "
+                             "Utile quand UNE session a une calibration différente.")
     args = parser.parse_args()
 
     try:
@@ -229,7 +259,18 @@ def main():
         sys.exit(1)
 
     coords = {f"A{i+1}": [int(v) for v in roi] for i, roi in enumerate(rois)}
-    save_coords(coords)
+
+    if args.save_to == "session":
+        if not args.session:
+            print("❌ --save-to session nécessite --session <id>", file=sys.stderr)
+            sys.exit(1)
+        try:
+            save_coords_to_session(args.session, coords)
+        except (FileNotFoundError, ValueError) as e:
+            print(f"❌ {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        save_coords_default(coords)
 
 
 if __name__ == "__main__":
