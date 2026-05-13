@@ -183,12 +183,17 @@ def cmd_align(args) -> None:
     et corrige les noms d'arguments dans la fonction ci-dessous.
     """
     import vame
-    import pandas as pd
     config = load_vame_config()
 
-    pairs = find_pairs(VAME_INPUT_DIR, CROPPED_DIR)
-    df = pd.read_hdf(pairs[0][1])
-    bp = df.columns.get_level_values("bodyparts").unique().tolist()
+    # Les keypoints sont déjà dans le config.yaml du projet (copiés par
+    # init_new_project), pas besoin de relire les .h5 originaux. Du coup
+    # cmd_align ne dépend plus du dossier vame-input, ce qui simplifie
+    # l'organisation quand on a plusieurs runs DLC distincts.
+    bp = list(config.get("keypoints") or [])
+    if not bp:
+        print("❌ Pas de 'keypoints' dans le config.yaml du projet VAME.",
+              file=sys.stderr)
+        sys.exit(1)
 
     def find(candidates, default):
         for name in candidates:
@@ -258,15 +263,29 @@ def cmd_segment(args) -> None:
 
 
 def cmd_info(args) -> None:
-    if not CONFIG_POINTER.exists():
-        print("Pas de projet VAME initialisé.")
-        return
-    print(f"Projet VAME courant : {CONFIG_POINTER.read_text().strip()}")
-    pairs = find_pairs(VAME_INPUT_DIR, CROPPED_DIR)
-    print(f"\nPaires (vidéo, h5) qui seraient utilisées par un nouveau setup : "
-          f"{len(pairs)}")
-    sessions = {p[1].stem.rsplit('_', 1)[0] for p in pairs}
-    print(f"Sessions distinctes : {len(sessions)}")
+    if CONFIG_POINTER.exists():
+        config_path = CONFIG_POINTER.read_text().strip()
+        print(f"Projet VAME courant : {config_path}")
+        try:
+            import vame
+            cfg = vame.read_config(config_path)
+            print(f"  → {len(cfg.get('session_names') or [])} session(s) "
+                  f"importée(s) dans le projet")
+            print(f"  → {len(cfg.get('keypoints') or [])} keypoint(s)")
+        except Exception:
+            pass
+    else:
+        print("Pas de projet VAME initialisé pour le moment.")
+
+    # Scan optionnel d'un dossier vame-input (pour planifier un futur setup)
+    input_dir = Path(args.input_dir) if args.input_dir else VAME_INPUT_DIR
+    cropped_dir = Path(args.cropped_dir) if args.cropped_dir else CROPPED_DIR
+    if input_dir.exists():
+        pairs = find_pairs(input_dir, cropped_dir)
+        sessions = {p[1].stem.rsplit("_", 1)[0] for p in pairs}
+        print(f"\nDans {input_dir} :")
+        print(f"  → {len(pairs)} paire(s) (vidéo + h5) disponibles")
+        print(f"  → {len(sessions)} session(s) distincte(s)")
 
 
 def cmd_all(args) -> None:
@@ -315,7 +334,12 @@ def main() -> None:
     sub.add_parser("train",    help="Entraînement du VAE (long)")
     sub.add_parser("evaluate", help="Évaluation du modèle")
     sub.add_parser("segment",  help="Segmentation en motifs")
-    sub.add_parser("info",     help="Projet courant + diag rapide")
+
+    p_info = sub.add_parser("info", help="Projet courant + diag rapide")
+    p_info.add_argument("--input-dir", default=None,
+                        help="Scanne ce dossier pour montrer combien de paires "
+                             "seraient utilisées par un futur setup")
+    p_info.add_argument("--cropped-dir", default=None)
     sub.add_parser("all",      help="Tout enchaîner (très long)")
 
     args = parser.parse_args()
