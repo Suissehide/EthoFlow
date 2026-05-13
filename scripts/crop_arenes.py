@@ -94,6 +94,16 @@ def crop_arenes(session_id: str) -> None:
     if default_coords:
         print(f"Coords par défaut chargées depuis {CONFIG_PATH.name}")
 
+    # Offset temporel optionnel : skipper les N premières secondes (utile quand
+    # la manip commence après quelques secondes de placement des souris).
+    start_time_s = float(metadata.get("start_time_s") or 0)
+    end_time_s = metadata.get("end_time_s")
+    if start_time_s > 0:
+        print(f"⏱  start_time_s = {start_time_s}s — les premières secondes "
+              f"seront ignorées")
+    if end_time_s is not None:
+        print(f"⏱  end_time_s   = {end_time_s}s")
+
     n_cropped = n_skipped = 0
     for arene in arenes:
         arene_id = arene["id"]
@@ -115,9 +125,16 @@ def crop_arenes(session_id: str) -> None:
         output_name = f"{session_id}_{arene_id}.mp4"
         output_path = output_dir / output_name
 
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(source_video),
+        cmd = ["ffmpeg", "-y"]
+        # -ss AVANT -i : seek rapide (à la frame-clé la plus proche, suffisamment
+        # précis pour ce cas d'usage)
+        if start_time_s > 0:
+            cmd += ["-ss", str(start_time_s)]
+        cmd += ["-i", str(source_video)]
+        if end_time_s is not None:
+            duration = float(end_time_s) - start_time_s
+            cmd += ["-t", str(duration)]
+        cmd += [
             "-vf", f"crop={w}:{h}:{x}:{y}",
             "-c:v", "libx264", "-preset", "medium", "-crf", "23",
             "-c:a", "copy",

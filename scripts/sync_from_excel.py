@@ -166,6 +166,24 @@ def write_metadata(metadata: dict, dry_run: bool = False) -> Path:
     if dry_run:
         return target
 
+    # Préserver les overrides locaux ajoutés manuellement (start_time_s,
+    # end_time_s, coords par arène, etc.) qu'on ne veut pas perdre au resync.
+    if target.exists():
+        with open(target) as f:
+            existing = yaml.safe_load(f) or {}
+        for key in ("start_time_s", "end_time_s"):
+            if key in existing:
+                metadata[key] = existing[key]
+        # Préserver les coords par arène si elles ont été overridées localement
+        existing_coords = {
+            a["id"]: a.get("coords")
+            for a in existing.get("arenes", [])
+            if a.get("coords")
+        }
+        for ar in metadata["arenes"]:
+            if existing_coords.get(ar["id"]):
+                ar["coords"] = existing_coords[ar["id"]]
+
     session_dir.mkdir(parents=True, exist_ok=True)
     with open(target, "w") as f:
         yaml.dump(
