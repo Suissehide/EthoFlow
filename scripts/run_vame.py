@@ -163,6 +163,19 @@ def cmd_setup(args) -> None:
     videos = [str(v) for v, _ in pairs]
     poses = [str(p) for _, p in pairs]
 
+    # Symlink vs copy : sur Windows, les symlinks demandent des privilèges
+    # admin ou le Developer Mode — sinon on prend une OSError 1314. Par défaut
+    # on copie sur Windows et on symlinke ailleurs ; --copy-videos / --no-copy-videos
+    # forcent un choix.
+    import platform
+    if args.copy_videos is None:
+        copy_videos = (platform.system() == "Windows")
+    else:
+        copy_videos = args.copy_videos
+    if copy_videos:
+        print("ℹ️  Mode COPY (les vidéos sont copiées dans le projet, "
+              "pas de symlinks).")
+
     print(f"\nCréation du projet VAME '{args.project_name}' dans {VAME_PROJECTS_DIR}...")
     # vame-py 0.13 : init_new_project retourne (config_path, config_dict)
     result = vame.init_new_project(
@@ -172,6 +185,7 @@ def cmd_setup(args) -> None:
         working_directory=str(VAME_PROJECTS_DIR),
         videos=videos,
         video_type=".mp4",
+        copy_videos=copy_videos,
     )
     # Compatibilité défensive : ancienne API renvoyait juste un chemin
     if isinstance(result, tuple):
@@ -334,6 +348,14 @@ def main() -> None:
                          help="Dossier des vidéos croppées (défaut: data/cropped/)")
     p_setup.add_argument("--force", action="store_true",
                          help="Supprimer un projet du même nom s'il existe déjà")
+    copy_grp = p_setup.add_mutually_exclusive_group()
+    copy_grp.add_argument("--copy-videos", dest="copy_videos",
+                          action="store_const", const=True, default=None,
+                          help="Copier les vidéos dans le projet (au lieu de symlink). "
+                               "Défaut auto : copy sur Windows, symlink ailleurs.")
+    copy_grp.add_argument("--no-copy-videos", dest="copy_videos",
+                          action="store_const", const=False,
+                          help="Forcer le symlink (échouera sur Windows sans Developer Mode)")
 
     p_align = sub.add_parser("align", help="Preprocessing VAME (alignement + nettoyage)")
     p_align.add_argument("--no-lowconf-cleaning", action="store_true",
