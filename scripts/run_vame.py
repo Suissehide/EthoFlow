@@ -368,13 +368,39 @@ def cmd_segment(args) -> None:
     print(f'  - python -c "import vame; vame.community(vame.read_config(\\"{load_config_pointer()}\\"))"')
 
 
+def list_projects() -> list[Path]:
+    """Liste tous les projets VAME valides (qui ont un config.yaml)."""
+    if not VAME_PROJECTS_DIR.exists():
+        return []
+    return sorted(
+        d for d in VAME_PROJECTS_DIR.iterdir()
+        if d.is_dir() and (d / "config.yaml").exists()
+    )
+
+
+def cmd_use(args) -> None:
+    """Bascule le projet VAME courant sans toucher au projet lui-même."""
+    project_dir = VAME_PROJECTS_DIR / args.project_name
+    config_path = project_dir / "config.yaml"
+    if not config_path.exists():
+        available = [d.name for d in list_projects()]
+        print(f"❌ Projet introuvable : {project_dir}\n"
+              f"Disponibles dans {VAME_PROJECTS_DIR} : "
+              f"{available if available else 'aucun'}",
+              file=sys.stderr)
+        sys.exit(1)
+    save_config_pointer(str(config_path))
+    print(f"✅ Projet courant : {config_path}")
+
+
 def cmd_info(args) -> None:
+    current = None
     if CONFIG_POINTER.exists():
-        config_path = CONFIG_POINTER.read_text().strip()
-        print(f"Projet VAME courant : {config_path}")
+        current = CONFIG_POINTER.read_text().strip()
+        print(f"Projet VAME courant : {current}")
         try:
             import vame
-            cfg = vame.read_config(config_path)
+            cfg = vame.read_config(current)
             print(f"  → {len(cfg.get('session_names') or [])} session(s) "
                   f"importée(s) dans le projet")
             print(f"  → {len(cfg.get('keypoints') or [])} keypoint(s)")
@@ -382,6 +408,15 @@ def cmd_info(args) -> None:
             pass
     else:
         print("Pas de projet VAME initialisé pour le moment.")
+
+    # Tous les projets disponibles dans vame-projects/
+    projects = list_projects()
+    if projects:
+        print(f"\nProjets disponibles dans {VAME_PROJECTS_DIR} :")
+        for p in projects:
+            marker = "→" if current and Path(current).parent == p else " "
+            print(f"  {marker} {p.name}")
+        print("\nPour basculer : python scripts/run_vame.py use <nom>")
 
     # Scan optionnel d'un dossier vame-input (pour planifier un futur setup)
     input_dir = Path(args.input_dir) if args.input_dir else VAME_INPUT_DIR
@@ -454,11 +489,16 @@ def main() -> None:
     sub.add_parser("evaluate", help="Évaluation du modèle")
     sub.add_parser("segment",  help="Segmentation en motifs")
 
-    p_info = sub.add_parser("info", help="Projet courant + diag rapide")
+    p_info = sub.add_parser("info", help="Projet courant + liste des projets")
     p_info.add_argument("--input-dir", default=None,
                         help="Scanne ce dossier pour montrer combien de paires "
                              "seraient utilisées par un futur setup")
     p_info.add_argument("--cropped-dir", default=None)
+
+    p_use = sub.add_parser("use", help="Bascule le projet courant (sans re-créer)")
+    p_use.add_argument("project_name",
+                       help="Nom du projet (dans vame-projects/) à activer")
+
     sub.add_parser("all",      help="Tout enchaîner (très long)")
 
     args = parser.parse_args()
@@ -470,6 +510,7 @@ def main() -> None:
         "evaluate": cmd_evaluate,
         "segment":  cmd_segment,
         "info":     cmd_info,
+        "use":      cmd_use,
         "all":      cmd_all,
     }[args.cmd](args)
 
