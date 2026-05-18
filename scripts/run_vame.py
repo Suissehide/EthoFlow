@@ -394,8 +394,8 @@ def cmd_motif_videos(args) -> None:
     vame.motif_videos(load_vame_config())
     print("\n✅ Vidéos générées.")
     project = Path(load_config_pointer()).parent
-    print(f"   Cherche dans : {project / 'results' / '<session>' / '<model>' / "
-          f"'<algo>-<n_clusters>' / 'motif_videos'}")
+    sample_path = project / "results" / "<session>" / "<model>" / "<algo>-<n>" / "motif_videos"
+    print(f"   Cherche dans : {sample_path}")
 
 
 def cmd_community(args) -> None:
