@@ -286,14 +286,19 @@ def cmd_align(args) -> None:
 def _ensure_position_processed(project_path: Path) -> None:
     """
     VAME's create_trainset attend une variable 'position_processed' dans chaque
-    .nc de data/processed/. Cette variable est normalement créée par la dernière
-    étape de preprocessing (savgol_filtering en général). Si on a désactivé
-    savgol (pour éviter les crashes sur NaN), cette variable manque.
+    .nc de data/processed/. Normalement créée par la dernière étape de
+    preprocessing (savgol), mais cette dernière soit n'a pas tourné, soit
+    a produit une variable 100% NaN à cause des NaN d'entrée. Dans les deux
+    cas on a besoin d'une version utilisable.
 
-    On la fabrique ici à partir de 'position_egocentric_aligned' en bouchant
-    les NaN (forward-fill + backward-fill + 0 pour les bords).
+    On la (re)fabrique TOUJOURS à partir de 'position_egocentric_aligned',
+    en bouchant les NaN dans cet ordre :
+      - ffill sur l'axe time (propage la dernière valeur valide vers l'avant)
+      - bfill (propage la prochaine valeur valide vers l'arrière)
+      - fillna(0) pour les keypoints totalement NaN dans une session
     """
     import shutil
+    import numpy as np
     import xarray as xr
 
     processed_dir = project_path / "data" / "processed"
@@ -303,29 +308,41 @@ def _ensure_position_processed(project_path: Path) -> None:
     n_fixed = 0
     for nc_path in sorted(processed_dir.glob("*.nc")):
         with xr.open_dataset(nc_path) as ds:
-            if "position_processed" in ds.data_vars:
-                continue
             if "position_egocentric_aligned" not in ds.data_vars:
-                print(f"  ⚠️  {nc_path.name} : ni 'position_processed' ni "
-                      f"'position_egocentric_aligned', skip", file=sys.stderr)
+                print(f"  ⚠️  {nc_path.name} : pas de 'position_egocentric_aligned', skip",
+                      file=sys.stderr)
                 continue
+
             aligned = ds["position_egocentric_aligned"]
-            # Remplit dans cet ordre : ffill → bfill → 0 (pour tout NaN au début)
+            n_before = int(np.isnan(aligned.values).sum())
             filled = aligned.ffill(dim="time").bfill(dim="time").fillna(0.0)
+            n_after = int(np.isnan(filled.values).sum())
+
+            # Vérifier l'état actuel de position_processed pour info
+            existing_status = "absent"
+            if "position_processed" in ds.data_vars:
+                cur = ds["position_processed"].values
+                n_cur_nan = int(np.isnan(cur).sum())
+                pct = 100 * n_cur_nan / cur.size if cur.size else 0
+                existing_status = f"existant ({pct:.1f}% NaN, écrasé)"
+
             new_ds = ds.assign(position_processed=filled).load()
 
-        # to_netcdf ne peut pas écrire dans un fichier ouvert : écris dans tmp
-        # puis remplace.
+        # to_netcdf ne peut pas écrire dans un fichier ouvert
         tmp = nc_path.with_suffix(".nc.tmp")
         new_ds.to_netcdf(tmp)
         new_ds.close()
         shutil.move(str(tmp), str(nc_path))
         n_fixed += 1
-        print(f"  ✓ {nc_path.name} : position_processed créé "
-              f"(NaN remplis avec ffill+bfill+0)")
+        total = aligned.size
+        pct_before = 100 * n_before / total if total else 0
+        pct_after = 100 * n_after / total if total else 0
+        print(f"  ✓ {nc_path.name:50s} "
+              f"NaN: {pct_before:.1f}% → {pct_after:.1f}%  "
+              f"(was: {existing_status})")
 
     if n_fixed:
-        print(f"\n→ {n_fixed} fichier(s) augmenté(s) avec position_processed.")
+        print(f"\n→ {n_fixed} fichier(s) (re)généré(s) avec position_processed propre.")
 
 
 def cmd_trainset(args) -> None:
