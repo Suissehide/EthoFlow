@@ -365,6 +365,59 @@ def _ensure_position_processed(project_path: Path) -> None:
         print(f"\n→ {n_fixed} fichier(s) (re)généré(s) avec position_processed propre.")
 
 
+def _fix_seq_mean_std(project_path: Path) -> None:
+    """
+    Recalcule seq_mean.npy et seq_std.npy depuis train_seq.npy.
+
+    VAME's create_trainset écrit parfois des NaN scalaires dans seq_mean et
+    seq_std (probablement à cause d'un calcul fait sur une variable
+    intermédiaire qui contient encore des NaN — `position_cleaned_lowconf`
+    ou similaire — avant que notre `_ensure_position_processed` n'ait fini
+    son boulot). La normalisation `(train_seq - mean) / std` produit ensuite
+    du NaN partout → loss NaN → training mort à l'epoch 50.
+
+    Comme `train_seq.npy` lui-même est propre, on recalcule mean et std
+    directement à partir de lui.
+    """
+    import numpy as np
+
+    train_dir = project_path / "data" / "train"
+    train_seq_path = train_dir / "train_seq.npy"
+    mean_path = train_dir / "seq_mean.npy"
+    std_path = train_dir / "seq_std.npy"
+
+    if not train_seq_path.exists():
+        print(f"  ⚠️  Pas de train_seq.npy à {train_dir}", file=sys.stderr)
+        return
+
+    train_seq = np.load(train_seq_path)
+    train_nan = int(np.isnan(train_seq).sum())
+    if train_nan > 0:
+        print(f"  ⚠️  train_seq.npy contient {train_nan} NaN — "
+              f"le fix mean/std ne suffira pas. À investiguer.",
+              file=sys.stderr)
+
+    needs_fix = False
+    for path, label in [(mean_path, "seq_mean"), (std_path, "seq_std")]:
+        if not path.exists():
+            needs_fix = True
+            continue
+        arr = np.load(path)
+        if np.isnan(arr).any() or np.isinf(arr).any():
+            print(f"  ❌ {label}.npy contient NaN ou Inf")
+            needs_fix = True
+
+    if not needs_fix:
+        print(f"  ✓ seq_mean / seq_std déjà propres")
+        return
+
+    new_mean = float(np.nanmean(train_seq))
+    new_std = float(np.nanstd(train_seq))
+    np.save(mean_path, np.array(new_mean))
+    np.save(std_path, np.array(new_std))
+    print(f"  ✓ Recalculé depuis train_seq : mean={new_mean:.4f}, std={new_std:.4f}")
+
+
 def cmd_trainset(args) -> None:
     import vame
     config_path = load_config_pointer()
@@ -377,6 +430,13 @@ def cmd_trainset(args) -> None:
     _ensure_position_processed(project_path)
 
     vame.create_trainset(load_vame_config())
+
+    # VAME peut écrire un seq_mean / seq_std contenant des NaN — la
+    # normalisation (train_seq - mean) / std produit alors du NaN partout
+    # et tue le training. On recalcule depuis train_seq.npy (propre).
+    print("\nVérification de seq_mean / seq_std...")
+    _fix_seq_mean_std(project_path)
+
     print("\n✅ Trainset créé. Étape suivante : python scripts/run_vame.py train")
 
 
