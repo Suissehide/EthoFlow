@@ -381,9 +381,31 @@ def cmd_segment(args) -> None:
     print("Segmentation des poses en motifs comportementaux...")
     vame.segment_session(load_vame_config())
     print("\n✅ Segmentation terminée.")
-    print("\nÉtapes optionnelles :")
-    print(f'  - python -c "import vame; vame.motif_videos(vame.read_config(\\"{load_config_pointer()}\\"))"')
-    print(f'  - python -c "import vame; vame.community(vame.read_config(\\"{load_config_pointer()}\\"))"')
+    print("\nÉtapes suivantes possibles :")
+    print("  - python scripts/run_vame.py motif-videos   # vidéos d'exemple par motif")
+    print("  - python scripts/run_vame.py community      # regroupement de motifs en communautés")
+    print("  - python scripts/analyze_vame.py            # comparaison par condition (custom EthoFlow)")
+
+
+def cmd_motif_videos(args) -> None:
+    """Génère une courte vidéo d'exemple pour chaque motif comportemental."""
+    import vame
+    print("Génération des vidéos par motif (peut être long)...")
+    vame.motif_videos(load_vame_config())
+    print("\n✅ Vidéos générées.")
+    project = Path(load_config_pointer()).parent
+    print(f"   Cherche dans : {project / 'results' / '<session>' / '<model>' / "
+          f"'<algo>-<n_clusters>' / 'motif_videos'}")
+
+
+def cmd_community(args) -> None:
+    """Regroupe les motifs en communautés (motifs sémantiquement proches)."""
+    import vame
+    print("Construction des communautés de motifs...")
+    vame.community(load_vame_config())
+    print("\n✅ Communautés calculées.")
+    project = Path(load_config_pointer()).parent
+    print(f"   Résultats dans : {project / 'results'}")
 
 
 def list_projects() -> list[Path]:
@@ -509,6 +531,8 @@ def main() -> None:
                               "quand le SVD plante au premier epoch.")
     sub.add_parser("evaluate", help="Évaluation du modèle")
     sub.add_parser("segment",  help="Segmentation en motifs")
+    sub.add_parser("motif-videos", help="Vidéos d'exemple par motif")
+    sub.add_parser("community",   help="Regroupement des motifs en communautés")
 
     p_info = sub.add_parser("info", help="Projet courant + liste des projets")
     p_info.add_argument("--input-dir", default=None,
@@ -524,15 +548,17 @@ def main() -> None:
 
     args = parser.parse_args()
     {
-        "setup":    cmd_setup,
-        "align":    cmd_align,
-        "trainset": cmd_trainset,
-        "train":    cmd_train,
-        "evaluate": cmd_evaluate,
-        "segment":  cmd_segment,
-        "info":     cmd_info,
-        "use":      cmd_use,
-        "all":      cmd_all,
+        "setup":        cmd_setup,
+        "align":        cmd_align,
+        "trainset":     cmd_trainset,
+        "train":        cmd_train,
+        "evaluate":     cmd_evaluate,
+        "segment":      cmd_segment,
+        "motif-videos": cmd_motif_videos,
+        "community":    cmd_community,
+        "info":         cmd_info,
+        "use":          cmd_use,
+        "all":          cmd_all,
     }[args.cmd](args)
 
 
