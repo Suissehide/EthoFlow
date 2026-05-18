@@ -551,7 +551,7 @@ def main() -> None:
                               "car peut ré-introduire des NaN qui crashent savgol)")
     p_align.add_argument("--with-savgol", action="store_true",
                          help="Active le filtre Savitzky-Golay (OFF par défaut car "
-                              "crashe sur NaN ; à n'activer que sur données 100% propres)")
+                              "crashe sur NaN ; à n'activer que sur données 100%% propres)")
     p_align.add_argument("--rescaling", action="store_true",
                          help="Activer le rescaling (désactivé par défaut)")
     sub.add_parser("trainset", help="Création du trainset")
