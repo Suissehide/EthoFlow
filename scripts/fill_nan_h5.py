@@ -77,15 +77,18 @@ def fill_h5(src: Path, dst: Path) -> dict:
         if df[ycol].isna().any():
             df[ycol] = df[ycol].fillna(df[ycol].median())
 
-        # Likelihood : on met 1.0 partout (et pas seulement sur les points
-        # remplis). Justification :
-        #  - les points remplis doivent passer n'importe quel seuil de confiance
-        #  - les points originaux ont déjà été nettoyés par notre pipeline
-        #    (assign_arenas filtre déjà à likelihood > 0.6), donc on a confiance
-        #    en leurs valeurs ; pas de raison que VAME les rejette à 0.99.
-        # Conséquence : VAME's lowconf_cleaning devient un no-op, ce qui
-        # permet de garder ses défauts (alignment, IQR, etc.) sans casser.
-        df[lcol] = 1.0
+        # Likelihood : on ne touche QUE les points qu'on a inventés (likelihood=1.0
+        # pour qu'ils passent les filtres de confiance). Les points originaux
+        # gardent leur likelihood d'origine — c'est l'info qualité honnête de DLC,
+        # utile en aval pour distinguer "vraie détection" vs "imputation".
+        # Pour que VAME ne re-masque pas les originaux à son seuil par défaut
+        # de 0.99, baisse `pose_confidence` dans le config.yaml du projet
+        # (option `--pose-confidence` dans `run_vame.py setup`).
+        df.loc[was_nan, lcol] = 1.0
+        # Si la likelihood elle-même est NaN par endroits (rare), médiane par
+        # sécurité — ces frames n'ont pas de signal de confiance exploitable.
+        if df[lcol].isna().any():
+            df[lcol] = df[lcol].fillna(df[lcol].median())
 
         n_filled_pts += n_to_fill
 

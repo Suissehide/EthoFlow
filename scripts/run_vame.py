@@ -215,6 +215,18 @@ def cmd_setup(args) -> None:
     else:
         config_path = result
     save_config_pointer(config_path)
+
+    # Ajuste pose_confidence dans le config.yaml du projet — par défaut VAME le
+    # met à 0.99, ce qui mask la majorité des points SuperAnimal (typiquement
+    # 0.5-0.95). On s'aligne sur notre seuil de pré-cleaning (0.6) pour ne
+    # rejeter que les points dont DLC était vraiment peu sûr.
+    if args.pose_confidence is not None:
+        cfg = vame.read_config(config_path)
+        old = cfg.get("pose_confidence", "?")
+        cfg["pose_confidence"] = args.pose_confidence
+        vame.write_config(config_path, cfg)
+        print(f"\nℹ️  pose_confidence : {old} → {args.pose_confidence}")
+
     print(f"\n✅ Projet VAME créé.\n   config.yaml : {config_path}")
     print("\nLe `config.yaml` contient les hyperparamètres du modèle. Tu peux\n"
           "l'éditer avant l'entraînement (taille de fenêtre, learning rate, etc).\n"
@@ -527,6 +539,10 @@ def main() -> None:
     p_setup.add_argument("--no-auto-rekey", action="store_true",
                          help="Ne pas re-clé-er automatiquement les .h5 à la "
                               "clé 'df_with_missing' (par défaut auto-corrigé)")
+    p_setup.add_argument("--pose-confidence", type=float, default=0.6,
+                         help="Seuil de confiance VAME (lowconf_cleaning) — "
+                              "défaut 0.6, aligné sur notre pré-filtrage. "
+                              "Mets None pour garder le 0.99 par défaut de VAME.")
     copy_grp = p_setup.add_mutually_exclusive_group()
     copy_grp.add_argument("--copy-videos", dest="copy_videos",
                           action="store_const", const=True, default=None,
