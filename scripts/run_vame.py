@@ -345,6 +345,24 @@ def cmd_trainset(args) -> None:
 
 def cmd_train(args) -> None:
     import vame
+
+    if args.no_cluster_loss:
+        # Monkey-patch : vame.model.rnn_vae.cluster_loss() appelle torch.svd()
+        # sur une gram matrix qui est régulièrement mal conditionnée (latents
+        # collapsés, données peu diverses, etc.) et fait planter le training
+        # avant le premier epoch — même quand le poids kmeans_loss vaut 0.
+        # Comme la fonction n'est utile que si on veut une régularisation par
+        # cluster, on la remplace par un no-op qui renvoie 0.
+        import torch
+        import vame.model.rnn_vae as rnn_vae
+
+        def _zero_cluster_loss(latent, kloss, klmbda, bsize):
+            return torch.tensor(0.0, device=latent.device)
+
+        rnn_vae.cluster_loss = _zero_cluster_loss
+        print("⚠️  cluster_loss désactivée (monkey-patch) pour contourner les "
+              "crashes SVD sur latents mal conditionnés.")
+
     print("Entraînement du VAE — peut prendre plusieurs heures sur GPU.")
     print("Les hyperparamètres sont dans le config.yaml du projet VAME.")
     vame.train_model(load_vame_config())
@@ -485,7 +503,10 @@ def main() -> None:
     p_align.add_argument("--rescaling", action="store_true",
                          help="Activer le rescaling (désactivé par défaut)")
     sub.add_parser("trainset", help="Création du trainset")
-    sub.add_parser("train",    help="Entraînement du VAE (long)")
+    p_train = sub.add_parser("train", help="Entraînement du VAE (long)")
+    p_train.add_argument("--no-cluster-loss", action="store_true",
+                         help="Désactive vame.cluster_loss (no-op). À utiliser "
+                              "quand le SVD plante au premier epoch.")
     sub.add_parser("evaluate", help="Évaluation du modèle")
     sub.add_parser("segment",  help="Segmentation en motifs")
 
