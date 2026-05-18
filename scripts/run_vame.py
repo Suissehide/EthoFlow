@@ -260,11 +260,19 @@ def cmd_align(args) -> None:
     print(f"  → keypoints détectés : {bp}")
     print(f"  → reference keypoints : center={tail_kp}, orientation={nose_kp}")
 
+    # Défauts EthoFlow-aware :
+    # - lowconf_cleaning ON : un no-op si fill_nan_h5 a tourné (likelihood=1.0),
+    #   peu coûteux à laisser quand ce n'est pas le cas.
+    # - egocentric_alignment ON : indispensable.
+    # - outlier_cleaning OFF par défaut : son IQR peut ré-introduire des NaN
+    #   qui font crasher savgol et empoisonnent le training.
+    # - savgol_filtering OFF par défaut : crashe sur NaN ; on lisse plutôt
+    #   en amont via notre fill_nan_h5 (interpolation).
     steps = {
         "run_lowconf_cleaning":     not args.no_lowconf_cleaning,
         "run_egocentric_alignment": not args.no_alignment,
-        "run_outlier_cleaning":     not args.no_outlier_cleaning,
-        "run_savgol_filtering":     not args.no_savgol,
+        "run_outlier_cleaning":     args.with_outlier_cleaning,
+        "run_savgol_filtering":     args.with_savgol,
         "run_rescaling":            args.rescaling,
     }
     enabled = [k for k, v in steps.items() if v]
@@ -529,16 +537,21 @@ def main() -> None:
                           help="Forcer le symlink (échouera sur Windows sans Developer Mode)")
 
     p_align = sub.add_parser("align", help="Preprocessing VAME (alignement + nettoyage)")
+    # Flags 'no-' désactivent ce qui est ON par défaut
     p_align.add_argument("--no-lowconf-cleaning", action="store_true",
-                         help="Skip le nettoyage low-confidence (seuil 0.99 par défaut, "
-                              "trop strict pour SuperAnimal — déjà fait par notre pipeline)")
+                         help="Désactive le lowconf_cleaning (ON par défaut, mais "
+                              "no-op après fill_nan_h5 car likelihood=1.0 partout)")
     p_align.add_argument("--no-alignment", action="store_true",
-                         help="Skip l'alignement égocentrique")
-    p_align.add_argument("--no-outlier-cleaning", action="store_true",
-                         help="Skip le nettoyage des outliers IQR")
-    p_align.add_argument("--no-savgol", action="store_true",
-                         help="Skip le filtre Savitzky-Golay (qui crashe sur NaN — "
-                              "à activer si trop de trous)")
+                         help="Désactive l'alignement égocentrique (ON par défaut, "
+                              "ne le désactive que pour debug)")
+    # Flags 'with-' activent ce qui est OFF par défaut (parce que ces étapes
+    # font régulièrement planter le pipeline EthoFlow)
+    p_align.add_argument("--with-outlier-cleaning", action="store_true",
+                         help="Active le nettoyage des outliers IQR (OFF par défaut "
+                              "car peut ré-introduire des NaN qui crashent savgol)")
+    p_align.add_argument("--with-savgol", action="store_true",
+                         help="Active le filtre Savitzky-Golay (OFF par défaut car "
+                              "crashe sur NaN ; à n'activer que sur données 100% propres)")
     p_align.add_argument("--rescaling", action="store_true",
                          help="Activer le rescaling (désactivé par défaut)")
     sub.add_parser("trainset", help="Création du trainset")
