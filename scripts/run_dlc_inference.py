@@ -26,10 +26,17 @@ Pré-requis :
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 import yaml
+
+# expandable_segments réduit la fragmentation de la VRAM CUDA, ce qui aide
+# l'entraînement d'adaptation (--video-adapt) à tenir dans les 16 Go d'un
+# GPU à mémoire limitée. setdefault : on n'écrase pas une valeur déjà
+# posée par l'utilisateur dans le shell.
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
 ROOT = Path(__file__).resolve().parent.parent
 RAW_DIR = ROOT / "data" / "raw"
@@ -100,6 +107,7 @@ def run_superanimal(
     model_name: str,
     detector_name: str,
     video_adapt: bool,
+    video_adapt_batch_size: int = 8,
 ) -> None:
     try:
         import deeplabcut
@@ -122,6 +130,8 @@ def run_superanimal(
     print(f"  modèle    : {model_name}")
     print(f"  détecteur : {detector_name}")
     print(f"  video_adapt = {video_adapt}")
+    if video_adapt:
+        print(f"  video_adapt_batch_size = {video_adapt_batch_size}")
 
     deeplabcut.video_inference_superanimal(
         [str(source)],
@@ -130,6 +140,7 @@ def run_superanimal(
         detector_name=detector_name,
         videotype="mp4",
         video_adapt=video_adapt,
+        video_adapt_batch_size=video_adapt_batch_size,
         dest_folder=str(output_dir),
     )
 
@@ -144,6 +155,7 @@ def run_superanimal_cropped(
     model_name: str = "hrnet_w32",
     detector_name: str = "fasterrcnn_resnet50_fpn_v2",
     video_adapt: bool = False,
+    video_adapt_batch_size: int = 8,
     likelihood_threshold: float = 0.6,
     interp_limit: int = 25,
     output_dir: Path | None = None,
@@ -196,6 +208,8 @@ def run_superanimal_cropped(
     print(f"SuperAnimal single-animal (max_individuals=1)")
     print(f"  modèle    : {model_name}")
     print(f"  détecteur : {detector_name}")
+    if video_adapt:
+        print(f"  video_adapt = True  (batch_size={video_adapt_batch_size})")
 
     deeplabcut.video_inference_superanimal(
         [str(v) for v in videos],
@@ -204,6 +218,7 @@ def run_superanimal_cropped(
         detector_name=detector_name,
         videotype="mp4",
         video_adapt=video_adapt,
+        video_adapt_batch_size=video_adapt_batch_size,
         max_individuals=1,
         dest_folder=str(temp_dest),
     )
@@ -305,6 +320,10 @@ if __name__ == "__main__":
     parser.add_argument("--superanimal-detector", default="fasterrcnn_resnet50_fpn_v2")
     parser.add_argument("--video-adapt", action="store_true",
                         help="Active le fine-tuning court (plus précis, plus lent)")
+    parser.add_argument("--video-adapt-batch-size", type=int, default=8,
+                        help="Batch size de l'entrainement d'adaptation "
+                             "(defaut DLC: 8). A baisser (4, 2, voire 1) en cas "
+                             "de 'CUDA out of memory' sur GPU a memoire limitee.")
     parser.add_argument("--likelihood-threshold", type=float, default=0.6,
                         help="(mode single-animal) seuil de likelihood pour le nettoyage")
     parser.add_argument("--interp-limit", type=int, default=25,
@@ -348,6 +367,7 @@ if __name__ == "__main__":
                     model_name=args.superanimal_model,
                     detector_name=args.superanimal_detector,
                     video_adapt=args.video_adapt,
+                    video_adapt_batch_size=args.video_adapt_batch_size,
                 )
             elif args.mode == "single-animal":
                 run_superanimal_cropped(
@@ -356,6 +376,7 @@ if __name__ == "__main__":
                     model_name=args.superanimal_model,
                     detector_name=args.superanimal_detector,
                     video_adapt=args.video_adapt,
+                    video_adapt_batch_size=args.video_adapt_batch_size,
                     likelihood_threshold=args.likelihood_threshold,
                     interp_limit=args.interp_limit,
                     output_dir=args.output_dir,
