@@ -61,29 +61,22 @@ def is_processed(session_id: str, mode: str = "superanimal") -> bool:
     """Vrai si une sortie DLC existe déjà pour cette session, dans le mode donné.
 
     - superanimal (multi-animal) : .h5 directement dans dlc-output/<session>/
-    - single-animal               : .h5 finaux dans vame-input/<session>/, ou
-                                    .h5 "adapté" (hors before_adapt) dans
-                                    dlc-output/<session>/cropped-raw/
+    - single-animal               : .h5 finaux dans vame-input/<session>/
+                                    (cropped-raw/ est un scratch intermédiaire,
+                                    pas un signal fiable de complétion)
     - custom                      : .h5 dans dlc-output/<session>/
     """
     if mode == "single-animal":
-        # Sortie finale présente dans vame-input/ → réellement traité.
+        # Seule la sortie FINALE dans vame-input/ fait foi. Le dossier
+        # cropped-raw/ est un scratch intermédiaire : un run --video-adapt
+        # qui crashe pendant l'adaptation y laisse déjà le .h5 de
+        # pré-adaptation (nom canonique SANS suffixe — seuls le .json et
+        # la vidéo annotée portent le tag *_before_adapt). Sa présence ne
+        # prouve donc RIEN sur la complétion de la session.
         vame_session = VAME_INPUT_DIR / session_id
-        if vame_session.exists() and any(vame_session.glob(f"{session_id}_A*.h5")):
-            return True
-        # cropped-raw/ : un run --video-adapt qui crashe à l'étape
-        # "object detector training" n'y laisse que des *before_adapt*
-        # (prédictions pré-adaptation). Ça ne compte PAS comme traité :
-        # il faut reprendre. On exige au moins un .h5 hors before_adapt.
-        cropped_raw = DLC_OUTPUT_DIR / session_id / "cropped-raw"
-        if cropped_raw.exists():
-            adapted_h5 = [
-                p for p in cropped_raw.glob("*.h5")
-                if "before_adapt" not in p.name
-            ]
-            if adapted_h5:
-                return True
-        return False
+        return vame_session.exists() and any(
+            vame_session.glob(f"{session_id}_A*.h5")
+        )
 
     # multi-animal / custom : .h5 directement à la racine de dlc-output/<session>/
     out = DLC_OUTPUT_DIR / session_id
@@ -228,16 +221,12 @@ def run_superanimal_cropped(
         if not h5_candidates:
             print(f"  ⚠️  {video.stem} : pas de .h5 produit")
             continue
-        # Avec --video-adapt, cropped-raw/ contient à la fois la prédiction
-        # *_before_adapt et la version adaptée. On veut TOUJOURS l'adaptée
-        # pour VAME — sinon le fine-tuning ne sert à rien.
-        adapted = [c for c in h5_candidates if "before_adapt" not in c.name]
-        if adapted:
-            h5_candidates = adapted
-        elif any("before_adapt" in c.name for c in h5_candidates):
-            print(f"  ⚠️  {video.stem} : seulement du before_adapt trouvé — "
-                  f"l'adaptation n'a pas abouti, qualité non optimale")
-        produced_h5 = sorted(h5_candidates)[0]
+        # Avec --video-adapt, DLC écrit le .h5 de pré-adaptation puis la
+        # version adaptée — le .h5 ne porte aucun suffixe distinctif
+        # (contrairement aux artefacts *_before_adapt.json / .mp4). On
+        # prend donc le .h5 le plus récent : c'est la version adaptée si
+        # l'adaptation a abouti, sinon la prédiction de base.
+        produced_h5 = max(h5_candidates, key=lambda p: p.stat().st_mtime)
         df = pd.read_hdf(produced_h5)
 
         # Aplatissement : drop le niveau 'individuals' (max 1 individu)
