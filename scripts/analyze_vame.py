@@ -415,7 +415,7 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
     for ax, motif in zip(axes, motifs):
         d = df[df["motif"] == motif]
         data = [d.loc[d[condition_col] == g, "frequency"].values for g in groups]
-        ax.boxplot(data, labels=[str(g) for g in groups])
+        ax.boxplot(data, tick_labels=[str(g) for g in groups])
         ax.set_title(motif_display(motif, labels), fontsize=10)
         ax.set_ylabel("Proportion")
     fig.suptitle(f"Top motifs différenciants par {condition_col}")
