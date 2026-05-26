@@ -20,6 +20,18 @@ Usage:
     python scripts/analyze_vame.py --algo hmm
     python scripts/analyze_vame.py --algo kmeans --n-clusters 15
     python scripts/analyze_vame.py --project /chemin/vers/vame-projects/<nom>
+    python scripts/analyze_vame.py --labels data/results/motif_labels_hmm15.yaml
+
+Le fichier de labels (--labels) est un YAML simple {motif_id: étiquette} :
+
+    0: immobilité
+    1: locomotion lente
+    2: rearing
+    ...
+
+Les motifs non listés gardent une étiquette par défaut "motif_<i>". Output :
+colonne 'label' dans motif_usage_long.csv, en-têtes renommées dans
+motif_usage.csv, étiquettes sur les axes et titres des plots.
 """
 from __future__ import annotations
 
@@ -48,6 +60,43 @@ def get_project_path(arg_project: str | None) -> Path:
     raise FileNotFoundError(
         "Aucun projet VAME actif. Lance `run_vame.py use <nom>` ou passe --project."
     )
+
+
+def load_motif_labels(labels_path: Path | None) -> dict[int, str]:
+    """
+    Charge un YAML qui mappe motif_id → étiquette comportementale.
+
+    Format attendu (clés entières, valeurs chaînes) :
+
+        0: immobilité
+        1: locomotion lente
+        2: rearing
+        ...
+
+    Retourne {} si aucun fichier fourni. Les motifs non listés sont tolérés
+    et gardent leur étiquette par défaut "motif_<i>".
+    """
+    if labels_path is None:
+        return {}
+    if not labels_path.exists():
+        raise FileNotFoundError(f"Fichier de labels introuvable : {labels_path}")
+    with open(labels_path) as f:
+        raw = yaml.safe_load(f) or {}
+    labels: dict[int, str] = {}
+    for k, v in raw.items():
+        try:
+            labels[int(k)] = str(v)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Clé non-entière dans {labels_path} : {k!r}"
+            ) from exc
+    return labels
+
+
+def motif_display(motif_id: int, labels: dict[int, str]) -> str:
+    """Forme compacte pour CSV/plots : '3: grooming' si labellisé, sinon 'motif_3'."""
+    label = labels.get(motif_id)
+    return f"{motif_id}: {label}" if label else f"motif_{motif_id}"
 
 
 def find_segmentations(project_path: Path, algo: str, n_clusters: int | None) -> list[Path]:
@@ -105,7 +154,8 @@ def load_metadata_index() -> dict[tuple[str, str], dict]:
 
 
 def build_dataframe(seg_files: list[Path],
-                    meta_index: dict[tuple[str, str], dict]) -> pd.DataFrame:
+                    meta_index: dict[tuple[str, str], dict],
+                    labels: dict[int, str]) -> pd.DataFrame:
     rows = []
     for f in seg_files:
         usage = np.load(f).astype(float)
@@ -128,13 +178,15 @@ def build_dataframe(seg_files: list[Path],
                 "angii": meta.get("angii"),
                 "timepoint": meta.get("timepoint"),
                 "motif": motif_i,
+                "label": labels.get(motif_i, f"motif_{motif_i}"),
                 "frequency": freq,
                 "count": int(usage[motif_i]),
             })
     return pd.DataFrame(rows)
 
 
-def plot_heatmap(df: pd.DataFrame, out_path: Path) -> None:
+def plot_heatmap(df: pd.DataFrame, out_path: Path,
+                 labels: dict[int, str]) -> None:
     pivot = df.pivot_table(
         index="session_full", columns="motif", values="frequency", aggfunc="mean"
     )
@@ -145,7 +197,8 @@ def plot_heatmap(df: pd.DataFrame, out_path: Path) -> None:
     ax.set_yticks(range(len(pivot.index)))
     ax.set_yticklabels(pivot.index, fontsize=7)
     ax.set_xticks(range(len(pivot.columns)))
-    ax.set_xticklabels(pivot.columns, fontsize=8)
+    xtick_labels = [motif_display(int(m), labels) for m in pivot.columns]
+    ax.set_xticklabels(xtick_labels, fontsize=8, rotation=45, ha="right")
     ax.set_xlabel("Motif")
     ax.set_title("Usage par session (proportion de frames)")
     fig.colorbar(im, ax=ax, label="proportion")
@@ -155,13 +208,18 @@ def plot_heatmap(df: pd.DataFrame, out_path: Path) -> None:
 
 
 def plot_means_by_condition(df: pd.DataFrame, condition_col: str,
-                            out_path: Path, title: str) -> None:
+                            out_path: Path, title: str,
+                            labels: dict[int, str]) -> None:
     grouped = df.groupby([condition_col, "motif"])["frequency"].mean().reset_index()
     pivot = grouped.pivot(index="motif", columns=condition_col, values="frequency")
     if pivot.empty:
         return
     fig, ax = plt.subplots(figsize=(10, 5))
     pivot.plot(kind="bar", ax=ax)
+    ax.set_xticklabels(
+        [motif_display(int(m), labels) for m in pivot.index],
+        rotation=45, ha="right", fontsize=8,
+    )
     ax.set_xlabel("Motif")
     ax.set_ylabel("Proportion moyenne")
     ax.set_title(title)
@@ -182,7 +240,7 @@ def differentiating_motifs(df: pd.DataFrame, condition_col: str,
 
 
 def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
-                  out_path: Path) -> None:
+                  out_path: Path, labels: dict[int, str]) -> None:
     if not motifs:
         return
     fig, axes = plt.subplots(1, len(motifs), figsize=(3 * len(motifs), 4), sharey=True)
@@ -193,7 +251,7 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
         d = df[df["motif"] == motif]
         data = [d.loc[d[condition_col] == g, "frequency"].values for g in groups]
         ax.boxplot(data, labels=[str(g) for g in groups])
-        ax.set_title(f"Motif {motif}")
+        ax.set_title(motif_display(motif, labels), fontsize=10)
         ax.set_ylabel("Proportion")
     fig.suptitle(f"Top motifs différenciants par {condition_col}")
     fig.tight_layout()
@@ -209,6 +267,10 @@ def main() -> None:
                         help="Algo de segmentation à analyser (défaut: hmm)")
     parser.add_argument("--n-clusters", type=int, default=None,
                         help="Si plusieurs configurations existent, force un nombre de clusters")
+    parser.add_argument("--labels", type=Path, default=None,
+                        help="YAML de mapping motif_id → étiquette comportementale. "
+                             "Ajoute une colonne 'label' aux CSV et utilise ces "
+                             "étiquettes sur les axes des graphiques.")
     args = parser.parse_args()
 
     try:
@@ -229,7 +291,18 @@ def main() -> None:
     meta_index = load_metadata_index()
     print(f"  → {len(meta_index)} entrées de metadata chargées")
 
-    df = build_dataframe(seg_files, meta_index)
+    try:
+        labels = load_motif_labels(args.labels)
+    except (FileNotFoundError, ValueError) as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
+    if labels:
+        print(f"  → {len(labels)} étiquettes de motifs chargées depuis {args.labels}")
+    else:
+        print("  ℹ Aucun label — passe --labels <fichier.yaml> "
+              "pour étiqueter les motifs (YAML format: motif_id: nom).")
+
+    df = build_dataframe(seg_files, meta_index, labels)
     if df.empty:
         print("❌ DataFrame vide, rien à analyser.", file=sys.stderr)
         sys.exit(1)
@@ -244,12 +317,15 @@ def main() -> None:
     # CSV brut (un fichier par format)
     pivot = df.pivot_table(index="session_full", columns="motif",
                            values="frequency", aggfunc="mean")
+    if labels:
+        # En-têtes lisibles si on a un mapping, ex : "3: grooming"
+        pivot = pivot.rename(columns=lambda m: motif_display(int(m), labels))
     pivot.to_csv(out_dir / "motif_usage.csv")
     df.to_csv(out_dir / "motif_usage_long.csv", index=False)
     print(f"\n✓ CSV sauvés : {out_dir}/motif_usage.csv et motif_usage_long.csv")
 
     # Plots
-    plot_heatmap(df, out_dir / "heatmap_usage.png")
+    plot_heatmap(df, out_dir / "heatmap_usage.png", labels)
     print(f"✓ Heatmap : {out_dir}/heatmap_usage.png")
 
     # Comparaisons par condition disponibles
@@ -263,13 +339,13 @@ def main() -> None:
         if sub.empty or sub[col].nunique() < 2:
             continue
         plot_path = out_dir / f"mean_by_{col}.png"
-        plot_means_by_condition(sub, col, plot_path, title)
+        plot_means_by_condition(sub, col, plot_path, title, labels)
         print(f"✓ Barres par {col} : {plot_path.name}")
 
         top = differentiating_motifs(sub, col, top_k=6)
         if top:
             box_path = out_dir / f"boxplots_top_by_{col}.png"
-            plot_boxplots(sub, col, top, box_path)
+            plot_boxplots(sub, col, top, box_path, labels)
             print(f"  → boxplots top motifs : {box_path.name} (motifs {top})")
 
     print(f"\n✅ Analyse terminée. Tout est dans {out_dir}")
