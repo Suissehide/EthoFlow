@@ -2,18 +2,21 @@
 Analyse des résultats VAME en croisant avec les conditions expérimentales EthoFlow.
 
 Pour un projet VAME donné, ce script :
-  1. Liste toutes les sessions segmentées (motif_usage_session.npy)
+  1. Liste toutes les sessions segmentées (motif_usage_<session>.npy)
   2. Récupère pour chaque session-arène : condition, stress, ANGII, timepoint
      depuis les metadata.yaml d'ethoflow
   3. Construit un DataFrame combiné session × motif × condition
-  4. Sauvegarde un CSV et plusieurs plots de comparaison
+  4. (optionnel) Détecte les frames "empty arena" en bord d'enregistrement
+     via --validity-source ; --mask-empty les exclut des fréquences
+  5. Sauvegarde un CSV et plusieurs plots de comparaison
 
 Sortie : <project>/analysis/
-  - motif_usage.csv          : usage normalisé de chaque motif par session
-  - motif_usage_long.csv     : format long (1 ligne par session × motif)
-  - heatmap_usage.png        : heatmap (sessions × motifs)
-  - mean_by_condition.png    : usage moyen par groupe
-  - boxplots_top_motifs.png  : distribution des motifs les plus différenciants
+  - motif_usage.csv             : usage normalisé de chaque motif par session
+  - motif_usage_long.csv        : format long (1 ligne par session × motif)
+  - validity_per_session.csv    : (si --validity-source) frames empty-arena par session
+  - heatmap_usage.png           : heatmap (sessions × motifs)
+  - mean_by_condition.png       : usage moyen par groupe
+  - boxplots_top_motifs.png     : distribution des motifs les plus différenciants
 
 Usage:
     python scripts/analyze_vame.py
@@ -21,6 +24,8 @@ Usage:
     python scripts/analyze_vame.py --algo kmeans --n-clusters 15
     python scripts/analyze_vame.py --project /chemin/vers/vame-projects/<nom>
     python scripts/analyze_vame.py --labels data/results/motif_labels_hmm15.yaml
+    python scripts/analyze_vame.py --validity-source data/vame-input/single-enhanced-2026-05
+    python scripts/analyze_vame.py --validity-source ... --mask-empty
 
 Le fichier de labels (--labels) est un YAML simple {motif_id: étiquette} :
 
@@ -99,17 +104,115 @@ def motif_display(motif_id: int, labels: dict[int, str]) -> str:
     return f"{motif_id}: {label}" if label else f"motif_{motif_id}"
 
 
+def find_label_file(motif_usage_path: Path) -> Path | None:
+    """
+    À partir d'un motif_usage_<session>.npy, retrouve le fichier de label
+    par frame <n>_<algo>_label_<session>.npy situé dans le même dossier.
+    """
+    parent = motif_usage_path.parent
+    if "-" not in parent.name:
+        return None
+    algo, n = parent.name.split("-", 1)
+    prefix = "motif_usage_"
+    stem = motif_usage_path.stem
+    if not stem.startswith(prefix):
+        return None
+    session_name = stem[len(prefix):]
+    label = parent / f"{n}_{algo}_label_{session_name}.npy"
+    return label if label.exists() else None
+
+
+def find_prefill_h5(validity_source: Path, session_name: str) -> Path | None:
+    """
+    Localise le .h5 pré-fill (avant filter_keypoints / fill_nan_h5) pour
+    une session_full donnée (ex. 'OF-M1-20251010-V02_A4').
+    Structure attendue : <validity_source>/<session_id>/<session_full>.h5
+    """
+    session_id, arena = parse_session_name(session_name)
+    if not arena:
+        return None
+    candidate = validity_source / session_id / f"{session_name}.h5"
+    return candidate if candidate.exists() else None
+
+
+def detect_empty_arena_edges(prefill_h5: Path,
+                             min_edge_frames: int = 25) -> tuple[int, int]:
+    """
+    Compte les frames d'« empty arena » au tout début et à la toute fin
+    du h5 pré-fill : blocs contigus où aucun keypoint n'est détecté.
+
+    Critère « pas de souris » : toutes les colonnes x sont NaN sur la frame.
+    Le fill_nan_h5 a remplacé ces NaN dans le dossier -clean/, mais le
+    pré-fill (passé en --validity-source) garde le pattern d'origine.
+
+    Renvoie (n_empty_start, n_empty_end). Un bloc en bordure n'est compté
+    que s'il fait au moins min_edge_frames frames — sinon c'est du bruit
+    DLC ponctuel (un raté de détection sur 1-2 frames au démarrage).
+    """
+    df = pd.read_hdf(prefill_h5)
+    x_cols = [c for c in df.columns if isinstance(c, tuple) and c[-1] == "x"]
+    if not x_cols:
+        return 0, 0
+    no_det = df[x_cols].isna().all(axis=1).to_numpy()
+    n = len(no_det)
+    start = 0
+    while start < n and no_det[start]:
+        start += 1
+    end = 0
+    while end < n and no_det[n - 1 - end]:
+        end += 1
+    return (start if start >= min_edge_frames else 0,
+            end if end >= min_edge_frames else 0)
+
+
+def compute_session_validity(seg_file: Path, validity_source: Path,
+                             min_edge_frames: int) -> dict | None:
+    """
+    Pour une session segmentée (chemin du motif_usage_<session>.npy),
+    construit le masque valid_mask + détecte les frames empty-arena.
+
+    Renvoie None si le label par frame ou le h5 pré-fill sont introuvables
+    (la session sera analysée sans masquage, avec un warning).
+    """
+    session_name = seg_file.parent.parent.parent.name
+    prefill = find_prefill_h5(validity_source, session_name)
+    label_file = find_label_file(seg_file)
+    if prefill is None or label_file is None:
+        return None
+    labels_per_frame = np.load(label_file).astype(int)
+    n_total = len(labels_per_frame)
+    n_empty_start, n_empty_end = detect_empty_arena_edges(prefill, min_edge_frames)
+    n_empty_start = min(n_empty_start, n_total)
+    n_empty_end = min(n_empty_end, n_total - n_empty_start)
+    valid_mask = np.ones(n_total, dtype=bool)
+    if n_empty_start > 0:
+        valid_mask[:n_empty_start] = False
+    if n_empty_end > 0:
+        valid_mask[-n_empty_end:] = False
+    return {
+        "session_name": session_name,
+        "n_total": n_total,
+        "n_empty_start": n_empty_start,
+        "n_empty_end": n_empty_end,
+        "valid_mask": valid_mask,
+        "labels_per_frame": labels_per_frame,
+    }
+
+
 def find_segmentations(project_path: Path, algo: str, n_clusters: int | None) -> list[Path]:
-    """Trouve tous les motif_usage_session.npy pour l'algo demandé."""
+    """Trouve tous les motif_usage_<session>.npy pour l'algo demandé.
+
+    Structure VAME-py : results/<session>/<model>/<algo>-<n>/motif_usage_<session>.npy
+    """
     results = project_path / "results"
     if not results.exists():
         raise FileNotFoundError(f"Pas de dossier results/ dans {project_path}")
 
     if n_clusters is not None:
         pattern = f"{algo}-{n_clusters}"
-        glob = list(results.glob(f"*/*/{pattern}/motif_usage_session.npy"))
+        glob = list(results.glob(f"*/*/{pattern}/motif_usage_*.npy"))
     else:
-        glob = list(results.glob(f"*/*/{algo}-*/motif_usage_session.npy"))
+        glob = list(results.glob(f"*/*/{algo}-*/motif_usage_*.npy"))
     return sorted(glob)
 
 
@@ -155,20 +258,75 @@ def load_metadata_index() -> dict[tuple[str, str], dict]:
 
 def build_dataframe(seg_files: list[Path],
                     meta_index: dict[tuple[str, str], dict],
-                    labels: dict[int, str]) -> pd.DataFrame:
+                    labels: dict[int, str],
+                    validity_source: Path | None = None,
+                    min_edge_frames: int = 25,
+                    mask_empty: bool = False
+                    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Construit (motif_df, validity_df).
+
+    motif_df : 1 ligne par session × motif. Colonnes principales : motif,
+    label, frequency, count, et — si validity_source — empty_arena_count
+    et empty_arena_fraction par motif × session.
+
+    validity_df : 1 ligne par session, avec n_empty_start, n_empty_end,
+    n_valid_frames, valid_fraction. Vide si validity_source=None.
+
+    Si mask_empty=True, la `frequency` est recalculée en excluant les frames
+    empty-arena (le `count` reste l'original pour audit).
+    """
     rows = []
+    validity_rows = []
     for f in seg_files:
-        usage = np.load(f).astype(float)
-        # Normalise (proportion plutôt que count brut)
-        total = usage.sum()
-        usage_norm = usage / total if total > 0 else usage
-        # Le 3e dossier parent au-dessus du fichier est le nom de session
-        # (path = results/<session>/<model>/<algo-n>/motif_usage_session.npy)
+        usage_original = np.load(f).astype(float)
+        n_clusters = len(usage_original)
+        # path = results/<session>/<model>/<algo-n>/motif_usage_<session>.npy
         session_name = f.parent.parent.parent.name
         session_id, arena = parse_session_name(session_name)
         meta = meta_index.get((session_id, arena), {})
-        for motif_i, freq in enumerate(usage_norm):
-            rows.append({
+
+        per_motif_empty = None  # array (n_clusters,) si validity activée
+        n_empty_start = n_empty_end = 0
+        if validity_source is not None:
+            vinfo = compute_session_validity(f, validity_source, min_edge_frames)
+            if vinfo is None:
+                print(f"  ⚠️  {session_name} : pré-fill ou label par frame "
+                      f"introuvable — pas de masquage empty-arena ici.",
+                      file=sys.stderr)
+            else:
+                n_empty_start = vinfo["n_empty_start"]
+                n_empty_end = vinfo["n_empty_end"]
+                labels_per_frame = vinfo["labels_per_frame"]
+                valid_mask = vinfo["valid_mask"]
+                per_motif_empty = np.zeros(n_clusters, dtype=int)
+                for m in range(n_clusters):
+                    per_motif_empty[m] = int(
+                        ((labels_per_frame == m) & ~valid_mask).sum()
+                    )
+                n_valid = vinfo["n_total"] - n_empty_start - n_empty_end
+                validity_rows.append({
+                    "session_full": session_name,
+                    "session_id": session_id,
+                    "arena": arena,
+                    "n_frames_total": vinfo["n_total"],
+                    "n_empty_start": n_empty_start,
+                    "n_empty_end": n_empty_end,
+                    "n_valid_frames": n_valid,
+                    "valid_fraction": n_valid / max(vinfo["n_total"], 1),
+                })
+
+        # Si mask_empty, on retire les frames empty-arena de la frequency
+        # (numérateur ET dénominateur). Le `count` reste l'original.
+        if mask_empty and per_motif_empty is not None:
+            usage_for_freq = usage_original - per_motif_empty
+        else:
+            usage_for_freq = usage_original
+        total = usage_for_freq.sum()
+        usage_norm = usage_for_freq / total if total > 0 else usage_for_freq
+
+        for motif_i in range(n_clusters):
+            row = {
                 "session_full": session_name,
                 "session_id": session_id,
                 "arena": arena,
@@ -179,10 +337,17 @@ def build_dataframe(seg_files: list[Path],
                 "timepoint": meta.get("timepoint"),
                 "motif": motif_i,
                 "label": labels.get(motif_i, f"motif_{motif_i}"),
-                "frequency": freq,
-                "count": int(usage[motif_i]),
-            })
-    return pd.DataFrame(rows)
+                "frequency": float(usage_norm[motif_i]),
+                "count": int(usage_original[motif_i]),
+            }
+            if per_motif_empty is not None:
+                orig = int(usage_original[motif_i])
+                row["empty_arena_count"] = int(per_motif_empty[motif_i])
+                row["empty_arena_fraction"] = (
+                    per_motif_empty[motif_i] / orig if orig > 0 else 0.0
+                )
+            rows.append(row)
+    return pd.DataFrame(rows), pd.DataFrame(validity_rows)
 
 
 def plot_heatmap(df: pd.DataFrame, out_path: Path,
@@ -271,6 +436,19 @@ def main() -> None:
                         help="YAML de mapping motif_id → étiquette comportementale. "
                              "Ajoute une colonne 'label' aux CSV et utilise ces "
                              "étiquettes sur les axes des graphiques.")
+    parser.add_argument("--validity-source", type=Path, default=None,
+                        help="Dossier des .h5 PRÉ-fill (avant fill_nan_h5), "
+                             "typiquement data/vame-input/single-enhanced-2026-05. "
+                             "Active la détection des frames empty-arena en bord "
+                             "d'enregistrement (NaN au tout début/fin).")
+    parser.add_argument("--min-edge-frames", type=int, default=25,
+                        help="Longueur minimale d'un bloc NaN en bord pour le "
+                             "compter comme empty-arena (défaut 25 = 1 s @ 25 fps). "
+                             "En-dessous c'est traité comme du bruit DLC ponctuel.")
+    parser.add_argument("--mask-empty", action="store_true",
+                        help="Recalcule les fréquences en excluant les frames "
+                             "empty-arena du dénominateur (le count original "
+                             "reste dans la colonne 'count' pour audit).")
     args = parser.parse_args()
 
     try:
@@ -302,7 +480,12 @@ def main() -> None:
         print("  ℹ Aucun label — passe --labels <fichier.yaml> "
               "pour étiqueter les motifs (YAML format: motif_id: nom).")
 
-    df = build_dataframe(seg_files, meta_index, labels)
+    df, validity_df = build_dataframe(
+        seg_files, meta_index, labels,
+        validity_source=args.validity_source,
+        min_edge_frames=args.min_edge_frames,
+        mask_empty=args.mask_empty,
+    )
     if df.empty:
         print("❌ DataFrame vide, rien à analyser.", file=sys.stderr)
         sys.exit(1)
@@ -310,6 +493,18 @@ def main() -> None:
     n_motifs = df["motif"].nunique()
     n_sessions = df["session_full"].nunique()
     print(f"  → {n_sessions} sessions × {n_motifs} motifs = {len(df)} lignes")
+    if not validity_df.empty:
+        n_affected = int(
+            (validity_df["n_empty_start"] + validity_df["n_empty_end"] > 0).sum()
+        )
+        total_empty = int(
+            validity_df["n_empty_start"].sum() + validity_df["n_empty_end"].sum()
+        )
+        mode_txt = ("exclues des fréquences (--mask-empty)" if args.mask_empty
+                    else "diagnostique uniquement — repasse avec --mask-empty "
+                         "pour les exclure")
+        print(f"  → empty-arena : {n_affected}/{len(validity_df)} sessions "
+              f"affectées, {total_empty} frames au total ({mode_txt})")
 
     out_dir = project / "analysis"
     out_dir.mkdir(exist_ok=True)
@@ -323,6 +518,9 @@ def main() -> None:
     pivot.to_csv(out_dir / "motif_usage.csv")
     df.to_csv(out_dir / "motif_usage_long.csv", index=False)
     print(f"\n✓ CSV sauvés : {out_dir}/motif_usage.csv et motif_usage_long.csv")
+    if not validity_df.empty:
+        validity_df.to_csv(out_dir / "validity_per_session.csv", index=False)
+        print(f"✓ Validity par session : {out_dir}/validity_per_session.csv")
 
     # Plots
     plot_heatmap(df, out_dir / "heatmap_usage.png", labels)
