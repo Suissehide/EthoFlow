@@ -189,8 +189,11 @@ python scripts/crop_arenes.py --all
 
 # 2. DLC single-animal sur les vidéos croppées (env: dlc)
 conda activate dlc
-python scripts/run_dlc_inference.py --mode single-animal --all
+python scripts/run_dlc_inference.py --mode single-animal --all \
+       --video-adapt --video-adapt-batch-size 2
 ```
+
+> Sur GPU 16 Go (RTX 5080 / 4080), garde `--video-adapt-batch-size 2`. Sur GPU 24 Go, tu peux remonter à 4-8. Sans cette option, le défaut DLC (8) déborde silencieusement en OOM ou paging WDDM. Détails dans [`docs/ETHOFLOW.md`](docs/ETHOFLOW.md#54-dlc-video-adapt-et-vram-limit%C3%A9e) §5.4.
 
 ### Comparer les deux chemins
 
@@ -226,9 +229,17 @@ ethoflow/
 │   ├── sync_from_excel.py             # Excel → metadata.yaml
 │   ├── calibrate_arenes.py            # GUI : tracer les 4 ROI d'arène
 │   ├── crop_arenes.py                 # crop optionnel (pour labellisation)
-│   ├── run_dlc_inference.py           # SuperAnimal multi-animal ou modèle custom
+│   ├── post_process_cropped.py        # nettoyage post-crop (rotation, recentrage)
+│   ├── run_dlc_inference.py           # SuperAnimal multi/single-animal ou modèle custom (--video-adapt-batch-size 2 sur 16 Go)
 │   ├── assign_arenas.py               # split DLC multi-animal → 4 .h5 par arène
-│   ├── run_vame.py                    # analyse VAME (squelette)
+│   ├── filter_keypoints.py            # vire les keypoints non fiables (queue distale, etc.) — cf. ETHOFLOW.md §6
+│   ├── fill_nan_h5.py                 # impute les NaN restants avant VAME
+│   ├── rekey_h5.py                    # re-clé un h5 à la convention VAME (df_with_missing)
+│   ├── trim_empty_arena.py            # tronque h5 + mp4 en miroir des empty-arena (cf. ETHOFLOW.md §6.6)
+│   ├── inspect_session.py             # QC visuel par session (couverture, gaps)
+│   ├── inspect_vame_project.py        # QC d'un projet VAME
+│   ├── run_vame.py                    # orchestration VAME (setup / align / train / segment / motif-videos / community)
+│   ├── analyze_vame.py                # analyse statistique post-VAME (--labels / --validity-source / --mask-empty)
 │   └── run_pipeline.py                # orchestrateur tout-en-un
 │
 ├── configs/

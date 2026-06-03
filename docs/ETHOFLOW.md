@@ -322,6 +322,26 @@ Si la caméra est strictement fixe, les coords sont identiques pour toutes les s
 - `ethoflow/data/dlc-output/`, `ethoflow/data/vame-output/` : sauvegarder, ce sont des données dérivées coûteuses à recalculer
 - `ethoflow/data/cropped/` : éphémère, recalculable à partir de la source — pas besoin de sauvegarder
 
+### 3.7 SOP enregistrement
+
+> 💡 **Règle apprise dans la douleur sur la cohorte M1/M2 2026-05** : démarrer l'enregistrement caméra **après** placement des souris dans les arènes, jamais avant.
+
+Sur cette cohorte, ~60 % des sessions (22/36 arènes) ont eu une période initiale d'arène vide allant de 11 à 86 secondes selon l'enregistrement. C'est un problème en aval :
+
+- DLC ne détecte rien sur ces frames → NaN dans le `.h5`
+- `fill_nan_h5.py` impute en remplissant avec la médiane de la session → segments « pose constante imputée »
+- VAME forme un (ou plusieurs) motif autour de ces segments artificiels, ce qui pollue les statistiques par condition
+- La correction a posteriori (`--mask-empty` ou `trim_empty_arena.py`, cf. §6.6) marche mais ajoute des étapes et complique l'interprétation des cluster_videos
+
+**Bonne pratique opérationnelle :**
+
+1. Placer les 4 souris dans leurs arènes respectives
+2. Vérifier au moniteur que les 4 sont effectivement présentes (et qu'aucune n'a grimpé sur le bord caméra)
+3. **Puis** appuyer sur Record
+4. Arrêter l'enregistrement avant de retirer les souris (pas pendant)
+
+Si oubli ponctuel (1-2 sessions), la pipeline sait nettoyer ; si systématique sur une cohorte entière, on passe plusieurs heures en post.
+
 ---
 
 ## 4. Créer ton premier modèle DeepLabCut
@@ -549,6 +569,26 @@ Le chercheur double-clique, voit la console défiler, sait que c'est fini quand 
 
 > En partie 7 on remplace ce `.bat` par une interface Streamlit beaucoup plus agréable.
 
+### 5.4 DLC video-adapt et VRAM limitée
+
+`run_dlc_inference.py --video-adapt` active le fine-tuning court de SuperAnimal sur tes propres vidéos. C'est l'étape « Starting object detector training… » dans les logs, et c'est l'étape la plus VRAM-intensive de tout le pipeline.
+
+**Sur GPU 16 Go (RTX 5080, 4080…) le défaut DLC `video_adapt_batch_size=8` déborde et provoque soit un OOM soit (pire) un freeze silencieux par paging WDDM** (cf. §9). On expose un paramètre dédié dans `run_dlc_inference.py` :
+
+```bash
+python scripts/run_dlc_inference.py <session> --mode single-animal \
+    --video-adapt --video-adapt-batch-size 2
+```
+
+`2` est notre valeur de travail confirmée sur le 5080 / 16 Go. Si tu as un GPU 24 Go (RTX 4090, A6000…), tu peux probablement monter à 4 ou 8 sans rebondir.
+
+Deux autres dispositifs déjà câblés dans le script pour minimiser les ratés VRAM :
+
+- **`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`** est posé automatiquement en tête du module via `os.environ.setdefault`. Ça réduit la fragmentation de l'allocateur PyTorch — il y a souvent un GB+ de mémoire réservée-mais-non-allouée gaspillée sans ce flag.
+- **Côté Windows** : NVIDIA Control Panel → Manage 3D Settings → « CUDA - Sysmem Fallback Policy » → **« Prefer No Sysmem Fallback »**. Sans ça, en cas d'OOM CUDA pagine sur la RAM système et l'entraînement tourne en boucle silencieuse au lieu de remonter une vraie erreur. À activer une fois pour toutes sur la machine de calcul.
+
+**Reprise après crash** : `is_processed()` dans `run_dlc_inference.py` (mode single-animal) se base **exclusivement** sur `data/vame-input/<session>/<session>_A*.h5` pour décider si une session est traitée. Le scratch intermédiaire `data/dlc-output/<session>/cropped-raw/` n'est plus consulté (un crash en cours de `--video-adapt` y laisse un `.h5` partiel au nom canonique qui faussait l'ancienne logique). Donc relancer `--all --mode single-animal` après un crash reprend automatiquement les sessions incomplètes.
+
 ---
 
 ## 6. Analyse VAME
@@ -602,6 +642,157 @@ vame.community(config, show_umap=True)
 ### 6.5 Encapsuler dans le pipeline
 
 Une fois validé manuellement sur quelques sessions, encapsuler ces commandes dans `scripts/run_vame.py` qui prend une liste de sessions DLC en entrée et produit les sorties dans `data/vame-output/`.
+
+### 6.6 Détection et exclusion des artefacts empty-arena
+
+**Le problème.** Si l'enregistrement caméra a démarré avant la mise en place des souris (cf. §3.7), les premières secondes/minutes de chaque session sont une arène vide. DLC ne détecte rien, `fill_nan_h5.py` impute avec la médiane de session, et VAME forme un motif sur ces patterns artificiels. Résultat : un (ou plusieurs) motif où, par session, parfois c'est du « vrai grooming » et parfois c'est de l'« arène vide imputée ». Mélange empoisonnant pour les statistiques par condition.
+
+**Détection automatique.** `analyze_vame.py` sait identifier ces frames a posteriori, à partir des `.h5` **pré-fill** (avant que `fill_nan_h5` ne masque les NaN par imputation) :
+
+```bash
+python scripts/analyze_vame.py --validity-source data/vame-input/single-enhanced-2026-05
+```
+
+Heuristique implémentée : un bloc contigu de NaN qui démarre au frame 0 (ou termine au dernier frame), de longueur ≥ `--min-edge-frames` (défaut 25 = 1 s à 25 fps), est classé comme **empty-arena**. Les blocs internes (de quelques secondes à 1-2 min) restent dans l'analyse car ils correspondent à de la **vraie immobilité** de souris que DLC perd temporairement — comportement légitime à conserver.
+
+Output diagnostique : `validity_per_session.csv` (frames empty par session) + colonnes `empty_arena_count` / `empty_arena_fraction` ajoutées à `motif_usage_long.csv` (combien de chaque motif × session tombe dans la zone empty).
+
+**Deux modes d'action.**
+
+1. **Voie pragmatique — masquage des fréquences** (`--mask-empty`) :
+
+   ```bash
+   python scripts/analyze_vame.py \
+       --validity-source data/vame-input/single-enhanced-2026-05 \
+       --mask-empty \
+       --labels data/results/motif_labels_hmm15.yaml
+   ```
+
+   Les fréquences dans les CSVs et plots sont recalculées en excluant les frames empty-arena du dénominateur. Les counts originaux restent dans la colonne `count` pour audit. **Limitation** : les `cluster_videos` générés par `motif-videos` contiennent encore des extraits empty-arena (puisque générés AVANT le masquage), ce qui rend la labellisation visuelle ambiguë pour les motifs polluants. On contourne en notant explicitement dans le YAML : `5: grooming (contaminated empty-arena V01_A2, V02_*)`.
+
+2. **Voie propre — trim des sources puis re-segment** (`trim_empty_arena.py`) :
+
+   ```bash
+   python scripts/trim_empty_arena.py \
+       --validity-csv vame-projects/<projet>/analysis/validity_per_session.csv \
+       --h5-input data/vame-input/<dataset>-clean \
+       --h5-output data/vame-input/<dataset>-trimmed \
+       --video-input data/cropped \
+       --video-output data/cropped-trimmed
+   ```
+
+   Tronque les `.h5` ET les `.mp4` du même nombre de frames (lecture/réencodage opencv frame-accurate). Les sessions non affectées sont copiées telles quelles. Compte ~60-90 min de calcul pour 22 vidéos affectées.
+
+   Ensuite tu crées un nouveau projet VAME sur les sorties trimées :
+
+   ```bash
+   python scripts/run_vame.py setup \
+       --input-dir data/vame-input/<dataset>-trimmed \
+       --cropped-dir data/cropped-trimmed \
+       --project-name <nom>-trimmed
+   ```
+
+   ⚠️ **Caveat important découvert sur la cohorte M1/M2 2026-05** : le retrain VAME sur des données nettoyées de leur empty-arena overfit systématiquement, quel que soit le réglage de beta/dropout/zdims (cf. §6.8). Le test_loss minimum reste similaire avec ou sans empty-arena (~1100 en valeur absolue, plus haut que les ~540 du run original — qui était gonflé artificiellement par les frames triviales). En pratique sur cette cohorte, on est resté sur la voie 1 (masquage) plutôt que la voie 2 (trim+retrain).
+
+**Recommandation par cohorte :**
+
+- Si la SOP §3.7 a été respectée et qu'aucune session n'est affectée → rien à faire, `analyze_vame.py` tout seul suffit.
+- Si quelques sessions sont affectées (< 30 %) → voie 1 (masquage) avec annotation YAML.
+- Si majorité des sessions sont affectées (cas M1/M2 2026-05) → voie 1 par défaut. Voie 2 seulement si on veut absolument des cluster_videos visuellement propres pour la labellisation, et en acceptant 2-3 h de tuning VAME en plus.
+
+### 6.7 Labellisation des motifs
+
+Une fois `motif-videos` exécuté, chaque motif a un fichier `motif_<i>.mp4` (montage de clips où ce motif est actif à travers les sessions), dans :
+
+```
+vame-projects/<projet>/results/<une_session>/VAME/hmm-15/cluster_videos/
+```
+
+(le contenu est identique d'une session à l'autre, n'importe laquelle convient pour la labellisation).
+
+**Workflow :**
+
+1. Visionner 3-5 clips par motif (~1 min/motif, total ~15-20 min pour 15 motifs)
+2. Attribuer un label éthologique au format YAML libre :
+
+   ```yaml
+   # data/results/motif_labels_hmm15.yaml
+   0: immobility
+   1: slow locomotion
+   2: rearing (unsupported)
+   3: grooming face
+   4: grooming body
+   5: fast locomotion
+   6: sniffing wall
+   7: thigmotaxis
+   8: ambiguous          # OK de mettre ambigu si pas tranchable
+   9: artifact           # OK pour les motifs non-comportementaux
+   # ...
+   ```
+
+3. Relancer `analyze_vame.py --labels <ce_yaml>` pour propager les labels dans tous les CSV et plots.
+
+**Vocabulaire éthologique standard pour open-field souris** (à piocher selon ce qu'on voit) :
+
+| Catégorie | Labels |
+|---|---|
+| **Locomotion** | `locomotion`, `slow locomotion`, `fast locomotion`, `running`, `pivoting`, `turning` |
+| **Stationary** | `immobility`, `freezing`, `resting`, `crouching` |
+| **Vertical exploration** | `rearing supported`, `rearing unsupported`, `stretch-attend posture` (SAP) |
+| **Sniffing** | `sniffing wall`, `sniffing floor`, `sniffing air` |
+| **Grooming** | `grooming face`, `grooming body`, `grooming tail`, `grooming genital`, `scratching` |
+| **Arène-specific** | `thigmotaxis`, `center exploration`, `corner` |
+| **Autres** | `jumping`, `digging`, `wall climbing`, `transition`, `ambiguous`, `artifact` |
+
+**Conseils pratiques :**
+
+- Les motifs peu utilisés (< 1 % d'usage moyen sur la heatmap) sont souvent des artefacts ou des comportements rares — `ambiguous` ou `artifact` sont des labels honnêtes.
+- Il est normal d'avoir deux motifs avec le même label (`slow locomotion 1`, `slow locomotion 2`) — VAME a séparé deux nuances que le clustering distingue mais qu'on ne distingue pas visuellement.
+- Pour publication : double-labelliser indépendamment par deux personnes et reporter un Cohen's kappa de fiabilité inter-juges.
+- **Motifs contaminés par empty-arena** (cf. §6.6) : labelliser le contenu majoritaire et noter explicitement le caveat : `5: grooming (note: contaminated empty-arena V01_A2 / V02_*)`. C'est défendable scientifiquement si l'analyse downstream utilise `--mask-empty`.
+
+### 6.8 Notes hyperparamètres VAME (apprises dans la douleur)
+
+Découvertes empiriques de la cohorte M1/M2 2026-05, à connaître avant de relancer un train VAME sur une nouvelle cohorte.
+
+**Les défauts VAME peuvent masquer un overfit massif.** Avec le config par défaut (`beta: 1, dropout: 0 partout, noise: false, kl_start: 2, annealtime: 4`), VAME présente une `test_loss` apparemment stable parce que les frames imputées par `fill_nan_h5` (poses constantes triviales à reconstruire) gonflent artificiellement à la baisse la moyenne. Sur des données nettoyées (sans ces frames), l'overfit devient visible : train loss descend, test loss remonte.
+
+**Le minimum atteignable de test_loss dépend essentiellement de la dataset, pas des hyperparamètres.** Sur la cohorte M1/M2 nettoyée, plage 1000-1200 quel que soit le réglage (beta 1, 4, 10 ; dropout 0, 0.2, 0.4 ; zdims 30, 15). Les ~540 obtenus sur les données non nettoyées étaient une illusion. **Conclusion pratique : on ne traque pas une « bonne » valeur absolue de test_loss, on évalue le modèle qualitativement sur la cohérence des motifs en aval.**
+
+**VAME sauvegarde son `best_model.pkl` à la fin de l'entraînement**, pas au cours des epochs. Si tu Ctrl+C en cours de route, le fichier n'existe pas et `segment` plante. Pour avoir un modèle utilisable rapidement : **set `max_epochs: 30` dans `config.yaml`**, lance, laisse finir (~30 min). À la fin, `best_model.pkl` contient automatiquement le checkpoint du minimum de test_loss (typiquement epoch 5-10 sur des données nettoyées, plus tard sur des données avec frames triviales).
+
+**Le critère `model_convergence` est basé sur la `train_loss`, pas la `test_loss`.** Le set par défaut (50) déclenche un auto-stop quand la train_loss stagne 50 epochs — ce qui peut arriver en plein overfit (train descend toujours mais test depuis longtemps remontée). **Set `model_convergence: 200` pour neutraliser ce critère** et te reposer uniquement sur `max_epochs`.
+
+**Si tu veux régulariser plus** (pour cluster_videos plus propres, latent mieux structuré), les leviers efficaces dans l'ordre :
+
+1. **`dropout_encoder: 0.2-0.4`** + **`dropout_pred: 0.2-0.4`**. (Note : `dropout_rec` ne fait rien quand `n_layers: 1`, c'est un warning PyTorch silencieux dans VAME — laisse à 0 ou ignore-le.)
+2. **`noise: true`** — bruit gaussien sur les inputs d'entraînement, équivalent d'une augmentation de données.
+3. **`zdims: 10-15`** au lieu de 30. Force vraiment le bottleneck à compresser. Réduit aussi `hidden_size_*` à 128 si tu veux taper plus fort.
+4. **`kl_start: 5-10`** + **`annealtime: 20-30`** au lieu de `kl_start: 2`, `annealtime: 4`. Donne plus de temps au modèle pour s'installer avant que la pression KL ne kicke.
+5. **`beta`** : entre 1 et 10. Sur cette cohorte la valeur de beta n'a pas eu d'effet majeur, parce que la contribution KL au loss total reste petite quoi qu'il arrive (KL ~5-8, MSE ~1000-2000, donc beta×KL << MSE même à beta=10).
+
+**Combinaison « régularisée minimale » testée comme dernière itération sur la cohorte :**
+
+```yaml
+beta: 4
+dropout_encoder: 0.4
+dropout_rec: 0.4    # ignoré si n_layers=1 mais inoffensif
+dropout_pred: 0.4
+noise: true
+zdims: 15
+hidden_size_layer_1: 128
+hidden_size_layer_2: 128
+hidden_size_rec: 128
+hidden_size_pred: 128
+kl_start: 5
+annealtime: 25
+model_convergence: 200
+max_epochs: 30
+```
+
+Ça n'a pas magiquement résolu l'overfit (test_loss min ~1145 quand même), mais le modèle au minimum est plus généralisable que celui en config par défaut (latent plus régulier, moins de mémorisation par exemple). C'est une bonne base de départ pour une nouvelle cohorte.
+
+**Bug VAME à noter** : `vame.train_model()` fait `os.mkdir(model_losses)` sans `exist_ok=True`. Au deuxième run dans le même projet, ça plante avec `FileExistsError`. Workaround : `rmdir /S /Q "<projet>/model/model_losses"` avant chaque relance.
 
 ---
 
@@ -739,6 +930,89 @@ Ouvre http://localhost:8000 et tu as une doc navigable. Avec un peu de config, h
 
 - Quand tu modifies le code, **modifie la doc dans le même commit Git**. Sinon elle dérive en quelques semaines et devient pire qu'inutile.
 
+### Crash Windows BSOD `HYPERVISOR_ERROR (0x20001)` pendant l'entraînement
+
+Observé sur Dell Tower Plus EBT2250 (Z890 chipset, Arrow Lake-S) avec RTX 5080. Pattern : crash systématique à l'étape « Starting object detector training » de `--video-adapt`. Le minidump dans `C:\Windows\Minidump\` analysé via WinDbg (`!analyze -v`) pointe vers `intelppm.sys!HvRequestIdle` + Arg1=0x28 (« internal error in the I/O MMU module »).
+
+C'est un bug d'interaction entre le power management Intel, Hyper-V (machine Secured-core) et le VT-d (IOMMU). **Pas un problème de PSU, RAM, ou GPU.**
+
+**Fix** : F2 au démarrage → BIOS Dell → Virtualization Support → désactiver « VT for Direct I/O » (≠ VT-x qu'on laisse activé). Sauver, redémarrer. Le composant qui faute (IOMMU) est physiquement retiré du chemin, l'hyperviseur reste actif (Memory Integrity peut rester on) et le crash disparaît.
+
+Aucun impact sur les perfs DLC/VAME. Tu perds juste la protection DMA, sans conséquence sur un poste de calcul en labo.
+
+### CUDA out of memory pendant `--video-adapt`
+
+Symptômes :
+- Vrai cas : exception `torch.OutOfMemoryError` claire dans la console
+- Pire cas (sans config NVIDIA) : freeze silencieux avec `nvidia-smi` qui montre 100 % GPU-util mais ~80 W de puissance et 38 °C — c'est du paging WDDM, pas du calcul
+
+**Fix systémique** : NVIDIA Control Panel → Manage 3D Settings → « CUDA - Sysmem Fallback Policy » → **« Prefer No Sysmem Fallback »**. Ça transforme le freeze silencieux en vraie erreur OOM exploitable. À configurer une fois pour toutes.
+
+**Fix par paramètre** : `--video-adapt-batch-size 2` (au lieu du défaut DLC 8). Voir §5.4.
+
+**Aide complémentaire** : `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (déjà câblé en tête de `run_dlc_inference.py` via `os.environ.setdefault`).
+
+### VAME plante au 2ᵉ run de `train` avec `FileExistsError: model_losses`
+
+Bug VAME-py 0.13.0 : `os.mkdir(model_losses)` sans `exist_ok=True`. Workaround :
+
+```cmd
+rmdir /S /Q "<projet>/model/model_losses"
+python scripts/run_vame.py train
+```
+
+Faire pareil pour `<projet>/model/best_model` et `<projet>/logs` si tu veux repartir d'une session TensorBoard propre.
+
+⚠️ **Ne supprime PAS `<projet>/data/processed/`** entre deux runs : VAME y stocke les `.nc` initialisés au `setup`, et `align` les modifie en place. Si tu supprimes processed/, il faut refaire `setup --force` pour reconstruire les fichiers initiaux.
+
+### TensorBoard affiche les courbes de deux runs mélangées
+
+Si tu relances `train` plusieurs fois dans le même projet sans nettoyer, les events s'accumulent dans `logs/tensorboard/VAME/` et TB les concatène visuellement (le warning « Found more than one graph event per run » apparaît à l'ouverture). Pour un monitoring propre, supprime le dossier avant chaque relance :
+
+```cmd
+rmdir /S /Q "<projet>/logs/tensorboard"
+```
+
+---
+
+## 10. Setup futur : autres vues / modèles DLC
+
+**Pas de SuperAnimal pour la vue de dessous** (vérifié sur modelzoo officiel mai 2026). Les SuperAnimal disponibles sont `superanimal_topviewmouse` (le tien), `superanimal_quadruped` (quadrupèdes vus de profil) et `superanimal_humanbody`. Rien pour bottom-view (plaque de verre, gait analysis).
+
+**Stratégie pragmatique pour ajouter une vue bottom-view** : **transfer learning** depuis `superanimal_quadruped`, qui partage des features visuelles bas niveau avec ton setup et qui voit naturellement les pattes (au contraire du topview qui ne les voit pas du tout).
+
+Code template (à adapter quand tu y arriveras) :
+
+```python
+import deeplabcut
+from deeplabcut.modelzoo import build_weight_init
+
+config_path = "<chemin>/config.yaml"  # projet DLC custom avec tes propres keypoints bottom-view
+
+weight_init = build_weight_init(
+    cfg=config_path,
+    super_animal="superanimal_quadruped",
+    model_name="hrnet_w32",
+    detector_name="fasterrcnn_resnet50_fpn_v2",
+    with_decoder=False,  # nouveau decoder pour TES keypoints
+)
+
+deeplabcut.create_training_dataset(config_path, weight_init=weight_init)
+
+deeplabcut.train_network(
+    config_path,
+    superanimal_name="superanimal_quadruped",
+    superanimal_transfer_learning=True,
+    epochs=50,
+)
+```
+
+`with_decoder=False` + `superanimal_transfer_learning=True` = on charge le backbone Quadruped et on entraîne par-dessus un nouveau décodeur sur tes keypoints custom (qui peuvent être totalement différents de ceux de Quadruped — pattes/coussinets/ventre pour bottom-view au lieu de tête/oreilles).
+
+**Budget labellisation estimé** : 100-150 frames bien réparties (différentes postures et timings) suffisent grâce au pré-entraînement. C'est 5-10× moins que de partir from-scratch.
+
+Ensuite, le pipeline EthoFlow existant intègre le modèle custom via `--mode custom` dans `run_dlc_inference.py` (config dans `configs/pipeline_config.yaml` → clé `dlc_project_config`).
+
 ---
 
 ## Annexes
@@ -775,3 +1049,46 @@ Ouvre http://localhost:8000 et tu as une doc navigable. Avec un peu de config, h
 - [ ] Construire l'interface Streamlit
 - [ ] Servir la doc avec MkDocs
 - [ ] Préparer la passation
+
+### D. Journal de cohorte M1/M2 2026-05
+
+Chronologie pour mémoire de ce qui s'est passé sur la première vraie cohorte avec ce pipeline. À jour : juin 2026.
+
+**Phase 1 — Stabilisation hardware (Windows / RTX 5080)**
+
+Plusieurs jours bloqués sur des crashs BSOD `HYPERVISOR_ERROR` à chaque tentative de `--video-adapt`. Diagnostic via minidumps (`C:\Windows\Minidump\` + WinDbg `!analyze -v`) : interaction Intel power management × Hyper-V (machine Secured-core Dell Tower Plus EBT2250) × VT-d. **Fix : désactiver VT-d dans le BIOS** (cf. §9). Pas de retombée sur les perfs.
+
+**Phase 2 — VRAM video-adapt**
+
+Avec VT-d désactivé, plus de crash mais freeze silencieux à « Starting object detector training… » : 100 % GPU-util, 78 W / 38 °C, 15.8 / 16.3 GB VRAM. Diagnostic : oversubscription VRAM + paging WDDM transparent (Sysmem Fallback Policy par défaut « auto »). **Fix : `Prefer No Sysmem Fallback` dans NVIDIA Control Panel + `--video-adapt-batch-size 2`** (au lieu du défaut DLC 8). Câblage `expandable_segments:True` dans `run_dlc_inference.py` (commit `c5a846d`).
+
+**Phase 3 — DLC inference complète**
+
+`--video-adapt-batch-size 2` ouvre la voie. Tous les 36 (session × arène) passent avec QC ≥ 92 % de couverture. Quelques bugs `is_processed()` corrigés au passage pour gérer les reprises après crash (commits `d2e5492`, `604dc8d`).
+
+**Phase 4 — Empty-arena discovery**
+
+À l'analyse VAME, on observe sur les `motif-videos` que le motif 5 (entre autres) montre **tantôt du grooming, tantôt une arène vide** selon la session. Investigation via comparaison des `.h5` pré-fill et post-fill : 22/36 arènes ont 11 à 86 secondes d'arène vide en tout début d'enregistrement (la caméra a été démarrée avant la mise en place des souris).
+
+Fix amont pour les cohortes futures : SOP §3.7 « démarrer enregistrement après placement ».
+
+Fix aval (cette cohorte) : `analyze_vame.py` étendu avec :
+- `--validity-source <dir>` : détecte les blocs NaN edge des `.h5` pré-fill (commit `7d6afbd`)
+- `--mask-empty` : recalcule les fréquences en excluant les frames empty
+- `--labels <yaml>` : propage des labels comportementaux dans CSV+plots (commit `6fdabaa`)
+
+Plus `trim_empty_arena.py` (nouveau script, commit `4c2a2cc`) qui tronque h5+vidéo en miroir pour repartir sur un dataset vraiment propre.
+
+**Phase 5 — Retrain VAME sur données trimées (échec, info importante)**
+
+Tentative de retrain VAME complet sur les données trimées pour avoir des cluster_videos propres et des fréquences sans avoir besoin de `--mask-empty`. 5 itérations d'hyperparamètres (beta 1, 4, 10 ; dropout 0, 0.2, 0.4 ; zdims 30 → 15 ; hidden 256 → 128 ; KL anneal accéléré → ralenti).
+
+**Toutes overfittent.** Pattern systématique : `train_loss` descend, `test_loss` remonte rapidement (minimum entre epoch 4 et 10 selon le réglage). **Découverte importante** : les ~540 de test_loss du run original n'étaient pas un succès, c'était une illusion gonflée par les ~20 000 frames imputées avec pose constante (triviales à reconstruire). Sur du « vrai » comportement (données trimées), le plancher de `test_loss` atteignable se situe en réalité vers 1100-1200. Voir §6.8 pour la liste complète des leviers de régularisation et leurs limites.
+
+**Décision finale pour cette cohorte** : on est restés sur le projet original `OF-single-enhanced-2026-05` avec `--mask-empty + --labels` dans `analyze_vame.py`. Les statistiques sont correctes, les cluster_videos sont parfois ambigus (motifs polluants notés explicitement dans le YAML).
+
+**À retenir pour la cohorte suivante :**
+
+1. Démarrer l'enregistrement APRÈS placement des souris (§3.7) — ça élimine tout le problème en amont.
+2. Si exception (1-2 sessions), la voie « masquage » `--mask-empty` suffit largement.
+3. Le retrain VAME sur données nettoyées est PROBABLEMENT possible mais demande plus de tuning qu'on n'a fait — peut-être tester `superanimal_topviewmouse` + transfer learning DLC (cf. §10 et la doc DLC à jour) plutôt qu'un VAE from-scratch sur si peu de données.
