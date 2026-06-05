@@ -35,9 +35,12 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_RAW = ROOT / "data" / "raw"
+DEFAULT_DATA_RAW = ROOT / "data" / "raw"
 DEFAULT_EXCEL = ROOT.parent / "data" / "OpenField_trials_CDUPLAA.xlsx"
 DEFAULT_VIDEOS = ROOT.parent / "data"
+
+# Variable globale mise à jour par --project-dir
+DATA_RAW = DEFAULT_DATA_RAW
 
 
 def fallback_from_codebook(mouse_id: int, timepoint: str) -> dict:
@@ -196,14 +199,20 @@ def write_metadata(metadata: dict, dry_run: bool = False) -> Path:
 
 
 def main():
+    global DATA_RAW
     parser = argparse.ArgumentParser(description="Sync sessions depuis Excel.")
     parser.add_argument("--excel", type=Path, default=DEFAULT_EXCEL,
                         help=f"Chemin du fichier Excel (défaut: {DEFAULT_EXCEL})")
     parser.add_argument("--videos-dir", type=Path, default=DEFAULT_VIDEOS,
                         help=f"Dossier des .mp4 (défaut: {DEFAULT_VIDEOS})")
+    parser.add_argument("--project-dir", type=Path, default=None,
+                        help="Dossier du projet EthoFlow (écrit dans <project>/data/raw/)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Affiche sans écrire de fichier")
     args = parser.parse_args()
+
+    if args.project_dir:
+        DATA_RAW = args.project_dir / "data" / "raw"
 
     if not args.excel.exists():
         print(f"❌ Excel introuvable : {args.excel}", file=sys.stderr)

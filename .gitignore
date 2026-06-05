@@ -30,6 +30,7 @@ data/results/*
 # Modèles entraînés — trop lourds pour Git
 dlc-projects/
 vame-projects/
+projects/
 *.h5
 *.pickle
 *.pkl
