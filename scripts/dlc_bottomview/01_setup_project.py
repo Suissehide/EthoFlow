@@ -29,14 +29,14 @@ import deeplabcut as dlc
 # À ÉDITER
 # ----------------------------------------------------------------------
 
-VIDEO_PILOTE = Path("/chemin/vers/ta_video_pilote.mp4")
-WORKDIR = Path.home() / "Inserm" / "dlc-projects"
+VIDEO_PILOTE = Path("D:\\ETHOVISION\\202606005-MCCfemellescapto-bottomIR\\Media Files\\970.mp4")
+WORKDIR = Path("D:\\LEO\\dlc-projects")
 PROJECT_NAME = "souris-bottomview"
 EXPERIMENTER = "Leo"
 
 # Nombre de frames extraites automatiquement (kmeans pour la diversité posturale).
 # Édite aussi le `numframes2pick` dans config.yaml si tu veux > 30.
-N_AUTO_FRAMES = 30
+N_AUTO_FRAMES = 60
 
 
 # ----------------------------------------------------------------------

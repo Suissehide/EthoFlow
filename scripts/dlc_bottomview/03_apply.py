@@ -24,11 +24,11 @@ import deeplabcut as dlc
 # À ÉDITER
 # ----------------------------------------------------------------------
 
-CONFIG = "/chemin/absolu/vers/souris-bottomview-Leo-2026-06-XX/config.yaml"
+CONFIG = "D:\\LEO\\dlc-projects\\souris-bottomview-Leo-2026-06-05\\config.yaml"
 
 # Une ou plusieurs vidéos à analyser. Chemins absolus de préférence.
 VIDEOS = [
-    "/chemin/vers/ta_video_pilote.mp4",
+    "D:\\ETHOVISION\\202606005-MCCfemellescapto-bottomIR\\Media Files\\970.mp4",
     # "/chemin/vers/autre_video.mp4",
 ]
 

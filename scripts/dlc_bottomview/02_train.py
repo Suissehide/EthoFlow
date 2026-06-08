@@ -26,7 +26,7 @@ from deeplabcut.modelzoo import build_weight_init
 # ----------------------------------------------------------------------
 
 # Chemin absolu vers le config.yaml généré par 01_setup_project.py
-CONFIG = "/chemin/absolu/vers/souris-bottomview-Leo-2026-06-XX/config.yaml"
+CONFIG = "D:\\LEO\\dlc-projects\\souris-bottomview-Leo-2026-06-05\\config.yaml"
 
 # 50 epochs suffisent grâce au transfer learning (vs ~200k iterations
 # en from-scratch).
@@ -48,7 +48,7 @@ def main() -> None:
     )
 
     print("Création du training dataset...")
-    dlc.create_training_dataset(CONFIG, weight_init=weight_init)
+    dlc.create_training_dataset(CONFIG, weight_init=weight_init,net_type="hrnet_w32")
 
     print(f"Entraînement ({EPOCHS} epochs, transfer learning actif)...")
     dlc.train_network(
