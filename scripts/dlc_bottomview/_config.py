@@ -106,3 +106,27 @@ LABELED_VIDEO_PCUTOFF = 0.6
 # - False = production (juste produire les .h5 pour VAME) → gagne ~1× la
 #           durée de la vidéo en calcul
 MAKE_LABELED_VIDEO = True
+
+
+# ----------------------------------------------------------------------
+# Phase 2 — ajout de vidéos cross-mouse (04_add_videos.py)
+# ----------------------------------------------------------------------
+
+# Vidéos supplémentaires à ajouter au training set après le pilote, pour
+# que le modèle apprenne des features anatomiques de la souris au lieu
+# de raccourcis spécifiques au décor de la vidéo pilote.
+#
+# 4-6 souris différentes suffisent largement pour le pilote phase 2,
+# pas la peine de tout mettre d'un coup. Tu peux re-lancer 04_add_videos
+# plus tard avec d'autres souris si besoin.
+ADDITIONAL_VIDEOS: list[Path] = [
+    # Path(r"D:\ETHOVISION\...\souris02.mp4"),
+    # Path(r"D:\ETHOVISION\...\souris03.mp4"),
+    # Path(r"D:\ETHOVISION\...\souris04.mp4"),
+    # Path(r"D:\ETHOVISION\...\souris05.mp4"),
+]
+
+# Nombre de frames à extraire par nouvelle vidéo. Plus petit que
+# N_AUTO_FRAMES (60) parce qu'on a déjà la diversité posturale du pilote ;
+# ici l'objectif est la diversité INTER-individus, pas intra.
+NEW_VIDEO_FRAMES = 20
