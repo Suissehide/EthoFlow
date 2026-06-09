@@ -1,0 +1,108 @@
+"""Configuration centralisée pour les scripts DLC bottom-view.
+
+Modifie ce fichier une seule fois — les scripts 01, 02, 03 et les éventuels
+scripts d'analyse à venir importent depuis ici. Ça évite de copier-coller des
+chemins absolus partout.
+
+Conventions :
+- Les chemins Windows utilisent des raw strings (r"...") pour éviter de
+  doubler les backslashes.
+- `CONFIG` est un str (et pas un Path) parce que DeepLabCut l'attend en str.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+
+# ----------------------------------------------------------------------
+# Projet DLC
+# ----------------------------------------------------------------------
+
+PROJECT_NAME = "souris-bottomview"
+EXPERIMENTER = "Leo"
+WORKDIR = Path(r"D:\LEO\dlc-projects")
+
+# Dossier du projet une fois `01_setup_project.py` exécuté.
+# DLC ajoute le nom de l'expérimentateur et la date à la création.
+# Mets à jour ce nom après le premier setup.
+PROJECT_DIR = WORKDIR / "souris-bottomview-Leo-2026-06-05"
+CONFIG = str(PROJECT_DIR / "config.yaml")
+
+
+# ----------------------------------------------------------------------
+# Vidéos
+# ----------------------------------------------------------------------
+
+# Vidéo principale utilisée pour le pilote et les premiers tests.
+PILOT_VIDEO = Path(
+    r"D:\ETHOVISION\202606005-MCCfemellescapto-bottomIR\Media Files\970.mp4"
+)
+
+# Liste des vidéos à analyser par `03_apply.py`. Peut contenir PILOT_VIDEO
+# seul au début, puis s'enrichir des autres souris quand tu les auras.
+VIDEOS_TO_ANALYZE: list[Path] = [
+    PILOT_VIDEO,
+    # Ajoute les autres vidéos ici, par exemple :
+    # Path(r"D:\ETHOVISION\...\autre_video.mp4"),
+]
+
+
+# ----------------------------------------------------------------------
+# Sortie
+# ----------------------------------------------------------------------
+
+# Les outputs d'inférence (h5, csv, vidéo annotée) atterrissent dans
+# <PROJECT_DIR>/result-videos/<nom_vidéo>/. Un dossier par vidéo source =
+# pas de mélange entre runs.
+RESULTS_DIR = PROJECT_DIR / "result-videos"
+
+
+# ----------------------------------------------------------------------
+# Extraction de frames (01_setup_project.py)
+# ----------------------------------------------------------------------
+
+# Nombre de frames extraites automatiquement par kmeans.
+# 60 = sweet spot pour un pilote single-video. À monter si tu ajoutes
+# plusieurs souris au projet (15-20 frames par souris supplémentaire).
+N_AUTO_FRAMES = 60
+
+
+# ----------------------------------------------------------------------
+# Transfer learning (02_train.py)
+# ----------------------------------------------------------------------
+
+# Pour la souris bottom-view, on transfer learning depuis Quadruped
+# qui voit les pattes pendant son entraînement (contrairement à
+# TopViewMouse qui ne les voit jamais).
+SUPERANIMAL_NAME = "superanimal_quadruped"
+MODEL_NAME = "hrnet_w32"
+DETECTOR_NAME = "fasterrcnn_resnet50_fpn_v2"
+
+# Architecture du modèle local. DOIT matcher MODEL_NAME, sinon size mismatch
+# au chargement des poids (cf. bug ResNet50 vs HRNet rencontré au 1er run).
+NET_TYPE = "hrnet_w32"
+
+
+# ----------------------------------------------------------------------
+# Training (02_train.py)
+# ----------------------------------------------------------------------
+
+EPOCHS = 50
+
+
+# ----------------------------------------------------------------------
+# Inférence et visualisation (03_apply.py)
+# ----------------------------------------------------------------------
+
+# Seuil de confiance pour l'affichage des keypoints dans la vidéo annotée.
+# - 0.6  = défaut DLC, propre pour un modèle qui marche bien
+# - 0.1  = mode diagnostic, affiche TOUTES les prédictions même non confiantes
+#   (utile quand le modèle semble « ne rien détecter » : tu vois s'il prédit
+#    quelque chose au mauvais endroit ou rien du tout)
+LABELED_VIDEO_PCUTOFF = 0.6
+
+# Génère ou non la vidéo annotée.
+# - True  = phase pilote / debug → INDISPENSABLE pour le QC visuel
+# - False = production (juste produire les .h5 pour VAME) → gagne ~1× la
+#           durée de la vidéo en calcul
+MAKE_LABELED_VIDEO = True

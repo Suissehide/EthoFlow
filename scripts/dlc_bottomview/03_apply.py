@@ -1,59 +1,85 @@
-"""Applique le modèle DLC bottom-view entraîné sur une ou plusieurs vidéos
-et produit la vidéo annotée pour inspection visuelle.
+"""Applique le modèle DLC bottom-view entraîné sur une ou plusieurs vidéos.
+
+Outputs (h5, csv, vidéo annotée) organisés par vidéo source dans :
+    <PROJECT_DIR>/result-videos/<nom_video_sans_extension>/
+
+Avantages de cette organisation :
+    - Pas de mélange avec d'autres fichiers à côté de la vidéo source
+    - Pas d'écrasement entre runs sur la même vidéo
+    - Tous les outputs du projet centralisés au même endroit
 
 Pré-requis :
-    - 02_train.py terminé avec succès (best_model présent)
+    - 02_train.py terminé avec succès (best_model.pkl écrit)
+    - VIDEOS_TO_ANALYZE renseigné dans `_config.py`
     - conda activate dlc
-
-Pour brancher ce modèle sur le pipeline EthoFlow ensuite :
-    1. Renseigne `dlc_project_config: <chemin>/config.yaml` dans
-       `configs/pipeline_config.yaml`
-    2. Lance `python scripts/run_dlc_inference.py <session> --mode custom`
-
-Ce script-ci est utile en standalone pour :
-    - Vérifier visuellement la qualité du modèle après chaque retrain
-    - Inférer sur des vidéos qui ne sont pas (encore) dans une session
-      EthoFlow propre
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import deeplabcut as dlc
 
+# Import du config centralisé
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import (  # noqa: E402
+    CONFIG,
+    LABELED_VIDEO_PCUTOFF,
+    MAKE_LABELED_VIDEO,
+    RESULTS_DIR,
+    VIDEOS_TO_ANALYZE,
+)
 
-# ----------------------------------------------------------------------
-# À ÉDITER
-# ----------------------------------------------------------------------
-
-CONFIG = "D:\\LEO\\dlc-projects\\souris-bottomview-Leo-2026-06-05\\config.yaml"
-
-# Une ou plusieurs vidéos à analyser. Chemins absolus de préférence.
-VIDEOS = [
-    "D:\\ETHOVISION\\202606005-MCCfemellescapto-bottomIR\\Media Files\\970.mp4",
-    # "/chemin/vers/autre_video.mp4",
-]
-
-
-# ----------------------------------------------------------------------
-# Pipeline
-# ----------------------------------------------------------------------
 
 def main() -> None:
-    print(f"Inférence DLC sur {len(VIDEOS)} vidéo(s)...")
-    dlc.analyze_videos(CONFIG, VIDEOS, save_as_csv=True)
-    print("✅ Inférence terminée — .h5 et .csv écrits à côté des vidéos sources.\n")
+    if not VIDEOS_TO_ANALYZE:
+        print("⚠ VIDEOS_TO_ANALYZE est vide dans _config.py")
+        return
 
-    print("Génération des vidéos annotées (pour inspection visuelle)...")
-    dlc.create_labeled_video(CONFIG, VIDEOS)
-    print("✅ Vidéos annotées générées.\n")
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    print(f"Résultats dans : {RESULTS_DIR}")
+    print(f"  pcutoff vidéo annotée : {LABELED_VIDEO_PCUTOFF}")
+    print(f"  vidéo annotée         : {'oui' if MAKE_LABELED_VIDEO else 'non'}\n")
+
+    for video in VIDEOS_TO_ANALYZE:
+        if not video.exists():
+            print(f"⚠ Vidéo introuvable, skip : {video}")
+            continue
+
+        # Un sous-dossier dédié par vidéo, nommé par le stem
+        # (ex: "970.mp4" → result-videos/970/)
+        out_dir = RESULTS_DIR / video.stem
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"→ {video.name}")
+        print(f"   sortie : {out_dir.relative_to(RESULTS_DIR.parent)}")
+
+        # Inférence : produit le .h5 et le .csv dans out_dir
+        dlc.analyze_videos(
+            CONFIG,
+            [str(video)],
+            save_as_csv=True,
+            destfolder=str(out_dir),
+        )
+
+        # Vidéo annotée pour inspection visuelle (optionnelle)
+        if MAKE_LABELED_VIDEO:
+            dlc.create_labeled_video(
+                CONFIG,
+                [str(video)],
+                destfolder=str(out_dir),
+                pcutoff=LABELED_VIDEO_PCUTOFF,
+                draw_skeleton=True,
+            )
+        print(f"   ✅ Terminé\n")
 
     print(
         "À vérifier sur la vidéo annotée :\n"
         "  - Les 12 keypoints suivent visuellement la souris en posture neutre\n"
-        "  - Pendant les rearings, les pattes avant disparaissent ou ont une\n"
-        "    likelihood basse (c'est ATTENDU et c'est ce qu'on exploitera plus\n"
-        "    tard pour la détection automatique du rearing)\n"
-        "  - Pas de jitter excessif sur les pattes arrière et tail_base\n"
-        "    (anchors pour l'égocentrage VAME downstream)\n"
+        "  - Pendant les rearings, les pattes avant ont une likelihood basse\n"
+        "    (c'est ATTENDU)\n"
+        "  - Pas de jitter excessif sur tail_base et les hanches\n"
+        "    (anchors VAME downstream)\n"
     )
 
 

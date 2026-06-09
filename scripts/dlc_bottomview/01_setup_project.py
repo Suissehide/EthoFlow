@@ -1,78 +1,62 @@
 """Crée le projet DLC bottom-view et extrait les frames à labelliser.
 
 Workflow :
-    1. Édite les constantes VIDEO_PILOTE et WORKDIR ci-dessous
+    1. Édite les constantes dans `_config.py` (PILOT_VIDEO, WORKDIR, etc.)
     2. (env: dlc) python scripts/dlc_bottomview/01_setup_project.py
     3. Édite manuellement le config.yaml généré pour mettre la liste des
        12 bodyparts et le skeleton (voir docs/ETHOFLOW.md §10)
-    4. Reprends ce script pour les extract_frames (ou décommente les lignes
-       à la fin et relance)
-    5. dlc.label_frames(CONFIG) dans une session Python pour labelliser
+    4. Mets à jour `PROJECT_DIR` dans _config.py avec le nom exact du
+       projet créé (DLC ajoute la date)
+    5. Décommente les extract_frames à la fin du script et relance,
+       OU lance-les en interactif depuis Python
+    6. dlc.label_frames(CONFIG) dans une session Python pour labelliser
 
-Pré-requis :
-    - conda activate dlc
-    - DeepLabCut 3.x avec PyTorch
-    - Une vidéo pilote bottom-view au format mp4
-
-Le projet créé peut être versionné dans Git séparément (voir
-configs/pipeline_config.yaml clé `dlc_project_config` pour le câbler
-au pipeline EthoFlow via `run_dlc_inference.py --mode custom`).
+Pré-requis : conda activate dlc, DeepLabCut 3.x + PyTorch, vidéo pilote mp4.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import deeplabcut as dlc
 
+# Import du config centralisé (situé dans le même dossier)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _config import EXPERIMENTER, N_AUTO_FRAMES, PILOT_VIDEO, PROJECT_NAME, WORKDIR  # noqa: E402
 
-# ----------------------------------------------------------------------
-# À ÉDITER
-# ----------------------------------------------------------------------
-
-VIDEO_PILOTE = Path("D:\\ETHOVISION\\202606005-MCCfemellescapto-bottomIR\\Media Files\\970.mp4")
-WORKDIR = Path("D:\\LEO\\dlc-projects")
-PROJECT_NAME = "souris-bottomview"
-EXPERIMENTER = "Leo"
-
-# Nombre de frames extraites automatiquement (kmeans pour la diversité posturale).
-# Édite aussi le `numframes2pick` dans config.yaml si tu veux > 30.
-N_AUTO_FRAMES = 60
-
-
-# ----------------------------------------------------------------------
-# 1. Création du projet
-# ----------------------------------------------------------------------
 
 def main() -> None:
-    if not VIDEO_PILOTE.exists():
+    if not PILOT_VIDEO.exists():
         raise FileNotFoundError(
-            f"Vidéo pilote introuvable : {VIDEO_PILOTE}\n"
-            "Édite la constante VIDEO_PILOTE en tête de ce script."
+            f"Vidéo pilote introuvable : {PILOT_VIDEO}\n"
+            "Édite la constante PILOT_VIDEO dans _config.py."
         )
 
     print(f"Création du projet '{PROJECT_NAME}' dans {WORKDIR}/")
     config_path = dlc.create_new_project(
         project=PROJECT_NAME,
         experimenter=EXPERIMENTER,
-        videos=[str(VIDEO_PILOTE)],
+        videos=[str(PILOT_VIDEO)],
         working_directory=str(WORKDIR),
         copy_videos=True,
     )
     print(f"\n✅ Projet créé : {config_path}\n")
 
     print(
-        "Étape suivante MANUELLE avant extract_frames :\n"
+        "Étapes MANUELLES avant extract_frames :\n"
         f"  1. Ouvre {config_path}\n"
-        "  2. Remplace la section `bodyparts:` par les 12 keypoints "
-        "bottom-view (voir docs/ETHOFLOW.md §10)\n"
-        "  3. Remplace la section `skeleton:` par les liaisons correspondantes\n"
-        f"  4. (Optionnel) règle `numframes2pick: {N_AUTO_FRAMES}`\n"
+        "  2. Remplace `bodyparts:` par les 12 keypoints bottom-view\n"
+        "     (cf. docs/ETHOFLOW.md §10)\n"
+        "  3. Remplace `skeleton:` par les 11 liaisons correspondantes\n"
+        f"  4. Règle `numframes2pick: {N_AUTO_FRAMES}` si tu veux plus que 20 par défaut\n"
+        "  5. Mets à jour `PROJECT_DIR` dans `_config.py` avec le nom\n"
+        f"     exact du dossier créé : {Path(config_path).parent.name}\n"
     )
 
     # ------------------------------------------------------------------
-    # 2. Extraction automatique des frames (kmeans → diversité)
+    # Extraction automatique des frames (kmeans → diversité)
     # ------------------------------------------------------------------
-    # Décommente les lignes ci-dessous APRÈS avoir édité le config.yaml :
+    # Décommente APRÈS avoir édité config.yaml :
     #
     # dlc.extract_frames(
     #     config_path,
@@ -81,10 +65,7 @@ def main() -> None:
     #     crop=False,
     #     userfeedback=False,
     # )
-    # print(f"✅ {N_AUTO_FRAMES} frames extraites automatiquement.\n")
-    #
-    # # Phase manuelle pour ajouter ~15 frames de rearing (une GUI s'ouvre)
-    # dlc.extract_frames(config_path, mode="manual")
+    # print(f"✅ {N_AUTO_FRAMES} frames extraites automatiquement.")
 
 
 if __name__ == "__main__":
