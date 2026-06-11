@@ -130,3 +130,40 @@ ADDITIONAL_VIDEOS: list[Path] = [
 # N_AUTO_FRAMES (60) parce qu'on a déjà la diversité posturale du pilote ;
 # ici l'objectif est la diversité INTER-individus, pas intra.
 NEW_VIDEO_FRAMES = 20
+
+
+# ----------------------------------------------------------------------
+# Phase 3 — refine outliers (05_refine_outliers.py)
+# ----------------------------------------------------------------------
+
+# Vidéos sur lesquelles chercher des outliers à re-labelliser. Doivent
+# avoir été analysées via 03_apply.py au préalable (un .h5 doit exister
+# dans <PROJECT_DIR>/result-videos/<stem>/). En général ce sont les
+# vidéos déjà au training set, pour cibler les pattes que le modèle
+# galère à placer SUR DES DONNÉES QU'IL CONNAÎT (signe clair d'un manque
+# d'exemples plutôt que d'un manque de généralisation).
+TRAINING_VIDEOS_FOR_REFINE: list[Path] = [
+    PILOT_VIDEO,
+    # Ajoute ici les vidéos de phase 2 (971-980) une fois analysées :
+    # Path(r"D:\ETHOVISION\202606005-MCCfemellescapto-bottomIR\Media Files\971.mp4"),
+    # ...
+]
+
+# Algorithme de détection d'outliers :
+# - "jump" : détecte les sauts inter-frame d'un keypoint (très efficace
+#   pour les pattes qui flickent — exactement ce qu'on veut corriger).
+# - "fitting" : modèle ARIMA, plus coûteux et moins ciblé pour notre cas.
+# - "uncertain" : prend les frames à likelihood basse (utile mais souvent
+#   redondant avec "jump").
+OUTLIER_ALGORITHM = "jump"
+
+# Seuil de "jump" en pixels au-dessus duquel un mouvement inter-frame
+# est considéré anormal. Sur 1024×1080, 50 px est un compromis : assez
+# bas pour attraper les pattes qui sautent, assez haut pour ignorer les
+# mouvements légitimes du nez/tête.
+OUTLIER_EPSILON = 50
+
+# Nombre max de frames extraites PAR VIDÉO. Garde-fou : sinon DLC peut
+# en extraire des centaines. 30-40 / vidéo × 6 vidéos = 180-240 frames à
+# corriger, ~30-45 min de boulot dans la GUI.
+OUTLIER_NUMFRAMES = 30
