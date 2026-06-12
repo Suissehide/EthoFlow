@@ -20,7 +20,7 @@ from pathlib import Path
 
 PROJECT_NAME = "souris-bottomview"
 EXPERIMENTER = "Leo"
-WORKDIR = Path(r"D:\LEO\dlc-projects")
+WORKDIR = Path(r"E:\LEO\dlc-projects")
 
 # Dossier du projet une fois `01_setup_project.py` exécuté.
 # DLC ajoute le nom de l'expérimentateur et la date à la création.

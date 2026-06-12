@@ -72,6 +72,7 @@ import sys
 from pathlib import Path
 
 import deeplabcut as dlc
+import yaml
 
 # Import du config centralisé
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -80,9 +81,27 @@ from _config import (  # noqa: E402
     OUTLIER_ALGORITHM,
     OUTLIER_EPSILON,
     OUTLIER_NUMFRAMES,
+    PROJECT_DIR,
     RESULTS_DIR,
     TRAINING_VIDEOS_FOR_REFINE,
 )
+
+
+def update_numframes2pick(project_config_path: Path, n: int) -> int:
+    """Met à jour `numframes2pick` dans le config.yaml du projet.
+
+    Retourne l'ancienne valeur (pour info / restore manuel).
+    Identique au helper utilisé par 04_add_videos.py.
+    """
+    with open(project_config_path) as f:
+        cfg = yaml.safe_load(f)
+    old = cfg.get("numframes2pick", 20)
+    if old == n:
+        return old
+    cfg["numframes2pick"] = n
+    with open(project_config_path, "w") as f:
+        yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+    return old
 
 
 def main() -> None:
@@ -119,10 +138,26 @@ def main() -> None:
         f"  max frames / vidéo  : {OUTLIER_NUMFRAMES}\n"
     )
 
-    # extract_outlier_frames prend la liste complète des vidéos d'un coup
-    # mais on passe vidéo par vidéo pour des logs plus lisibles et pour
-    # que numframes2pick s'applique par vidéo (et pas globalement).
+    # `extract_outlier_frames` utilise numframes2pick du config.yaml pour
+    # déterminer combien de frames extraire. On l'aligne sur OUTLIER_NUMFRAMES
+    # ici (peut différer de NEW_VIDEO_FRAMES réglé par 04_add_videos.py).
+    project_config = Path(CONFIG)
+    old = update_numframes2pick(project_config, OUTLIER_NUMFRAMES)
+    if old != OUTLIER_NUMFRAMES:
+        print(f"  numframes2pick : {old} → {OUTLIER_NUMFRAMES}\n")
+
+    # IMPORTANT : on passe `destfolder=` pour que DLC aille chercher les .h5
+    # dans <result-videos>/<stem>/ au lieu du dossier de la vidéo source
+    # (par défaut DLC les cherche à côté de la vidéo).
+    # Le dossier des nouvelles frames extraites par DLC :
+    labeled_data_root = PROJECT_DIR / "labeled-data"
+
     for video in ready:
+        out_dir = RESULTS_DIR / video.stem
+        labeled_dir = labeled_data_root / video.stem
+        # Compte les PNG avant pour pouvoir détecter si rien n'a été extrait
+        before = len(list(labeled_dir.glob("*.png"))) if labeled_dir.exists() else 0
+
         print(f"→ {video.name}")
         dlc.extract_outlier_frames(
             CONFIG,
@@ -131,8 +166,20 @@ def main() -> None:
             epsilon=OUTLIER_EPSILON,
             extractionalgorithm="kmeans",
             automatic=True,  # pas de GUI à ce stade — juste extraction
+            destfolder=str(out_dir),  # va chercher le .h5 dans result-videos/
         )
-        print(f"   ✅ outliers extraits\n")
+
+        after = len(list(labeled_dir.glob("*.png"))) if labeled_dir.exists() else 0
+        added = after - before
+        if added > 0:
+            print(f"   ✅ {added} frame(s) ajoutée(s) dans labeled-data/{video.stem}/\n")
+        else:
+            print(
+                f"   ⚠ Aucune frame extraite. Causes possibles :\n"
+                f"     - epsilon trop strict ({OUTLIER_EPSILON} px) : peu de jumps détectés\n"
+                f"     - pas assez d'outliers à likelihood basse\n"
+                f"     - .h5 non trouvé dans {out_dir} (regarde les logs DLC ci-dessus)\n"
+            )
 
     print(
         "Étapes suivantes :\n"
