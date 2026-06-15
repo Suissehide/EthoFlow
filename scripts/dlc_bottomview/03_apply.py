@@ -55,11 +55,17 @@ def main() -> None:
         print(f"   sortie : {out_dir.relative_to(RESULTS_DIR.parent)}")
 
         # Inférence : produit le .h5 et le .csv dans out_dir
+        # snapshot_index=-1 force le dernier snapshot par numéro d'epoch
+        # (= snapshot-100.pt) plutôt que le "best" tracké pendant training,
+        # qui peut être un snapshot intermédiaire pas optimal sur le test set.
+        # Cf. notre eval post-training : snapshot-100 bat snapshot-best-090
+        # de loin (rmse_pcutoff 4.04 vs 7.21).
         dlc.analyze_videos(
             CONFIG,
             [str(video)],
             save_as_csv=True,
             destfolder=str(out_dir),
+            snapshot_index=-1,
         )
 
         # Vidéo annotée pour inspection visuelle (optionnelle)
