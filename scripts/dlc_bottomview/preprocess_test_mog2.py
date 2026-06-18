@@ -123,6 +123,14 @@ def main() -> None:
         help="Au lieu d'appliquer le mask binaire, fait absdiff avec le "
         "background adaptatif (préserve les gradients)",
     )
+    parser.add_argument(
+        "--learning-rate", type=float, default=-1.0,
+        help="Learning rate MOG2 (défaut: -1 = auto basé sur --history). "
+        "Mets une valeur faible (ex: 0.0001) pour figer le modèle quasi "
+        "complètement pendant le processing — utile si la souris stationne "
+        "longtemps et finit par être absorbée dans le background (ghosting). "
+        "Recommandé : warmup suffisant + learning-rate très bas.",
+    )
     args = parser.parse_args()
 
     if not args.video.exists():
@@ -180,9 +188,13 @@ def main() -> None:
         if args.morph_kernel > 0 else None
     )
 
+    lr_label = (
+        "auto" if args.learning_rate < 0 else f"{args.learning_rate:g}"
+    )
     print(
         f"Processing {n_frames} frames depuis t={args.start}s, "
-        f"mode={'absdiff (--no-mask)' if args.no_mask else 'binary mask'}..."
+        f"mode={'absdiff (--no-mask)' if args.no_mask else 'binary mask'}, "
+        f"learning_rate={lr_label}..."
     )
     for i in range(n_frames):
         ret, frame = cap.read()
@@ -190,8 +202,9 @@ def main() -> None:
             break
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # MOG2 continue à updater son modèle pendant qu'on consomme
-        fgmask = fgbg.apply(gray)
+        # MOG2 continue à updater son modèle pendant qu'on consomme.
+        # learning_rate très bas = quasi figé = pas d'absorption de la souris.
+        fgmask = fgbg.apply(gray, learningRate=args.learning_rate)
 
         if args.no_mask:
             # absdiff avec le background adaptatif courant
