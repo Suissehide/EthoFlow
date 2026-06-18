@@ -167,3 +167,30 @@ OUTLIER_EPSILON = 50
 # en extraire des centaines. 30-40 / vidéo × 6 vidéos = 180-240 frames à
 # corriger, ~30-45 min de boulot dans la GUI.
 OUTLIER_NUMFRAMES = 30
+
+
+# ----------------------------------------------------------------------
+# Phase 4 — preprocessing MOG2 + CLAHE (preprocess_all.py,
+#                                       migrate_project_to_preproc.py)
+# ----------------------------------------------------------------------
+
+# Dossier où atterrissent les vidéos pré-traitées (background subtraction
+# adaptatif MOG2 + CLAHE). Mêmes noms que dans le dossier source.
+PREPROCESSED_VIDEO_DIR = Path(r"E:\data\bottom_view\08062026_preproc")
+
+# Projet DLC dupliqué qui va consommer les vidéos pré-traitées. Tu dois
+# d'abord faire la copie manuelle de PROJECT_DIR vers ce path :
+#   xcopy /E /I "<PROJECT_DIR>" "<PREPROCESSED_PROJECT_DIR>"
+PREPROCESSED_PROJECT_DIR = WORKDIR / "souris-bottomview-Leo-2026-06-05-preproc"
+
+# Paramètres MOG2 validés visuellement sur un sample (cf. preprocess_test_mog2.py).
+# Combo qui élimine les reflets dynamiques sans absorber la souris quand
+# elle stationne (learning_rate quasi figé après warmup convergé).
+MOG2_HISTORY = 500
+MOG2_VAR_THRESHOLD = 16.0
+MOG2_WARMUP = 1000
+MOG2_LEARNING_RATE = 0.0001  # ~"figé après warmup"
+
+# Paramètres CLAHE
+CLAHE_CLIP_LIMIT = 2.0
+CLAHE_TILE_SIZE = 8
