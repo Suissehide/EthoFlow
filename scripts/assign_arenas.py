@@ -48,17 +48,23 @@ import numpy as np
 import pandas as pd
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "data" / "raw"
-DLC_OUTPUT_DIR = ROOT / "data" / "dlc-output"
-VAME_INPUT_DIR = ROOT / "data" / "vame-input"
-CONFIG_PATH = ROOT / "configs" / "pipeline_config.yaml"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    add_project_dir_arg,
+    dlc_output_dir,
+    pipeline_config_path,
+    raw_dir,
+    resolve_project,
+    vame_input_dir,
+)
 
 
-def load_default_coords() -> dict:
-    if not CONFIG_PATH.exists():
+def load_default_coords(project: Path) -> dict:
+    config_path = pipeline_config_path(project)
+    if not config_path.exists():
         return {}
-    with open(CONFIG_PATH) as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f) or {}
     return config.get("default_arenes_coords", {}) or {}
 
@@ -234,12 +240,13 @@ def clean_individual(
 
 
 def assign_arenas(
+    project: Path,
     session_id: str,
     threshold: float = 0.6,
     interp_limit: int = 25,
     do_clean: bool = True,
 ) -> None:
-    metadata_path = RAW_DIR / session_id / "metadata.yaml"
+    metadata_path = raw_dir(project) / session_id / "metadata.yaml"
     if not metadata_path.exists():
         raise FileNotFoundError(f"Metadata absent : {metadata_path}")
 
@@ -248,7 +255,7 @@ def assign_arenas(
     arenes = metadata.get("arenes", [])
 
     # Fallback : compléter les coords manquantes avec default_arenes_coords
-    default_coords = load_default_coords()
+    default_coords = load_default_coords(project)
     for ar in arenes:
         if not ar.get("coords"):
             fallback = default_coords.get(ar.get("id"))
@@ -261,8 +268,8 @@ def assign_arenas(
             "Lance `python scripts/calibrate_arenes.py` pour les définir."
         )
 
-    session_dlc_dir = DLC_OUTPUT_DIR / session_id
-    session_out_dir = VAME_INPUT_DIR / session_id
+    session_dlc_dir = dlc_output_dir(project) / session_id
+    session_out_dir = vame_input_dir(project) / session_id
     session_out_dir.mkdir(parents=True, exist_ok=True)
 
     h5_path = find_multianimal_h5(session_dlc_dir)
@@ -343,12 +350,13 @@ def assign_arenas(
     print(f"\n✅ {n_assigned}/{len(valid_arenes)} arène(s) assignée(s)")
 
 
-def list_dlc_processed_sessions() -> list[str]:
+def list_dlc_processed_sessions(project: Path) -> list[str]:
     """Sessions qui ont une sortie DLC multi-animal (donc prêtes à être assignées)."""
-    if not DLC_OUTPUT_DIR.exists():
+    dlc_dir = dlc_output_dir(project)
+    if not dlc_dir.exists():
         return []
     sessions = []
-    for d in sorted(DLC_OUTPUT_DIR.iterdir()):
+    for d in sorted(dlc_dir.iterdir()):
         if not d.is_dir() or d.name.startswith("."):
             continue
         # Au moins un .h5 multi-animal (pas un fichier déjà splitté _Aн)
@@ -358,14 +366,15 @@ def list_dlc_processed_sessions() -> list[str]:
     return sessions
 
 
-def is_assigned(session_id: str) -> bool:
-    """Vrai si VAME_INPUT_DIR/<session>/ contient déjà des .h5 single-animal."""
-    out = VAME_INPUT_DIR / session_id
+def is_assigned(project: Path, session_id: str) -> bool:
+    """Vrai si vame-input/<session>/ contient déjà des .h5 single-animal."""
+    out = vame_input_dir(project) / session_id
     return out.exists() and any(out.glob(f"{session_id}_A*.h5"))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    add_project_dir_arg(parser)
     parser.add_argument("session_ids", nargs="*",
                         help="Un ou plusieurs session_id à traiter")
     parser.add_argument("--all", action="store_true",
@@ -382,11 +391,13 @@ if __name__ == "__main__":
                         help="Désactive complètement le nettoyage (low-lk → NaN, interpolation)")
     args = parser.parse_args()
 
+    project = resolve_project(args)
+
     # Collecte de la liste de sessions
     if args.all:
-        sessions = list_dlc_processed_sessions()
+        sessions = list_dlc_processed_sessions(project)
     elif args.all_new:
-        sessions = [s for s in list_dlc_processed_sessions() if not is_assigned(s)]
+        sessions = [s for s in list_dlc_processed_sessions(project) if not is_assigned(project, s)]
     elif args.session_ids:
         sessions = list(args.session_ids)
     else:
@@ -406,6 +417,7 @@ if __name__ == "__main__":
             print(f"\n{'='*60}\n[{i}/{len(sessions)}] {session_id}\n{'='*60}")
         try:
             assign_arenas(
+                project,
                 session_id,
                 threshold=args.likelihood_threshold,
                 interp_limit=args.interp_limit,

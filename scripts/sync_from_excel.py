@@ -34,13 +34,16 @@ import pandas as pd
 import yaml
 
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_DATA_RAW = ROOT / "data" / "raw"
-DEFAULT_EXCEL = ROOT.parent / "data" / "OpenField_trials_CDUPLAA.xlsx"
-DEFAULT_VIDEOS = ROOT.parent / "data"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import add_project_dir_arg, raw_dir, resolve_project  # noqa: E402
 
-# Variable globale mise à jour par --project-dir
-DATA_RAW = DEFAULT_DATA_RAW
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_EXCEL = REPO_ROOT.parent / "data" / "OpenField_trials_CDUPLAA.xlsx"
+DEFAULT_VIDEOS = REPO_ROOT.parent / "data"
+
+# Variable globale mise à jour par main() depuis --project-dir.
+# Conserve la convention du code legacy (write_metadata lit DATA_RAW).
+DATA_RAW = REPO_ROOT / "data" / "raw"
 
 
 def fallback_from_codebook(mouse_id: int, timepoint: str) -> dict:
@@ -201,18 +204,16 @@ def write_metadata(metadata: dict, dry_run: bool = False) -> Path:
 def main():
     global DATA_RAW
     parser = argparse.ArgumentParser(description="Sync sessions depuis Excel.")
+    add_project_dir_arg(parser)
     parser.add_argument("--excel", type=Path, default=DEFAULT_EXCEL,
                         help=f"Chemin du fichier Excel (défaut: {DEFAULT_EXCEL})")
     parser.add_argument("--videos-dir", type=Path, default=DEFAULT_VIDEOS,
                         help=f"Dossier des .mp4 (défaut: {DEFAULT_VIDEOS})")
-    parser.add_argument("--project-dir", type=Path, default=None,
-                        help="Dossier du projet EthoFlow (écrit dans <project>/data/raw/)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Affiche sans écrire de fichier")
     args = parser.parse_args()
 
-    if args.project_dir:
-        DATA_RAW = args.project_dir / "data" / "raw"
+    DATA_RAW = raw_dir(resolve_project(args))
 
     if not args.excel.exists():
         print(f"❌ Excel introuvable : {args.excel}", file=sys.stderr)

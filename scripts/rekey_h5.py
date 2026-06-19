@@ -19,8 +19,14 @@ from pathlib import Path
 import pandas as pd
 import tables  # noqa: F401  — assure que pytables est bien là
 
-ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_ROOT = ROOT / "data" / "vame-input"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    add_project_dir_arg,
+    resolve_project,
+    vame_input_dir,
+)
+
 TARGET_KEY = "df_with_missing"
 
 
@@ -48,34 +54,38 @@ def rekey(h5_path: Path, force: bool = False) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Re-écrit les .h5 avec key='df_with_missing'.")
-    parser.add_argument("--root", type=Path, default=DEFAULT_ROOT,
-                        help=f"Racine à scanner (défaut: {DEFAULT_ROOT})")
+    add_project_dir_arg(parser)
+    parser.add_argument("--root", type=Path, default=None,
+                        help="Racine à scanner (défaut: <project>/data/vame-input/)")
     parser.add_argument("--force", action="store_true",
                         help="Re-écrire même les fichiers déjà OK")
     args = parser.parse_args()
 
-    if not args.root.exists():
-        print(f"❌ Racine introuvable : {args.root}", file=sys.stderr)
+    project = resolve_project(args)
+    root = args.root if args.root is not None else vame_input_dir(project)
+
+    if not root.exists():
+        print(f"❌ Racine introuvable : {root}", file=sys.stderr)
         sys.exit(1)
 
-    h5_files = sorted(args.root.rglob("*.h5"))
+    h5_files = sorted(root.rglob("*.h5"))
     if not h5_files:
-        print(f"Aucun .h5 dans {args.root}")
+        print(f"Aucun .h5 dans {root}")
         sys.exit(0)
 
-    print(f"Scan : {len(h5_files)} fichiers dans {args.root}\n")
+    print(f"Scan : {len(h5_files)} fichiers dans {root}\n")
     counts = {"rekeyed": 0, "already_ok": 0, "failed": 0}
     for h5 in h5_files:
         status = rekey(h5, force=args.force)
         if status == "rekeyed":
             counts["rekeyed"] += 1
-            print(f"  ✓ {h5.relative_to(args.root)}")
+            print(f"  ✓ {h5.relative_to(root)}")
         elif status == "already_ok":
             counts["already_ok"] += 1
-            print(f"  · {h5.relative_to(args.root)}  (déjà OK)")
+            print(f"  · {h5.relative_to(root)}  (déjà OK)")
         else:
             counts["failed"] += 1
-            print(f"  ❌ {h5.relative_to(args.root)} : {status}",
+            print(f"  ❌ {h5.relative_to(root)} : {status}",
                   file=sys.stderr)
 
     print(f"\n{counts['rekeyed']} re-keyés, "

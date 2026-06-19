@@ -20,36 +20,54 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "data" / "raw"
-DLC_OUTPUT_DIR = ROOT / "data" / "dlc-output"
-SCRIPTS_DIR = ROOT / "scripts"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    add_project_dir_arg,
+    dlc_output_dir,
+    raw_dir,
+    resolve_project,
+)
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
 
 
-def list_unprocessed():
+def list_unprocessed(project: Path):
     """Sessions présentes dans raw/ mais sans dossier dans dlc-output/."""
-    if not RAW_DIR.exists():
+    rd = raw_dir(project)
+    dd = dlc_output_dir(project)
+    if not rd.exists():
         return []
-    raw_sessions = {d.name for d in RAW_DIR.iterdir() if d.is_dir()}
+    raw_sessions = {d.name for d in rd.iterdir() if d.is_dir()}
     done_sessions = (
-        {d.name for d in DLC_OUTPUT_DIR.iterdir() if d.is_dir()}
-        if DLC_OUTPUT_DIR.exists() else set()
+        {d.name for d in dd.iterdir() if d.is_dir()}
+        if dd.exists() else set()
     )
     return sorted(raw_sessions - done_sessions)
 
 
-def run_in_env(env_name: str, script: str, session_id: str) -> int:
-    """Lance un script dans un env conda spécifique via `conda run`."""
+def run_in_env(env_name: str, script: str, session_id: str,
+               project: Path, propagate_project: bool) -> int:
+    """Lance un script dans un env conda spécifique via `conda run`.
+
+    `propagate_project` : si True, on transmet `--project-dir` au sous-script
+    (cas où on a un projet explicite). Sinon (fallback legacy), on laisse
+    le sous-script retomber sur la racine du repo lui-même.
+    """
     cmd = [
         "conda", "run", "-n", env_name,
-        "python", str(SCRIPTS_DIR / script), session_id,
+        "python", str(SCRIPTS_DIR / script),
     ]
+    if propagate_project:
+        cmd += ["--project-dir", str(project)]
+    cmd += [session_id]
     print(f"\n>>> [{env_name}] {script} {session_id}")
     return subprocess.call(cmd)
 
 
 def main():
     parser = argparse.ArgumentParser(description="EthoFlow — orchestrateur du pipeline")
+    add_project_dir_arg(parser)
     parser.add_argument("session_id", nargs="?", help="ID de session à traiter")
     parser.add_argument("--all", action="store_true",
                         help="Traiter toutes les sessions non traitées")
@@ -67,8 +85,13 @@ def main():
                         help="Nom de l'env conda VAME")
     args = parser.parse_args()
 
+    project = resolve_project(args)
+    # Seulement propager --project-dir aux sous-scripts si l'utilisateur l'a
+    # explicitement fourni — sinon on laisse chacun retomber sur son repo.
+    propagate_project = args.project_dir is not None
+
     if args.all:
-        sessions = list_unprocessed()
+        sessions = list_unprocessed(project)
         if not sessions:
             print("Aucune session à traiter.")
             return
@@ -83,25 +106,29 @@ def main():
         print(f"\n{'='*60}\nSession : {session_id}\n{'='*60}")
 
         if args.crop_first:
-            rc = run_in_env(args.env_pipeline, "crop_arenes.py", session_id)
+            rc = run_in_env(args.env_pipeline, "crop_arenes.py", session_id,
+                            project, propagate_project)
             if rc != 0:
                 print(f"❌ Crop a échoué pour {session_id}", file=sys.stderr)
                 continue
 
         if not args.skip_dlc:
-            rc = run_in_env(args.env_dlc, "run_dlc_inference.py", session_id)
+            rc = run_in_env(args.env_dlc, "run_dlc_inference.py", session_id,
+                            project, propagate_project)
             if rc != 0:
                 print(f"❌ DLC a échoué pour {session_id}", file=sys.stderr)
                 continue
 
         if not args.skip_assign:
-            rc = run_in_env(args.env_pipeline, "assign_arenas.py", session_id)
+            rc = run_in_env(args.env_pipeline, "assign_arenas.py", session_id,
+                            project, propagate_project)
             if rc != 0:
                 print(f"❌ assign_arenas a échoué pour {session_id}", file=sys.stderr)
                 continue
 
         if not args.skip_vame:
-            rc = run_in_env(args.env_vame, "run_vame.py", session_id)
+            rc = run_in_env(args.env_vame, "run_vame.py", session_id,
+                            project, propagate_project)
             if rc != 0:
                 print(f"❌ VAME a échoué pour {session_id}", file=sys.stderr)
                 continue

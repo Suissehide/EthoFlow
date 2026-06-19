@@ -52,9 +52,18 @@ import numpy as np
 import pandas as pd
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-ETHOFLOW_RAW = ROOT / "data" / "raw"
-CONFIG_POINTER = ROOT / ".vame_config_path"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    REPO_ROOT,
+    add_project_dir_arg,
+    raw_dir,
+    resolve_project,
+)
+
+# Le pointeur du projet VAME courant reste au repo root : c'est un état
+# session-wide (quelle config VAME utiliser), pas une donnée du projet.
+CONFIG_POINTER = REPO_ROOT / ".vame_config_path"
 
 
 def get_project_path(arg_project: str | None) -> Path:
@@ -224,15 +233,16 @@ def parse_session_name(name: str) -> tuple[str, str]:
     return m.group(1), m.group(2)
 
 
-def load_metadata_index() -> dict[tuple[str, str], dict]:
+def load_metadata_index(project: Path) -> dict[tuple[str, str], dict]:
     """
     Construit un dict {(session_id, arena_id) -> dict d'attributs} à partir
     des metadata.yaml d'ethoflow.
     """
     index: dict[tuple[str, str], dict] = {}
-    if not ETHOFLOW_RAW.exists():
+    ethoflow_raw = raw_dir(project)
+    if not ethoflow_raw.exists():
         return index
-    for session_dir in ETHOFLOW_RAW.iterdir():
+    for session_dir in ethoflow_raw.iterdir():
         meta_path = session_dir / "metadata.yaml"
         if not meta_path.exists():
             continue
@@ -426,6 +436,7 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    add_project_dir_arg(parser)
     parser.add_argument("--project", default=None,
                         help="Chemin du projet VAME (défaut: courant via .vame_config_path)")
     parser.add_argument("--algo", default="hmm", choices=["hmm", "kmeans"],
@@ -451,6 +462,8 @@ def main() -> None:
                              "reste dans la colonne 'count' pour audit).")
     args = parser.parse_args()
 
+    ethoflow_project = resolve_project(args)
+
     try:
         project = get_project_path(args.project)
     except FileNotFoundError as e:
@@ -466,7 +479,7 @@ def main() -> None:
         sys.exit(1)
     print(f"  → {len(seg_files)} sessions segmentées (algo={args.algo})")
 
-    meta_index = load_metadata_index()
+    meta_index = load_metadata_index(ethoflow_project)
     print(f"  → {len(meta_index)} entrées de metadata chargées")
 
     try:

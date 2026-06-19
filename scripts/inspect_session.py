@@ -26,9 +26,14 @@ import numpy as np
 import pandas as pd
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "data" / "raw"
-DEFAULT_INPUT_DIR = ROOT / "data" / "vame-input"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    add_project_dir_arg,
+    raw_dir,
+    resolve_project,
+    vame_input_dir,
+)
 
 
 def get_bodypart_columns(df: pd.DataFrame) -> dict[str, dict[str, tuple]]:
@@ -130,8 +135,8 @@ def print_report(arena_label: str, stats: dict, fps: float) -> None:
     print(f"    Verdict : {verdict(coverage)}")
 
 
-def get_session_fps(session_id: str, default: float = 25.0) -> float:
-    meta_path = RAW_DIR / session_id / "metadata.yaml"
+def get_session_fps(project: Path, session_id: str, default: float = 25.0) -> float:
+    meta_path = raw_dir(project) / session_id / "metadata.yaml"
     if not meta_path.exists():
         return default
     with open(meta_path) as f:
@@ -139,7 +144,7 @@ def get_session_fps(session_id: str, default: float = 25.0) -> float:
     return float(meta.get("camera", {}).get("fps", default))
 
 
-def inspect_session(session_id: str, input_dir: Path, fps: float | None) -> None:
+def inspect_session(project: Path, session_id: str, input_dir: Path, fps: float | None) -> None:
     session_dir = input_dir / session_id
     if not session_dir.exists():
         raise FileNotFoundError(f"Dossier introuvable : {session_dir}")
@@ -149,7 +154,7 @@ def inspect_session(session_id: str, input_dir: Path, fps: float | None) -> None
         raise FileNotFoundError(f"Aucun .h5 single-animal dans {session_dir}")
 
     if fps is None:
-        fps = get_session_fps(session_id)
+        fps = get_session_fps(project, session_id)
 
     print(f"\n══ {session_id} ({input_dir.name}, fps={fps:.0f}) ══")
 
@@ -178,20 +183,24 @@ def list_sessions(input_dir: Path) -> list[str]:
 
 def main():
     parser = argparse.ArgumentParser(description="Inspection qualité des sorties prêtes pour VAME.")
+    add_project_dir_arg(parser)
     parser.add_argument("session_ids", nargs="*",
                         help="Une ou plusieurs sessions à inspecter")
     parser.add_argument("--all", action="store_true",
                         help="Inspecter toutes les sessions présentes dans --input-dir")
-    parser.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR,
-                        help=f"Racine des .h5 single-animal (défaut: {DEFAULT_INPUT_DIR})")
+    parser.add_argument("--input-dir", type=Path, default=None,
+                        help="Racine des .h5 single-animal (défaut: <project>/data/vame-input/)")
     parser.add_argument("--fps", type=float, default=None,
                         help="FPS (défaut : lu depuis metadata.yaml, sinon 25)")
     args = parser.parse_args()
 
+    project = resolve_project(args)
+    input_dir = args.input_dir if args.input_dir is not None else vame_input_dir(project)
+
     if args.all:
-        sessions = list_sessions(args.input_dir)
+        sessions = list_sessions(input_dir)
         if not sessions:
-            print(f"Aucune session dans {args.input_dir}", file=sys.stderr)
+            print(f"Aucune session dans {input_dir}", file=sys.stderr)
             sys.exit(1)
     elif args.session_ids:
         sessions = list(args.session_ids)
@@ -201,7 +210,7 @@ def main():
 
     for s in sessions:
         try:
-            inspect_session(s, args.input_dir, args.fps)
+            inspect_session(project, s, input_dir, args.fps)
         except FileNotFoundError as e:
             print(f"❌ {s} : {e}", file=sys.stderr)
 

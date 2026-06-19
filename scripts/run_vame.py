@@ -38,11 +38,21 @@ import argparse
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-VAME_INPUT_DIR = ROOT / "data" / "vame-input"
-CROPPED_DIR = ROOT / "data" / "cropped"
-VAME_PROJECTS_DIR = ROOT.parent / "vame-projects"          # vit à côté d'ethoflow/
-CONFIG_POINTER = ROOT / ".vame_config_path"                # ID du projet courant
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    REPO_ROOT,
+    add_project_dir_arg,
+    cropped_dir,
+    resolve_project,
+    vame_input_dir,
+)
+
+# VAME_PROJECTS_DIR et CONFIG_POINTER ne sont pas des données *du* projet
+# EthoFlow : ce sont des artefacts session-wide (les projets VAME entraînés,
+# et l'ID du projet courant). Ils restent donc rattachés à la racine du repo.
+VAME_PROJECTS_DIR = REPO_ROOT.parent / "vame-projects"
+CONFIG_POINTER = REPO_ROOT / ".vame_config_path"
 
 
 # ============================================================
@@ -124,15 +134,16 @@ def cmd_setup(args) -> None:
         print("❌ VAME non installé. Active l'env conda 'vame'.", file=sys.stderr)
         sys.exit(1)
 
-    input_dir = Path(args.input_dir) if args.input_dir else VAME_INPUT_DIR
-    cropped_dir = Path(args.cropped_dir) if args.cropped_dir else CROPPED_DIR
+    project = resolve_project(args)
+    input_dir = Path(args.input_dir) if args.input_dir else vame_input_dir(project)
+    crop_dir = Path(args.cropped_dir) if args.cropped_dir else cropped_dir(project)
 
-    pairs = find_pairs(input_dir, cropped_dir)
+    pairs = find_pairs(input_dir, crop_dir)
     if not pairs:
         print("❌ Aucune paire (vidéo croppée, .h5) trouvée.\n"
               "   Vérifie que tu as :\n"
               f"   - des .h5 dans {input_dir}/<session>/\n"
-              f"   - des vidéos croppées dans {cropped_dir}/<session>/\n"
+              f"   - des vidéos croppées dans {crop_dir}/<session>/\n"
               "   (Lance `python scripts/crop_arenes.py --all` si besoin)",
               file=sys.stderr)
         sys.exit(1)
@@ -556,10 +567,11 @@ def cmd_info(args) -> None:
         print("\nPour basculer : python scripts/run_vame.py use <nom>")
 
     # Scan optionnel d'un dossier vame-input (pour planifier un futur setup)
-    input_dir = Path(args.input_dir) if args.input_dir else VAME_INPUT_DIR
-    cropped_dir = Path(args.cropped_dir) if args.cropped_dir else CROPPED_DIR
+    project = resolve_project(args)
+    input_dir = Path(args.input_dir) if args.input_dir else vame_input_dir(project)
+    crop_dir = Path(args.cropped_dir) if args.cropped_dir else cropped_dir(project)
     if input_dir.exists():
-        pairs = find_pairs(input_dir, cropped_dir)
+        pairs = find_pairs(input_dir, crop_dir)
         sessions = {p[1].stem.rsplit("_", 1)[0] for p in pairs}
         print(f"\nDans {input_dir} :")
         print(f"  → {len(pairs)} paire(s) (vidéo + h5) disponibles")
@@ -585,6 +597,7 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
+    add_project_dir_arg(parser)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_setup = sub.add_parser("setup", help="Init projet VAME")

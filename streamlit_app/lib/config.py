@@ -3,14 +3,19 @@
 Les chemins de données sont dynamiques : ils dépendent du projet courant
 stocké dans `st.session_state.current_project_path`.
 
-Les constantes statiques (ROOT, SCRIPTS_DIR, etc.) restent calculées depuis
-l'emplacement de ce fichier.
+La résolution structurelle (mapping `<project>/data/raw/` etc.) vient du
+module partagé `scripts/paths.py` — source unique de vérité commune entre
+les CLI et cette app Streamlit. Les wrappers ci-dessous se contentent de
+lire `current_project_path` dans le `session_state` puis de déléguer à
+`paths.<fn>(project)`.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import streamlit as st
+
 
 # ============================================================
 # Chemins statiques du repo
@@ -18,6 +23,12 @@ import streamlit as st
 ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPTS_DIR = ROOT / "scripts"
 CONFIG_POINTER = ROOT / ".vame_config_path"
+
+# Import du module partagé paths.py qui vit dans scripts/
+# (pas un package — on insère son dossier dans sys.path)
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+import paths as _paths  # noqa: E402
 
 # Racine par défaut des projets EthoFlow
 DEFAULT_PROJECTS_ROOT = Path.home() / "ethoflow" / "projects"
@@ -37,32 +48,38 @@ CONDA_ENVS: dict[str, str] = {
 # Chemins dynamiques — basés sur le projet courant
 # ============================================================
 
-def _project_data() -> Path:
-    """Racine data/ du projet courant."""
+def _current_project() -> Path:
+    """Racine du projet courant, fallback legacy ROOT si rien n'est sélectionné."""
     p = st.session_state.get("current_project_path")
     if p:
-        return Path(p) / "data"
+        return Path(p)
     # Fallback legacy (si pas de projet sélectionné)
-    return ROOT / "data"
+    return ROOT
 
 
 def data_root() -> Path:
-    return _project_data()
+    return _paths.data_dir(_current_project())
 
 def raw_dir() -> Path:
-    return _project_data() / "raw"
+    return _paths.raw_dir(_current_project())
 
 def cropped_dir() -> Path:
-    return _project_data() / "cropped"
+    return _paths.cropped_dir(_current_project())
 
 def dlc_output_dir() -> Path:
-    return _project_data() / "dlc-output"
+    return _paths.dlc_output_dir(_current_project())
 
 def vame_input_dir() -> Path:
-    return _project_data() / "vame-input"
+    return _paths.vame_input_dir(_current_project())
 
 def vame_output_dir() -> Path:
-    return _project_data() / "vame-output"
+    return _paths.vame_output_dir(_current_project())
+
+def results_dir() -> Path:
+    return _paths.results_dir(_current_project())
+
+def pipeline_config_path() -> Path:
+    return _paths.pipeline_config_path(_current_project())
 
 def current_project_name() -> str | None:
     """Nom du projet courant, ou None."""
@@ -72,14 +89,16 @@ def current_project_name() -> str | None:
     return None
 
 
-# Aliases pour rétrocompatibilité (lecture seule, évaluées à l'import)
-# IMPORTANT: utiliser les fonctions ci-dessus dans le nouveau code.
-DATA_ROOT = ROOT / "data"
-RAW_DIR = DATA_ROOT / "raw"
-CROPPED_DIR = DATA_ROOT / "cropped"
-DLC_OUTPUT_DIR = DATA_ROOT / "dlc-output"
-VAME_INPUT_DIR = DATA_ROOT / "vame-input"
-VAME_OUTPUT_DIR = DATA_ROOT / "vame-output"
+# Aliases pour rétrocompatibilité (lecture seule, évaluées à l'import).
+# IMPORTANT: utiliser les fonctions ci-dessus dans le nouveau code — ces
+# constantes ne suivent pas le projet courant et restent figées sur la
+# racine legacy.
+DATA_ROOT = _paths.data_dir(ROOT)
+RAW_DIR = _paths.raw_dir(ROOT)
+CROPPED_DIR = _paths.cropped_dir(ROOT)
+DLC_OUTPUT_DIR = _paths.dlc_output_dir(ROOT)
+VAME_INPUT_DIR = _paths.vame_input_dir(ROOT)
+VAME_OUTPUT_DIR = _paths.vame_output_dir(ROOT)
 
 
 # ============================================================

@@ -38,16 +38,21 @@ import yaml
 # posée par l'utilisateur dans le shell.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
-ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "data" / "raw"
-CROPPED_DIR = ROOT / "data" / "cropped"
-DLC_OUTPUT_DIR = ROOT / "data" / "dlc-output"
-VAME_INPUT_DIR = ROOT / "data" / "vame-input"
-PIPELINE_CONFIG = ROOT / "configs" / "pipeline_config.yaml"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    add_project_dir_arg,
+    cropped_dir,
+    dlc_output_dir,
+    pipeline_config_path,
+    raw_dir,
+    resolve_project,
+    vame_input_dir,
+)
 
 
-def load_session_metadata(session_id: str) -> dict:
-    metadata_path = RAW_DIR / session_id / "metadata.yaml"
+def load_session_metadata(project: Path, session_id: str) -> dict:
+    metadata_path = raw_dir(project) / session_id / "metadata.yaml"
     if not metadata_path.exists():
         raise FileNotFoundError(f"Metadata absent : {metadata_path}")
     with open(metadata_path) as f:
@@ -64,7 +69,7 @@ def get_source_video(metadata: dict) -> Path:
     return path
 
 
-def is_processed(session_id: str, mode: str = "superanimal") -> bool:
+def is_processed(project: Path, session_id: str, mode: str = "superanimal") -> bool:
     """Vrai si une sortie DLC existe déjà pour cette session, dans le mode donné.
 
     - superanimal (multi-animal) : .h5 directement dans dlc-output/<session>/
@@ -80,28 +85,31 @@ def is_processed(session_id: str, mode: str = "superanimal") -> bool:
         # pré-adaptation (nom canonique SANS suffixe — seuls le .json et
         # la vidéo annotée portent le tag *_before_adapt). Sa présence ne
         # prouve donc RIEN sur la complétion de la session.
-        vame_session = VAME_INPUT_DIR / session_id
+        vame_session = vame_input_dir(project) / session_id
         return vame_session.exists() and any(
             vame_session.glob(f"{session_id}_A*.h5")
         )
 
     # multi-animal / custom : .h5 directement à la racine de dlc-output/<session>/
-    out = DLC_OUTPUT_DIR / session_id
+    out = dlc_output_dir(project) / session_id
     if not out.exists():
         return False
     return any(f.suffix == ".h5" for f in out.iterdir() if f.is_file())
 
 
-def list_unprocessed_sessions(mode: str = "superanimal") -> list[str]:
-    if not RAW_DIR.exists():
+def list_unprocessed_sessions(project: Path, mode: str = "superanimal") -> list[str]:
+    rd = raw_dir(project)
+    if not rd.exists():
         return []
     return sorted(
-        d.name for d in RAW_DIR.iterdir()
-        if d.is_dir() and not d.name.startswith(".") and not is_processed(d.name, mode)
+        d.name for d in rd.iterdir()
+        if d.is_dir() and not d.name.startswith(".")
+        and not is_processed(project, d.name, mode)
     )
 
 
 def run_superanimal(
+    project: Path,
     session_id: str,
     superanimal_name: str,
     model_name: str,
@@ -119,10 +127,10 @@ def run_superanimal(
         )
         sys.exit(1)
 
-    metadata = load_session_metadata(session_id)
+    metadata = load_session_metadata(project, session_id)
     source = get_source_video(metadata)
 
-    output_dir = DLC_OUTPUT_DIR / session_id
+    output_dir = dlc_output_dir(project) / session_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Vidéo : {source}")
@@ -150,6 +158,7 @@ def run_superanimal(
 
 
 def run_superanimal_cropped(
+    project: Path,
     session_id: str,
     superanimal_name: str = "superanimal_topviewmouse",
     model_name: str = "hrnet_w32",
@@ -190,11 +199,11 @@ def run_superanimal_cropped(
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from assign_arenas import clean_individual
 
-    cropped_dir = CROPPED_DIR / session_id
-    videos = sorted(cropped_dir.glob(f"{session_id}_A*.mp4"))
+    session_cropped = cropped_dir(project) / session_id
+    videos = sorted(session_cropped.glob(f"{session_id}_A*.mp4"))
     if not videos:
         raise FileNotFoundError(
-            f"Aucune vidéo croppée dans {cropped_dir}.\n"
+            f"Aucune vidéo croppée dans {session_cropped}.\n"
             f"   Lance d'abord (env ethoflow) :\n"
             f"   conda activate ethoflow && python scripts/crop_arenes.py {session_id}"
         )
@@ -202,7 +211,7 @@ def run_superanimal_cropped(
     print(f"Vidéos croppées trouvées ({len(videos)}) : {[v.name for v in videos]}")
 
     # Sortie temporaire des h5 bruts (sera nettoyée et déplacée après)
-    temp_dest = DLC_OUTPUT_DIR / session_id / "cropped-raw"
+    temp_dest = dlc_output_dir(project) / session_id / "cropped-raw"
     temp_dest.mkdir(parents=True, exist_ok=True)
 
     print(f"SuperAnimal single-animal (max_individuals=1)")
@@ -224,7 +233,7 @@ def run_superanimal_cropped(
     )
 
     # Post-traitement : flatten + clean + déplacement vers vame-input
-    base_out = Path(output_dir) if output_dir else VAME_INPUT_DIR
+    base_out = Path(output_dir) if output_dir else vame_input_dir(project)
     out_dir = base_out / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nPost-traitement → {out_dir}\n")
@@ -265,28 +274,35 @@ def run_superanimal_cropped(
     print(f"\n✅ Single-animal cropped terminé : {out_dir}")
 
 
-def run_custom(session_id: str) -> None:
+def run_custom(project: Path, session_id: str) -> None:
     try:
         import deeplabcut
     except ImportError:
         print("❌ DeepLabCut non installé.", file=sys.stderr)
         sys.exit(1)
 
-    if not PIPELINE_CONFIG.exists():
+    # On lit la pipeline_config DU PROJET (chaque projet a sa propre config :
+    # un projet topview et un projet bottomview pointeront vers des
+    # dlc_project_config différents).
+    pipeline_cfg_path = pipeline_config_path(project)
+    if not pipeline_cfg_path.exists():
         raise FileNotFoundError(
-            f"Config absente : {PIPELINE_CONFIG}\n"
-            f"Copie configs/pipeline_config.yaml.example et adapte-le."
+            f"Config absente : {pipeline_cfg_path}\n"
+            f"Crée le fichier avec au minimum :\n"
+            f"  dlc_project_config: <chemin absolu vers le config.yaml DLC>"
         )
-    with open(PIPELINE_CONFIG) as f:
-        config = yaml.safe_load(f)
+    with open(pipeline_cfg_path) as f:
+        config = yaml.safe_load(f) or {}
     dlc_project_config = config.get("dlc_project_config")
     if not dlc_project_config:
-        raise ValueError("Clé 'dlc_project_config' manquante dans pipeline_config.yaml")
+        raise ValueError(
+            f"Clé 'dlc_project_config' manquante dans {pipeline_cfg_path}"
+        )
 
-    metadata = load_session_metadata(session_id)
+    metadata = load_session_metadata(project, session_id)
     source = get_source_video(metadata)
 
-    output_dir = DLC_OUTPUT_DIR / session_id
+    output_dir = dlc_output_dir(project) / session_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Modèle DLC custom : {dlc_project_config}")
@@ -303,9 +319,10 @@ def run_custom(session_id: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inférence DLC sur une ou plusieurs sessions.")
+    add_project_dir_arg(parser)
     parser.add_argument("session_ids", nargs="*", help="Un ou plusieurs session_id à traiter")
     parser.add_argument("--all", action="store_true",
-                        help="Traiter toutes les sessions de data/raw/ qui n'ont pas encore de sortie DLC")
+                        help="Traiter toutes les sessions de <project>/data/raw/ qui n'ont pas encore de sortie DLC")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Ignorer les sessions qui ont déjà une sortie DLC (utile en combinaison avec une liste)")
     parser.add_argument("--mode",
@@ -314,7 +331,7 @@ if __name__ == "__main__":
                         help="superanimal: multi-animal sur vidéo entière ; "
                              "single-animal: SuperAnimal sur vidéos déjà croppées "
                              "(une souris par vidéo, sortie directe vers vame-input/) ; "
-                             "custom: modèle DLC custom configuré dans pipeline_config.yaml")
+                             "custom: modèle DLC custom configuré dans <project>/configs/pipeline_config.yaml")
     parser.add_argument("--superanimal-name", default="superanimal_topviewmouse")
     parser.add_argument("--superanimal-model", default="hrnet_w32")
     parser.add_argument("--superanimal-detector", default="fasterrcnn_resnet50_fpn_v2")
@@ -330,15 +347,18 @@ if __name__ == "__main__":
                         help="(mode single-animal) taille max d'un trou interpolable, en frames")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="(mode single-animal) dossier de sortie alternatif "
-                             "(défaut: data/vame-input/). Utile pour comparer "
+                             "(défaut: <project>/data/vame-input/). Utile pour comparer "
                              "plusieurs runs sans écraser.")
     args = parser.parse_args()
+
+    project = resolve_project(args)
+    print(f"Projet : {project}\n")
 
     # Collecte de la liste de sessions à traiter (mode-aware : pour
     # single-animal, on regarde cropped-raw/ ; pour multi-animal, on regarde
     # le .h5 à la racine de dlc-output/<session>/)
     if args.all:
-        sessions = list_unprocessed_sessions(args.mode)
+        sessions = list_unprocessed_sessions(project, args.mode)
         if not sessions:
             print(f"Aucune session à traiter en mode '{args.mode}' "
                   f"(toutes ont déjà une sortie).")
@@ -348,7 +368,7 @@ if __name__ == "__main__":
     elif args.session_ids:
         sessions = list(args.session_ids)
         if args.skip_existing:
-            sessions = [s for s in sessions if not is_processed(s, args.mode)]
+            sessions = [s for s in sessions if not is_processed(project, s, args.mode)]
             if not sessions:
                 print("Toutes les sessions demandées sont déjà traitées.")
                 sys.exit(0)
@@ -362,6 +382,7 @@ if __name__ == "__main__":
         try:
             if args.mode == "superanimal":
                 run_superanimal(
+                    project,
                     session_id,
                     superanimal_name=args.superanimal_name,
                     model_name=args.superanimal_model,
@@ -371,6 +392,7 @@ if __name__ == "__main__":
                 )
             elif args.mode == "single-animal":
                 run_superanimal_cropped(
+                    project,
                     session_id,
                     superanimal_name=args.superanimal_name,
                     model_name=args.superanimal_model,
@@ -382,7 +404,7 @@ if __name__ == "__main__":
                     output_dir=args.output_dir,
                 )
             else:
-                run_custom(session_id)
+                run_custom(project, session_id)
             n_ok += 1
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ {session_id} : {e}", file=sys.stderr)

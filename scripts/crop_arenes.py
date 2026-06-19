@@ -39,23 +39,29 @@ from pathlib import Path
 
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "data" / "raw"
-CROPPED_DIR = ROOT / "data" / "cropped"
-CONFIG_PATH = ROOT / "configs" / "pipeline_config.yaml"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    add_project_dir_arg,
+    cropped_dir,
+    pipeline_config_path,
+    raw_dir,
+    resolve_project,
+)
 
 
-def load_default_coords() -> dict:
+def load_default_coords(project: Path) -> dict:
     """Charge default_arenes_coords depuis pipeline_config.yaml si présent."""
-    if not CONFIG_PATH.exists():
+    config_path = pipeline_config_path(project)
+    if not config_path.exists():
         return {}
-    with open(CONFIG_PATH) as f:
+    with open(config_path) as f:
         config = yaml.safe_load(f) or {}
     return config.get("default_arenes_coords", {}) or {}
 
 
-def crop_arenes(session_id: str) -> None:
-    session_dir = RAW_DIR / session_id
+def crop_arenes(project: Path, session_id: str) -> None:
+    session_dir = raw_dir(project) / session_id
     metadata_path = session_dir / "metadata.yaml"
 
     if not metadata_path.exists():
@@ -83,16 +89,16 @@ def crop_arenes(session_id: str) -> None:
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg introuvable dans le PATH.")
 
-    output_dir = CROPPED_DIR / session_id
+    output_dir = cropped_dir(project) / session_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     arenes = metadata.get("arenes", [])
     if not arenes:
         raise ValueError("Pas d'arènes dans le metadata.yaml")
 
-    default_coords = load_default_coords()
+    default_coords = load_default_coords(project)
     if default_coords:
-        print(f"Coords par défaut chargées depuis {CONFIG_PATH.name}")
+        print(f"Coords par défaut chargées depuis {pipeline_config_path(project).name}")
 
     # Offset temporel optionnel : skipper les N premières secondes (utile quand
     # la manip commence après quelques secondes de placement des souris).
@@ -148,25 +154,27 @@ def crop_arenes(session_id: str) -> None:
           f"{n_skipped} ignorée(s) — {output_dir}")
 
 
-def list_all_sessions() -> list[str]:
+def list_all_sessions(project: Path) -> list[str]:
     """Sessions présentes dans data/raw/."""
-    if not RAW_DIR.exists():
+    rd = raw_dir(project)
+    if not rd.exists():
         return []
     return sorted(
-        d.name for d in RAW_DIR.iterdir()
+        d.name for d in rd.iterdir()
         if d.is_dir() and not d.name.startswith(".")
     )
 
 
-def is_cropped(session_id: str) -> bool:
+def is_cropped(project: Path, session_id: str) -> bool:
     """Vrai si data/cropped/<session>/ contient déjà au moins une .mp4."""
-    out = CROPPED_DIR / session_id
+    out = cropped_dir(project) / session_id
     return out.exists() and any(out.glob("*.mp4"))
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Crop des arènes — single ou batch.")
+    add_project_dir_arg(parser)
     parser.add_argument("session_ids", nargs="*",
                         help="Un ou plusieurs session_id")
     parser.add_argument("--all", action="store_true",
@@ -175,10 +183,12 @@ if __name__ == "__main__":
                         help="Traiter uniquement les sessions sans crop existant")
     args = parser.parse_args()
 
+    project = resolve_project(args)
+
     if args.all:
-        sessions = list_all_sessions()
+        sessions = list_all_sessions(project)
     elif args.all_new:
-        sessions = [s for s in list_all_sessions() if not is_cropped(s)]
+        sessions = [s for s in list_all_sessions(project) if not is_cropped(project, s)]
     elif args.session_ids:
         sessions = list(args.session_ids)
     else:
@@ -197,7 +207,7 @@ if __name__ == "__main__":
         if len(sessions) > 1:
             print(f"\n{'='*60}\n[{i}/{len(sessions)}] {session_id}\n{'='*60}")
         try:
-            crop_arenes(session_id)
+            crop_arenes(project, session_id)
             n_ok += 1
         except (FileNotFoundError, ValueError, RuntimeError, subprocess.CalledProcessError) as e:
             print(f"❌ {session_id} : {e}", file=sys.stderr)

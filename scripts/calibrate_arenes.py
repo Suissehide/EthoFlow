@@ -40,15 +40,21 @@ from pathlib import Path
 import cv2
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = ROOT / "data" / "raw"
-CONFIG_PATH = ROOT / "configs" / "pipeline_config.yaml"
+# Import des chemins projet-aware
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from paths import (  # noqa: E402
+    add_project_dir_arg,
+    pipeline_config_path,
+    raw_dir,
+    resolve_project,
+)
+
 N_ARENAS = 4
 
 
-def resolve_video(args) -> Path:
+def resolve_video(project: Path, args) -> Path:
     if args.session:
-        meta_path = RAW_DIR / args.session / "metadata.yaml"
+        meta_path = raw_dir(project) / args.session / "metadata.yaml"
         if not meta_path.exists():
             raise FileNotFoundError(f"Metadata absent : {meta_path}")
         with open(meta_path) as f:
@@ -185,24 +191,25 @@ def select_arenas(frame, n_target: int = 4) -> list[tuple[int, int, int, int]]:
     return rects
 
 
-def save_coords_default(coords: dict[str, list[int]]) -> None:
+def save_coords_default(project: Path, coords: dict[str, list[int]]) -> None:
     """Sauve dans configs/pipeline_config.yaml (default pour toutes les sessions)."""
+    config_path = pipeline_config_path(project)
     config = {}
-    if CONFIG_PATH.exists():
-        with open(CONFIG_PATH) as f:
+    if config_path.exists():
+        with open(config_path) as f:
             config = yaml.safe_load(f) or {}
     config["default_arenes_coords"] = coords
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(CONFIG_PATH, "w") as f:
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w") as f:
         yaml.dump(config, f, sort_keys=False, allow_unicode=True)
-    print(f"\n✅ Coords sauvées dans {CONFIG_PATH} (default global)")
+    print(f"\n✅ Coords sauvées dans {config_path} (default global)")
     for k, v in coords.items():
         print(f"   {k}: {v}")
 
 
-def save_coords_to_session(session_id: str, coords: dict[str, list[int]]) -> None:
+def save_coords_to_session(project: Path, session_id: str, coords: dict[str, list[int]]) -> None:
     """Sauve dans la metadata.yaml de la session — override le default pour celle-ci uniquement."""
-    meta_path = RAW_DIR / session_id / "metadata.yaml"
+    meta_path = raw_dir(project) / session_id / "metadata.yaml"
     if not meta_path.exists():
         raise FileNotFoundError(f"Metadata absent : {meta_path}")
     with open(meta_path) as f:
@@ -226,6 +233,7 @@ def save_coords_to_session(session_id: str, coords: dict[str, list[int]]) -> Non
 
 def main():
     parser = argparse.ArgumentParser(description="Calibration interactive des 4 arènes")
+    add_project_dir_arg(parser)
     parser.add_argument("video", nargs="?", help="Chemin vers une vidéo source")
     parser.add_argument("--session", help="Session ID (utilise sa source_video)")
     parser.add_argument("--frame", type=int, default=None,
@@ -237,8 +245,10 @@ def main():
                              "Utile quand UNE session a une calibration différente.")
     args = parser.parse_args()
 
+    project = resolve_project(args)
+
     try:
-        video_path = resolve_video(args)
+        video_path = resolve_video(project, args)
     except (FileNotFoundError, ValueError) as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
@@ -265,12 +275,12 @@ def main():
             print("❌ --save-to session nécessite --session <id>", file=sys.stderr)
             sys.exit(1)
         try:
-            save_coords_to_session(args.session, coords)
+            save_coords_to_session(project, args.session, coords)
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ {e}", file=sys.stderr)
             sys.exit(1)
     else:
-        save_coords_default(coords)
+        save_coords_default(project, coords)
 
 
 if __name__ == "__main__":
