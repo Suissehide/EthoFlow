@@ -44,6 +44,7 @@ from paths import (  # noqa: E402
     REPO_ROOT,
     add_project_dir_arg,
     cropped_dir,
+    raw_dir,
     resolve_project,
     vame_input_dir,
 )
@@ -59,28 +60,79 @@ CONFIG_POINTER = REPO_ROOT / ".vame_config_path"
 # Helpers
 # ============================================================
 
-def find_pairs(vame_input_dir: Path, cropped_dir: Path) -> list[tuple[Path, Path]]:
+def find_pairs(
+    vame_input_dir: Path,
+    cropped_dir: Path,
+    raw_root: Path | None = None,
+) -> list[tuple[Path, Path]]:
     """
-    Liste toutes les paires (video croppée, .h5) trouvées.
+    Liste toutes les paires (video, .h5) trouvées.
 
-    Pour chaque session du vame_input_dir, on cherche les .h5 nommés
-    <session>_A*.h5 et la vidéo croppée correspondante <session>_A*.mp4.
+    Deux patterns supportés (essayés dans l'ordre pour chaque session) :
+
+    Topview (multi-arena : 4 souris par vidéo source, croppées en 4 vidéos) :
+        h5      : <vame_input_dir>/<session>/<session>_A*.h5
+        video   : <cropped_dir>/<session>/<session>_A*.mp4
+
+    Bottomview (single-animal : 1 souris par vidéo, pas de cropping) :
+        h5      : <vame_input_dir>/<session>/<session>.h5
+        video   : `source_video` lu depuis <raw_root>/<session>/metadata.yaml
+
+    Le paramètre `raw_root` n'est utilisé que pour le fallback bottomview.
+    Si None, le fallback est ignoré (compat ascendante pour les appels
+    existants qui ne donnent pas le raw_root).
     """
+    import yaml as _yaml
+
     pairs: list[tuple[Path, Path]] = []
     if not vame_input_dir.exists():
         return pairs
+
     for session_dir in sorted(vame_input_dir.iterdir()):
         if not session_dir.is_dir() or session_dir.name.startswith("."):
             continue
         session_id = session_dir.name
-        for h5_path in sorted(session_dir.glob(f"{session_id}_A*.h5")):
-            arena = h5_path.stem.rsplit("_", 1)[-1]  # "A1"
-            video_path = cropped_dir / session_id / f"{session_id}_{arena}.mp4"
-            if not video_path.exists():
-                print(f"  ⚠️  vidéo manquante : {video_path} — skip {h5_path.name}",
-                      file=sys.stderr)
-                continue
-            pairs.append((video_path, h5_path))
+
+        # --- Pattern 1 : topview cropped-by-arena ---
+        topview_h5s = sorted(session_dir.glob(f"{session_id}_A*.h5"))
+        if topview_h5s:
+            for h5_path in topview_h5s:
+                arena = h5_path.stem.rsplit("_", 1)[-1]  # "A1"
+                video_path = cropped_dir / session_id / f"{session_id}_{arena}.mp4"
+                if not video_path.exists():
+                    print(f"  ⚠️  vidéo manquante : {video_path} — skip {h5_path.name}",
+                          file=sys.stderr)
+                    continue
+                pairs.append((video_path, h5_path))
+            continue  # session déjà résolue en topview
+
+        # --- Pattern 2 : bottomview single-animal ---
+        bottom_h5 = session_dir / f"{session_id}.h5"
+        if not bottom_h5.exists():
+            continue
+        if raw_root is None:
+            print(f"  ⚠️  {session_id} : .h5 bottomview trouvé mais pas de raw_root "
+                  f"pour résoudre la vidéo source", file=sys.stderr)
+            continue
+        meta_path = raw_root / session_id / "metadata.yaml"
+        if not meta_path.exists():
+            print(f"  ⚠️  {session_id} : metadata.yaml absent ({meta_path})",
+                  file=sys.stderr)
+            continue
+        with open(meta_path) as f:
+            meta = _yaml.safe_load(f) or {}
+        src = meta.get("source_video")
+        if not src:
+            print(f"  ⚠️  {session_id} : pas de source_video dans la metadata",
+                  file=sys.stderr)
+            continue
+        video_path = Path(src)
+        if not video_path.exists():
+            print(f"  ⚠️  vidéo source introuvable : {video_path} — skip {bottom_h5.name}",
+                  file=sys.stderr)
+            continue
+        pairs.append((video_path, bottom_h5))
+
     return pairs
 
 
@@ -137,14 +189,16 @@ def cmd_setup(args) -> None:
     project = resolve_project(args)
     input_dir = Path(args.input_dir) if args.input_dir else vame_input_dir(project)
     crop_dir = Path(args.cropped_dir) if args.cropped_dir else cropped_dir(project)
+    raw_root = raw_dir(project)
 
-    pairs = find_pairs(input_dir, crop_dir)
+    pairs = find_pairs(input_dir, crop_dir, raw_root=raw_root)
     if not pairs:
-        print("❌ Aucune paire (vidéo croppée, .h5) trouvée.\n"
-              "   Vérifie que tu as :\n"
-              f"   - des .h5 dans {input_dir}/<session>/\n"
-              f"   - des vidéos croppées dans {crop_dir}/<session>/\n"
-              "   (Lance `python scripts/crop_arenes.py --all` si besoin)",
+        print("❌ Aucune paire (vidéo, .h5) trouvée.\n"
+              "   Patterns supportés :\n"
+              f"   - topview    : {input_dir}/<session>/<session>_A*.h5\n"
+              f"                + {crop_dir}/<session>/<session>_A*.mp4\n"
+              f"   - bottomview : {input_dir}/<session>/<session>.h5\n"
+              f"                + source_video lu dans {raw_root}/<session>/metadata.yaml",
               file=sys.stderr)
         sys.exit(1)
 
@@ -571,7 +625,7 @@ def cmd_info(args) -> None:
     input_dir = Path(args.input_dir) if args.input_dir else vame_input_dir(project)
     crop_dir = Path(args.cropped_dir) if args.cropped_dir else cropped_dir(project)
     if input_dir.exists():
-        pairs = find_pairs(input_dir, crop_dir)
+        pairs = find_pairs(input_dir, crop_dir, raw_root=raw_dir(project))
         sessions = {p[1].stem.rsplit("_", 1)[0] for p in pairs}
         print(f"\nDans {input_dir} :")
         print(f"  → {len(pairs)} paire(s) (vidéo + h5) disponibles")
