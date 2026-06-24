@@ -1,7 +1,7 @@
 """
 Inspection qualité des fichiers .h5 prêts pour VAME.
 
-Lit les fichiers `data/vame-input/<session_id>/<session_id>_A*.h5` et imprime
+Lit les fichiers `data/dlc-output/<session_id>/<session_id>_A*.h5` et imprime
 un bilan détaillé par arène : couverture (frames valides vs trous), distribution
 des trous, validité par keypoint, et un verdict pour VAME.
 
@@ -13,7 +13,7 @@ Usage:
     python scripts/inspect_session.py <session_id>
     python scripts/inspect_session.py <s1> <s2>            # plusieurs
     python scripts/inspect_session.py --all                # toutes
-    python scripts/inspect_session.py <session_id> --input-dir data/vame-input-single
+    python scripts/inspect_session.py <session_id> --input-dir data/dlc-output-alt
     python scripts/inspect_session.py <session_id> --fps 25
 """
 from __future__ import annotations
@@ -30,9 +30,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import (  # noqa: E402
     add_project_dir_arg,
+    dlc_output_dir,
     raw_dir,
     resolve_project,
-    vame_input_dir,
 )
 
 
@@ -189,13 +189,13 @@ def main():
     parser.add_argument("--all", action="store_true",
                         help="Inspecter toutes les sessions présentes dans --input-dir")
     parser.add_argument("--input-dir", type=Path, default=None,
-                        help="Racine des .h5 single-animal (défaut: <project>/data/vame-input/)")
+                        help="Racine des .h5 single-animal (défaut: <project>/data/dlc-output/)")
     parser.add_argument("--fps", type=float, default=None,
                         help="FPS (défaut : lu depuis metadata.yaml, sinon 25)")
     args = parser.parse_args()
 
     project = resolve_project(args)
-    input_dir = args.input_dir if args.input_dir is not None else vame_input_dir(project)
+    input_dir = args.input_dir if args.input_dir is not None else dlc_output_dir(project)
 
     if args.all:
         sessions = list_sessions(input_dir)

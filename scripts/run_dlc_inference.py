@@ -42,12 +42,12 @@ os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import (  # noqa: E402
     add_project_dir_arg,
+    cleaned_h5_path,
     cropped_dir,
     dlc_output_dir,
     pipeline_config_path,
     raw_dir,
     resolve_project,
-    vame_input_dir,
 )
 
 
@@ -73,22 +73,21 @@ def is_processed(project: Path, session_id: str, mode: str = "superanimal") -> b
     """Vrai si une sortie DLC existe déjà pour cette session, dans le mode donné.
 
     - superanimal (multi-animal) : .h5 directement dans dlc-output/<session>/
-    - single-animal               : .h5 finaux dans vame-input/<session>/
+    - single-animal               : .h5 finaux dans dlc-output/<session>/
                                     (cropped-raw/ est un scratch intermédiaire,
                                     pas un signal fiable de complétion)
     - custom                      : .h5 dans dlc-output/<session>/
     """
     if mode == "single-animal":
-        # Seule la sortie FINALE dans vame-input/ fait foi. Le dossier
-        # cropped-raw/ est un scratch intermédiaire : un run --video-adapt
-        # qui crashe pendant l'adaptation y laisse déjà le .h5 de
-        # pré-adaptation (nom canonique SANS suffixe — seuls le .json et
-        # la vidéo annotée portent le tag *_before_adapt). Sa présence ne
-        # prouve donc RIEN sur la complétion de la session.
-        vame_session = vame_input_dir(project) / session_id
-        return vame_session.exists() and any(
-            vame_session.glob(f"{session_id}_A*.h5")
-        )
+        # Seule la sortie FINALE des arènes (<session>_A*.h5 à la racine
+        # de dlc-output/<session>/) fait foi. Le dossier cropped-raw/ est
+        # un scratch intermédiaire : un run --video-adapt qui crashe
+        # pendant l'adaptation y laisse déjà le .h5 de pré-adaptation
+        # (nom canonique SANS suffixe — seuls le .json et la vidéo
+        # annotée portent le tag *_before_adapt). Sa présence ne prouve
+        # donc RIEN sur la complétion de la session.
+        out = dlc_output_dir(project) / session_id
+        return out.exists() and any(out.glob(f"{session_id}_A*.h5"))
 
     # multi-animal / custom : .h5 directement à la racine de dlc-output/<session>/
     out = dlc_output_dir(project) / session_id
@@ -180,7 +179,7 @@ def run_superanimal_cropped(
        beaucoup plus simple)
     2. Aplatissement du h5 (suppression du niveau 'individuals')
     3. Nettoyage (low-lk → NaN, interpolation des trous courts)
-    4. Écriture dans data/vame-input/<session>/<session>_<arene>.h5
+    4. Écriture dans data/dlc-output/<session>/<session>_<arene>.h5
 
     Pas d'`assign_arenas` à faire ensuite — la sortie va directement à VAME.
     """
@@ -232,8 +231,8 @@ def run_superanimal_cropped(
         dest_folder=str(temp_dest),
     )
 
-    # Post-traitement : flatten + clean + déplacement vers vame-input
-    base_out = Path(output_dir) if output_dir else vame_input_dir(project)
+    # Post-traitement : flatten + clean + déplacement vers dlc-output
+    base_out = Path(output_dir) if output_dir else dlc_output_dir(project)
     out_dir = base_out / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"\nPost-traitement → {out_dir}\n")
@@ -330,7 +329,7 @@ if __name__ == "__main__":
                         default="superanimal",
                         help="superanimal: multi-animal sur vidéo entière ; "
                              "single-animal: SuperAnimal sur vidéos déjà croppées "
-                             "(une souris par vidéo, sortie directe vers vame-input/) ; "
+                             "(une souris par vidéo, sortie directe vers dlc-output/) ; "
                              "custom: modèle DLC custom configuré dans <project>/configs/pipeline_config.yaml")
     parser.add_argument("--superanimal-name", default="superanimal_topviewmouse")
     parser.add_argument("--superanimal-model", default="hrnet_w32")
@@ -347,7 +346,7 @@ if __name__ == "__main__":
                         help="(mode single-animal) taille max d'un trou interpolable, en frames")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="(mode single-animal) dossier de sortie alternatif "
-                             "(défaut: <project>/data/vame-input/). Utile pour comparer "
+                             "(défaut: <project>/data/dlc-output/). Utile pour comparer "
                              "plusieurs runs sans écraser.")
     args = parser.parse_args()
 

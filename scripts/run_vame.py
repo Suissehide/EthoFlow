@@ -1,5 +1,5 @@
 """
-Runner VAME — bootstrap d'un projet à partir de data/vame-input/.
+Runner VAME — bootstrap d'un projet à partir de data/dlc-output/.
 
 Étapes (sous-commandes séparées, à lancer dans l'ordre) :
 
@@ -14,8 +14,9 @@ Runner VAME — bootstrap d'un projet à partir de data/vame-input/.
 
 Pré-requis :
     - Avoir crée l'env conda 'vame' (`conda env create -f environment-vame.yml`)
-    - Avoir `data/vame-input/<session>/<session>_A*.h5` (sorties d'assign_arenas
-      ou de run_dlc_inference --mode single-animal)
+    - Avoir `data/dlc-output/<session>/<session>_A*.h5` (sorties d'assign_arenas
+      ou de run_dlc_inference --mode single-animal) pour le topview,
+      ou `data/dlc-output/<session>/<session>_clean.h5` pour le bottomview
     - Avoir les vidéos correspondantes dans `data/cropped/<session>/<session>_A*.mp4`
       → si tu n'as pas encore croppé, lance `python scripts/crop_arenes.py --all`
       depuis l'env ethoflow (rapide, ~2 min/session avec ffmpeg)
@@ -44,23 +45,23 @@ from paths import (  # noqa: E402
     REPO_ROOT,
     add_project_dir_arg,
     cropped_dir,
+    dlc_output_dir,
     raw_dir,
     resolve_project,
     vame_config_pointer,
-    vame_input_dir,
-    vame_output_dir,
+    vame_dir,
 )
 
 # VAME_PROJECTS_DIR et CONFIG_POINTER sont MAINTENANT scopées au projet
-# EthoFlow : chaque projet a son sous-dossier `data/vame-output/` qui
-# contient ses projets VAME, et son propre pointer `.vame_config_path`.
+# EthoFlow : chaque projet a son sous-dossier `data/vame/` qui contient
+# ses projets VAME, et son propre pointer `.vame_config_path`.
 # Avant cette refactor, les deux étaient globaux au repo (chemin legacy
 # `<repo_parent>/vame-projects/` et `<repo>/.vame_config_path`) — ce qui
 # entraînait des collisions entre un projet topview et un projet bottomview
 # portant le même nom de projet VAME.
 def vame_projects_dir(project: Path) -> Path:
     """Racine où vit/crée les projets VAME d'un projet EthoFlow donné."""
-    return vame_output_dir(project)
+    return vame_dir(project)
 
 
 # ============================================================
@@ -68,7 +69,7 @@ def vame_projects_dir(project: Path) -> Path:
 # ============================================================
 
 def find_pairs(
-    vame_input_dir: Path,
+    dlc_output_root: Path,
     cropped_dir: Path,
     raw_root: Path | None = None,
 ) -> list[tuple[Path, Path]]:
@@ -78,11 +79,11 @@ def find_pairs(
     Deux patterns supportés (essayés dans l'ordre pour chaque session) :
 
     Topview (multi-arena : 4 souris par vidéo source, croppées en 4 vidéos) :
-        h5      : <vame_input_dir>/<session>/<session>_A*.h5
+        h5      : <dlc_output_root>/<session>/<session>_A*.h5
         video   : <cropped_dir>/<session>/<session>_A*.mp4
 
     Bottomview (single-animal : 1 souris par vidéo, pas de cropping) :
-        h5      : <vame_input_dir>/<session>/<session>.h5
+        h5      : <dlc_output_root>/<session>/<session>_clean.h5
         video   : `source_video` lu depuis <raw_root>/<session>/metadata.yaml
 
     Le paramètre `raw_root` n'est utilisé que pour le fallback bottomview.
@@ -92,10 +93,10 @@ def find_pairs(
     import yaml as _yaml
 
     pairs: list[tuple[Path, Path]] = []
-    if not vame_input_dir.exists():
+    if not dlc_output_root.exists():
         return pairs
 
-    for session_dir in sorted(vame_input_dir.iterdir()):
+    for session_dir in sorted(dlc_output_root.iterdir()):
         if not session_dir.is_dir() or session_dir.name.startswith("."):
             continue
         session_id = session_dir.name
@@ -114,7 +115,7 @@ def find_pairs(
             continue  # session déjà résolue en topview
 
         # --- Pattern 2 : bottomview single-animal ---
-        bottom_h5 = session_dir / f"{session_id}.h5"
+        bottom_h5 = session_dir / f"{session_id}_clean.h5"
         if not bottom_h5.exists():
             continue
         if raw_root is None:
@@ -216,7 +217,7 @@ def cmd_setup(args) -> None:
         sys.exit(1)
 
     project = resolve_project(args)
-    input_dir = Path(args.input_dir) if args.input_dir else vame_input_dir(project)
+    input_dir = Path(args.input_dir) if args.input_dir else dlc_output_dir(project)
     crop_dir = Path(args.cropped_dir) if args.cropped_dir else cropped_dir(project)
     raw_root = raw_dir(project)
 
@@ -226,7 +227,7 @@ def cmd_setup(args) -> None:
               "   Patterns supportés :\n"
               f"   - topview    : {input_dir}/<session>/<session>_A*.h5\n"
               f"                + {crop_dir}/<session>/<session>_A*.mp4\n"
-              f"   - bottomview : {input_dir}/<session>/<session>.h5\n"
+              f"   - bottomview : {input_dir}/<session>/<session>_clean.h5\n"
               f"                + source_video lu dans {raw_root}/<session>/metadata.yaml",
               file=sys.stderr)
         sys.exit(1)
@@ -370,7 +371,7 @@ def cmd_align(args) -> None:
 
     # Les keypoints sont déjà dans le config.yaml du projet (copiés par
     # init_new_project), pas besoin de relire les .h5 originaux. Du coup
-    # cmd_align ne dépend plus du dossier vame-input, ce qui simplifie
+    # cmd_align ne dépend plus du dossier dlc-output, ce qui simplifie
     # l'organisation quand on a plusieurs runs DLC distincts.
     bp = list(config.get("keypoints") or [])
     if not bp:
@@ -676,7 +677,7 @@ def cmd_info(args) -> None:
     else:
         print(f"Pas de projet VAME initialisé pour ce projet EthoFlow ({project}).")
 
-    # Tous les projets VAME disponibles dans <project>/data/vame-output/
+    # Tous les projets VAME disponibles dans <project>/data/vame/
     projects = list_projects(project)
     vp_dir = vame_projects_dir(project)
     if projects:
@@ -687,9 +688,9 @@ def cmd_info(args) -> None:
         print("\nPour basculer : python scripts/run_vame.py "
               f"--project-dir {project} use <nom>")
 
-    # Scan optionnel d'un dossier vame-input (pour planifier un futur setup)
+    # Scan optionnel d'un dossier dlc-output (pour planifier un futur setup)
     project = resolve_project(args)
-    input_dir = Path(args.input_dir) if args.input_dir else vame_input_dir(project)
+    input_dir = Path(args.input_dir) if args.input_dir else dlc_output_dir(project)
     crop_dir = Path(args.cropped_dir) if args.cropped_dir else cropped_dir(project)
     if input_dir.exists():
         pairs = find_pairs(input_dir, crop_dir, raw_root=raw_dir(project))
@@ -725,7 +726,7 @@ def main() -> None:
     p_setup.add_argument("--project-name", default="ethoflow-vame",
                          help="Nom du projet VAME (créé dans ../vame-projects/)")
     p_setup.add_argument("--input-dir", default=None,
-                         help="Dossier des .h5 (défaut: data/vame-input/)")
+                         help="Dossier des .h5 (défaut: data/dlc-output/)")
     p_setup.add_argument("--cropped-dir", default=None,
                          help="Dossier des vidéos croppées (défaut: data/cropped/)")
     p_setup.add_argument("--force", action="store_true",

@@ -69,11 +69,11 @@ def cropped_dir() -> Path:
 def dlc_output_dir() -> Path:
     return _paths.dlc_output_dir(_current_project())
 
-def vame_input_dir() -> Path:
-    return _paths.vame_input_dir(_current_project())
+def vame_dir() -> Path:
+    return _paths.vame_dir(_current_project())
 
-def vame_output_dir() -> Path:
-    return _paths.vame_output_dir(_current_project())
+def cleaned_h5_path(session_id: str) -> Path:
+    return _paths.cleaned_h5_path(_current_project(), session_id)
 
 def results_dir() -> Path:
     return _paths.results_dir(_current_project())
@@ -97,8 +97,7 @@ DATA_ROOT = _paths.data_dir(ROOT)
 RAW_DIR = _paths.raw_dir(ROOT)
 CROPPED_DIR = _paths.cropped_dir(ROOT)
 DLC_OUTPUT_DIR = _paths.dlc_output_dir(ROOT)
-VAME_INPUT_DIR = _paths.vame_input_dir(ROOT)
-VAME_OUTPUT_DIR = _paths.vame_output_dir(ROOT)
+VAME_DIR = _paths.vame_dir(ROOT)
 
 
 # ============================================================
@@ -126,7 +125,7 @@ def list_projects() -> list[Path]:
 def create_project(name: str) -> Path:
     """Crée un nouveau projet avec la structure de dossiers standard."""
     project_dir = projects_root() / name
-    subdirs = ["raw", "cropped", "dlc-output", "vame-input", "vame-output"]
+    subdirs = ["raw", "cropped", "dlc-output", "vame"]
     for sub in subdirs:
         (project_dir / "data" / sub).mkdir(parents=True, exist_ok=True)
     return project_dir

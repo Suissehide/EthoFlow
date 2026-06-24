@@ -8,8 +8,7 @@ données et sa propre config DLC/VAME :
     │   ├── raw/<session>/metadata.yaml
     │   ├── cropped/<session>/
     │   ├── dlc-output/<session>/
-    │   ├── vame-input/<session>/
-    │   ├── vame-output/<vame_project>/
+    │   ├── vame/<vame_project>/
     │   └── results/
     └── configs/
         └── pipeline_config.yaml
@@ -117,12 +116,27 @@ def dlc_output_dir(project: Path) -> Path:
     return project / "data" / "dlc-output"
 
 
-def vame_input_dir(project: Path) -> Path:
-    return project / "data" / "vame-input"
+def vame_dir(project: Path) -> Path:
+    """Racine VAME du projet : <project>/data/vame/.
+
+    C'est l'unique dossier VAME du projet : on y crée les projets VAME
+    (`<project>/data/vame/<vame_project_name>/`) via `run_vame setup`.
+
+    Les h5 nettoyés *avant* setup (ce qui était l'ancien `vame-input/`)
+    vivent maintenant à côté de leur output DLC d'origine :
+    `<project>/data/dlc-output/<session>/<session>_clean.h5`. Logique
+    parce que le clean est juste un post-traitement de l'output DLC,
+    pas un artefact VAME en soi.
+    """
+    return project / "data" / "vame"
 
 
-def vame_output_dir(project: Path) -> Path:
-    return project / "data" / "vame-output"
+def cleaned_h5_path(project: Path, session_id: str) -> Path:
+    """Path canonique du h5 nettoyé pour VAME, scoped au projet.
+
+    Convention : <project>/data/dlc-output/<session>/<session>_clean.h5.
+    """
+    return project / "data" / "dlc-output" / session_id / f"{session_id}_clean.h5"
 
 
 def results_dir(project: Path) -> Path:
@@ -148,7 +162,7 @@ def vame_config_pointer(project: Path) -> Path:
     EthoFlow.
 
     Contenu : un chemin absolu vers le `config.yaml` d'un projet VAME (qui
-    vit dans `vame_output_dir(project)/<name>/`). Permet de basculer entre
+    vit dans `vame_dir(project)/<name>/`). Permet de basculer entre
     plusieurs projets VAME (ex: comparer deux entraînements) sans toucher
     aux scripts.
 

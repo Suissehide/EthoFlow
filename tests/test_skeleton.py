@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def test_data_directories_exist():
     """Les dossiers de données attendus doivent exister."""
-    for sub in ["raw", "cropped", "dlc-output", "vame-output", "results"]:
+    for sub in ["raw", "cropped", "dlc-output", "vame", "results"]:
         assert (ROOT / "data" / sub).is_dir(), f"data/{sub} manquant"
 
 

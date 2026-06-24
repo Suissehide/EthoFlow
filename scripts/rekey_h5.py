@@ -6,8 +6,8 @@ Utile pour rattraper les fichiers qui ont été sauvés avec key='df' avant le f
 Lecture + ré-écriture, pas de calcul, c'est instantané.
 
 Usage:
-    python scripts/rekey_h5.py                          # toutes les .h5 dans data/vame-input/
-    python scripts/rekey_h5.py --root data/vame-input-single   # autre dossier
+    python scripts/rekey_h5.py                          # toutes les .h5 dans data/dlc-output/
+    python scripts/rekey_h5.py --root data/dlc-output-alt      # autre dossier
     python scripts/rekey_h5.py --root path/to/dir       # n'importe quel dossier
 """
 from __future__ import annotations
@@ -23,8 +23,8 @@ import tables  # noqa: F401  — assure que pytables est bien là
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import (  # noqa: E402
     add_project_dir_arg,
+    dlc_output_dir,
     resolve_project,
-    vame_input_dir,
 )
 
 TARGET_KEY = "df_with_missing"
@@ -56,13 +56,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Re-écrit les .h5 avec key='df_with_missing'.")
     add_project_dir_arg(parser)
     parser.add_argument("--root", type=Path, default=None,
-                        help="Racine à scanner (défaut: <project>/data/vame-input/)")
+                        help="Racine à scanner (défaut: <project>/data/dlc-output/)")
     parser.add_argument("--force", action="store_true",
                         help="Re-écrire même les fichiers déjà OK")
     args = parser.parse_args()
 
     project = resolve_project(args)
-    root = args.root if args.root is not None else vame_input_dir(project)
+    root = args.root if args.root is not None else dlc_output_dir(project)
 
     if not root.exists():
         print(f"❌ Racine introuvable : {root}", file=sys.stderr)

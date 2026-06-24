@@ -1,5 +1,5 @@
 """Migre un projet VAME de l'ancien emplacement legacy global vers
-le dossier projet-aware `<project>/data/vame-output/<name>/`.
+le dossier projet-aware `<project>/data/vame/<name>/`.
 
 Pourquoi : avant la refactor projet-aware, run_vame.py écrivait tous
 ses projets VAME dans un dossier global partagé entre projets EthoFlow
@@ -10,7 +10,7 @@ chaque projet VAME à son projet EthoFlow.
 
 Ce que fait le script :
     1. Déplace le dossier complet du projet VAME vers
-       `<ethoflow_project>/data/vame-output/<name>/`.
+       `<ethoflow_project>/data/vame/<name>/`.
     2. Réécrit toutes les occurrences de l'ancien path absolu dans le
        `config.yaml` du projet VAME (project_path, paths des sessions,
        etc) — le YAML est sérialisé tel quel, on fait un str.replace
@@ -57,7 +57,7 @@ from paths import (  # noqa: E402
     add_project_dir_arg,
     resolve_project,
     vame_config_pointer,
-    vame_output_dir,
+    vame_dir,
 )
 
 
@@ -125,7 +125,7 @@ def main() -> None:
     project = resolve_project(args)
     legacy_root = args.legacy_vame_projects_dir or default_legacy_dir()
     src = legacy_root / args.vame_project_name
-    dst_root = vame_output_dir(project)
+    dst_root = vame_dir(project)
     dst = dst_root / args.vame_project_name
 
     print(f"Projet EthoFlow  : {project}")

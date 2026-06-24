@@ -10,7 +10,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from lib.config import dlc_output_dir, vame_output_dir, vame_projects_root
+from lib.config import dlc_output_dir, vame_projects_root
 from lib.sessions import arenes_dataframe, list_sessions, load_metadata
 from lib.vame_projects import (
     discover_projects,

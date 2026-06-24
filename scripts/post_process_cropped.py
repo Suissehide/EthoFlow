@@ -1,7 +1,7 @@
 """
 Post-traitement des sorties single-animal cropped :
 aplatit le multi-index (individuals=1), nettoie (low-lk + interp),
-et copie vers data/vame-input/<session>/<session>_<arene>.h5.
+et copie vers data/dlc-output/<session>/<session>_<arene>.h5.
 
 À utiliser si l'inférence DLC s'est bien passée (fichiers présents dans
 `data/dlc-output/<session>/cropped-raw/`) mais que le post-traitement n'a
@@ -16,7 +16,7 @@ Usage:
     python scripts/post_process_cropped.py <session_id>
     python scripts/post_process_cropped.py <s1> <s2> ...
     python scripts/post_process_cropped.py --all
-    python scripts/post_process_cropped.py <session> --output-dir data/vame-input-single
+    python scripts/post_process_cropped.py <session> --output-dir data/dlc-output-alt
     python scripts/post_process_cropped.py <session> --likelihood-threshold 0.3 --interp-limit 100
 """
 from __future__ import annotations
@@ -34,7 +34,6 @@ from paths import (  # noqa: E402
     add_project_dir_arg,
     dlc_output_dir,
     resolve_project,
-    vame_input_dir,
 )
 # Import de clean_individual depuis assign_arenas
 from assign_arenas import clean_individual  # noqa: E402
@@ -81,7 +80,7 @@ def post_process(
     if not h5_files:
         raise FileNotFoundError(f"Aucun .h5 dans {src_raw_dir}")
 
-    base_out = Path(output_dir) if output_dir else vame_input_dir(project)
+    base_out = Path(output_dir) if output_dir else dlc_output_dir(project)
     out_dir = base_out / session_id
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -141,7 +140,7 @@ def main():
                         help="Taille max d'un trou interpolable, en frames "
                              "(défaut 25 = 1s @ 25fps)")
     parser.add_argument("--output-dir", type=Path, default=None,
-                        help="Dossier de sortie alternatif (défaut: <project>/data/vame-input/)")
+                        help="Dossier de sortie alternatif (défaut: <project>/data/dlc-output/)")
     args = parser.parse_args()
 
     project = resolve_project(args)

@@ -6,9 +6,8 @@ Un projet EthoFlow est un dossier auto-suffisant qui contient :
     ├── data/
     │   ├── raw/                 # data/raw/<session>/metadata.yaml
     │   ├── cropped/             # cropped videos (topview seulement)
-    │   ├── dlc-output/          # output DLC par session
-    │   ├── vame-input/          # h5 cleané et alignés
-    │   ├── vame-output/         # projets VAME par sous-dossier
+    │   ├── dlc-output/          # output DLC + h5 nettoyés (_clean.h5, _A*.h5)
+    │   ├── vame/                # projets VAME par sous-dossier
     │   └── results/             # exports figures/csv finaux
     └── configs/
         └── pipeline_config.yaml # DLC project config + (topview) arena coords
@@ -48,8 +47,7 @@ from paths import (  # noqa: E402
     raw_dir,
     results_dir,
     resolve_project,
-    vame_input_dir,
-    vame_output_dir,
+    vame_dir,
 )
 
 
@@ -111,8 +109,7 @@ def main() -> None:
         raw_dir(project),
         cropped_dir(project),
         dlc_output_dir(project),
-        vame_input_dir(project),
-        vame_output_dir(project),
+        vame_dir(project),
         results_dir(project),
         configs_dir(project),
     ]

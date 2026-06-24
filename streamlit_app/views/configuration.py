@@ -125,17 +125,16 @@ def render() -> None:
 
     # ---- Résumé des chemins ----
     st.markdown(lucide_title("clipboard-list", "Résumé des chemins"), unsafe_allow_html=True)
-    from lib.config import raw_dir, cropped_dir, dlc_output_dir, vame_input_dir, vame_output_dir, SCRIPTS_DIR
+    from lib.config import raw_dir, cropped_dir, dlc_output_dir, vame_dir, SCRIPTS_DIR
 
     paths = {
         "Données (racine)": data_root(),
         "Sessions brutes": raw_dir(),
         "Vidéos cropped": cropped_dir(),
         "Sorties DLC": dlc_output_dir(),
-        "Entrées VAME": vame_input_dir(),
-        "Sorties VAME": vame_output_dir(),
+        "Projets VAME (projet)": vame_dir(),
         "Scripts": SCRIPTS_DIR,
-        "Projets VAME": vame_path,
+        "Projets VAME (legacy)": vame_path,
     }
     for label, path in paths.items():
         icon = lucide_html("circle-check", 14, ACCENT) if path.exists() else lucide_html("circle-x", 14, "#ef4444")

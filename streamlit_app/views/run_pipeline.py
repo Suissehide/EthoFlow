@@ -11,7 +11,6 @@ import streamlit as st
 from lib.config import (
     cropped_dir,
     dlc_output_dir,
-    vame_input_dir,
     vame_projects_root,
 )
 from lib.pipeline import (
@@ -114,10 +113,10 @@ def _section_post_dlc(selected: list[str]) -> None:
     # ----- filter_keypoints -----
     with st.expander("filter_keypoints — virer les keypoints peu fiables", expanded=False):
         fk_in = st.text_input(
-            "input-dir", value=str(vame_input_dir()), key="fk_in",
+            "input-dir", value=str(dlc_output_dir()), key="fk_in",
         )
         fk_out = st.text_input(
-            "output-dir", value=str(vame_input_dir().parent / "vame-input-clean"),
+            "output-dir", value=str(dlc_output_dir().parent / "dlc-output-clean"),
             key="fk_out",
         )
         fk_keep = st.text_input(
@@ -150,7 +149,7 @@ def _section_post_dlc(selected: list[str]) -> None:
     # ----- fill_nan_h5 -----
     with st.expander("fill_nan_h5 — imputer les NaN avant VAME", expanded=False):
         fn_root = st.text_input(
-            "root", value=str(vame_input_dir().parent / "vame-input-clean"),
+            "root", value=str(dlc_output_dir().parent / "dlc-output-clean"),
             key="fn_root",
         )
         fn_out = st.text_input(
@@ -175,7 +174,7 @@ def _section_post_dlc(selected: list[str]) -> None:
     # ----- inspect_session -----
     with st.expander("inspect_session — QC visuel par session", expanded=False):
         ins_input = st.text_input(
-            "input-dir", value=str(vame_input_dir()), key="ins_in",
+            "input-dir", value=str(dlc_output_dir()), key="ins_in",
         )
         ins_all = st.checkbox(
             "--all (toutes les sessions de input-dir)",
@@ -211,10 +210,10 @@ def _section_post_dlc(selected: list[str]) -> None:
             "préalablement produit par `analyze_vame --validity-source`."
         )
         te_validity = st.text_input("validity-csv", value="", key="te_validity")
-        te_h5_in = st.text_input("h5-input", value=str(vame_input_dir()), key="te_h5_in")
+        te_h5_in = st.text_input("h5-input", value=str(dlc_output_dir()), key="te_h5_in")
         te_h5_out = st.text_input(
             "h5-output",
-            value=str(vame_input_dir().parent / "vame-input-trimmed"),
+            value=str(dlc_output_dir().parent / "dlc-output-trimmed"),
             key="te_h5_out",
         )
         te_vid_in = st.text_input(
@@ -261,7 +260,7 @@ def _section_vame() -> None:
     # ----- setup -----
     with st.expander("setup — initialiser un projet VAME", expanded=False):
         st_input = st.text_input(
-            "input-dir (vide = data/vame-input/)",
+            "input-dir (vide = data/dlc-output/)",
             value="", key="vs_input",
         )
         st_cropped = st.text_input(

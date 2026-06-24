@@ -1,7 +1,7 @@
 """Prépare les .h5 DLC custom-mode pour VAME (bottom-view, 12 keypoints).
 
 Étapes par session (lit `<project>/data/dlc-output/<session>/...h5` →
-écrit `<project>/data/vame-input/<session>/<session>.h5`) :
+écrit `<project>/data/dlc-output/<session>/<session>_clean.h5`) :
 
     1. dlc.filterpredictions  (median window, défaut 5 frames)
        Smooth temporel : tue les jitters d'une-deux frames sans toucher
@@ -18,7 +18,7 @@
        laisser à VAME (ou à fill_nan_h5.py si besoin).
 
     4. Écriture en h5 single-animal (key="df_with_missing", format="table")
-       dans `<project>/data/vame-input/<session>/<session>.h5`. C'est
+       dans `<project>/data/dlc-output/<session>/<session>_clean.h5`. C'est
        l'entrée canonique attendue par run_vame.py setup.
 
 Pré-requis :
@@ -44,7 +44,7 @@ Usage :
 
 Étape suivante : si tu veux remplir agressivement les NaN résiduels (pour
 VAME qui n'aime pas les trous), enchaîne avec :
-    python scripts/fill_nan_h5.py --root <project>/data/vame-input
+    python scripts/fill_nan_h5.py --root <project>/data/dlc-output
 """
 from __future__ import annotations
 
@@ -58,11 +58,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from assign_arenas import clean_individual  # noqa: E402
 from paths import (  # noqa: E402
     add_project_dir_arg,
+    cleaned_h5_path,
     dlc_output_dir,
     pipeline_config_path,
     raw_dir,
     resolve_project,
-    vame_input_dir,
 )
 
 
@@ -167,10 +167,9 @@ def process_session(
     df = pd.read_hdf(h5_to_clean)
     df_clean, stats = clean_individual(df, likelihood_threshold, interp_limit)
 
-    # 3) Écriture finale dans vame-input/<session>/<session>.h5
-    vame_out_dir = vame_input_dir(project) / session_id
-    vame_out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = vame_out_dir / f"{session_id}.h5"
+    # 3) Écriture finale : <project>/data/dlc-output/<session>/<session>_clean.h5
+    out_path = cleaned_h5_path(project, session_id)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     df_clean.to_hdf(out_path, key="df_with_missing", mode="w", format="table")
 
     stats["raw_h5"] = raw_h5.name
@@ -205,14 +204,14 @@ def main() -> None:
     )
     parser.add_argument(
         "--skip-existing", action="store_true",
-        help="Ignore les sessions qui ont déjà un fichier dans vame-input/",
+        help="Ignore les sessions qui ont déjà un fichier <session>_clean.h5 dans dlc-output/",
     )
     args = parser.parse_args()
 
     project = resolve_project(args)
-    out_root = vame_input_dir(project)
+    out_root = dlc_output_dir(project)
     print(f"Projet     : {project}")
-    print(f"Sortie     : {out_root}")
+    print(f"Sortie     : {out_root}/<session>/<session>_clean.h5")
     print(f"Threshold  : {args.likelihood_threshold}  (paws bottom-view : 0.3 OK)")
     print(f"Interp lim : {args.interp_limit} frames")
     print(f"Filtre DLC : {'OFF (--no-filter)' if args.no_filter else f'median win={args.window_length}'}")
@@ -233,7 +232,7 @@ def main() -> None:
         before = len(sessions)
         sessions = [
             s for s in sessions
-            if not (out_root / s / f"{s}.h5").exists()
+            if not cleaned_h5_path(project, s).exists()
         ]
         print(f"  skip-existing : {before} → {len(sessions)} sessions à traiter\n")
 
@@ -273,6 +272,9 @@ def main() -> None:
             "\nPuis setup VAME :\n"
             f"  python scripts/run_vame.py --project-dir {project} setup"
         )
+
+
+
 
 
 if __name__ == "__main__":

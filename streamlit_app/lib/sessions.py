@@ -1,8 +1,8 @@
 """Lecture des sessions EthoFlow et de leurs metadata.
 
 Centralise la logique d'inventaire qui était dans l'ancien `app.py` monofichier,
-en l'enrichissant des statuts post-cleanup (vame-input clean) et de la disponibilité
-de validity_per_session.csv pour les projets VAME connus.
+en l'enrichissant des statuts post-cleanup (h5 _clean dans dlc-output) et de
+la disponibilité de validity_per_session.csv pour les projets VAME connus.
 """
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ import pandas as pd
 import yaml
 
 from lib.config import (
+    cleaned_h5_path,
     dlc_output_dir,
     raw_dir,
-    vame_input_dir,
-    vame_output_dir,
+    vame_dir,
     vame_projects_root,
 )
 
@@ -30,13 +30,12 @@ def load_metadata(session_id: str) -> dict | None:
 
 
 def _cleanup_done(session_id: str) -> bool:
-    """Vrai si on trouve un dossier vame-input avec un suffixe -clean pour cette session."""
-    vi = vame_input_dir()
-    if not vi.exists():
-        return False
-    candidates = list(vi.glob(f"*clean*/{session_id}"))
-    candidates += list(vi.glob(f"{session_id}-clean"))
-    return any(c.exists() for c in candidates)
+    """Vrai si le h5 nettoyé existe pour cette session.
+
+    Convention : `<project>/data/dlc-output/<session>/<session>_clean.h5`
+    (produit par `prepare_vame_input_custom.py`).
+    """
+    return cleaned_h5_path(session_id).exists()
 
 
 def _validity_available(session_id: str) -> bool:
@@ -79,11 +78,10 @@ def list_sessions() -> pd.DataFrame:
             1 for a in meta.get("arenes", []) if a.get("mouse_id") is not None
         )
 
-        vi = vame_input_dir()
-        vame_input_session = vi / session_id
+        dlc_session = dlc_output_dir() / session_id
         split_done = (
-            vame_input_session.exists()
-            and any(vame_input_session.glob(f"{session_id}_A*.h5"))
+            dlc_session.exists()
+            and any(dlc_session.glob(f"{session_id}_A*.h5"))
         )
 
         rows.append({
@@ -94,7 +92,7 @@ def list_sessions() -> pd.DataFrame:
             "vidéo": "OK" if video_ok else "manque",
             "DLC": "OK" if (dlc_output_dir() / session_id).exists() else "—",
             "split": "OK" if split_done else "—",
-            "VAME": "OK" if (vame_output_dir() / session_id).exists() else "—",
+            "VAME": "OK" if (vame_dir() / session_id).exists() else "—",
             "cleanup": "OK" if _cleanup_done(session_id) else "—",
             "validity": "OK" if _validity_available(session_id) else "—",
         })

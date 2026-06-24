@@ -12,7 +12,7 @@ Logique (assignation **par-frame**, robuste au tracker bancal) :
 4. **Nettoie** chaque track : low-likelihood → NaN, puis interpolation
    linéaire des trous courts (≤ interp-limit frames)
 5. Écrit un fichier `<session>_<arene>.h5` single-animal par arène, dans
-   `data/dlc-output/<session>/`
+   `data/dlc-output/<session>/` (à côté du .h5 multi-animal d'origine)
 
 Pourquoi par-frame plutôt que par track entier : le tracker multi-animal
 de SuperAnimal mélange souvent les identités des souris au cours d'une
@@ -56,7 +56,6 @@ from paths import (  # noqa: E402
     pipeline_config_path,
     raw_dir,
     resolve_project,
-    vame_input_dir,
 )
 
 
@@ -269,7 +268,7 @@ def assign_arenas(
         )
 
     session_dlc_dir = dlc_output_dir(project) / session_id
-    session_out_dir = vame_input_dir(project) / session_id
+    session_out_dir = dlc_output_dir(project) / session_id
     session_out_dir.mkdir(parents=True, exist_ok=True)
 
     h5_path = find_multianimal_h5(session_dlc_dir)
@@ -367,8 +366,8 @@ def list_dlc_processed_sessions(project: Path) -> list[str]:
 
 
 def is_assigned(project: Path, session_id: str) -> bool:
-    """Vrai si vame-input/<session>/ contient déjà des .h5 single-animal."""
-    out = vame_input_dir(project) / session_id
+    """Vrai si dlc-output/<session>/ contient déjà des .h5 single-animal."""
+    out = dlc_output_dir(project) / session_id
     return out.exists() and any(out.glob(f"{session_id}_A*.h5"))
 
 
@@ -382,7 +381,7 @@ if __name__ == "__main__":
                              "qu'elles aient déjà été assignées ou non (réécrase)")
     parser.add_argument("--all-new", action="store_true",
                         help="Traiter uniquement les sessions DLC qui n'ont pas "
-                             "encore de sortie dans data/vame-input/")
+                             "encore de sortie split (_A*.h5) dans data/dlc-output/")
     parser.add_argument("--likelihood-threshold", type=float, default=0.6,
                         help="Seuil de confiance — détections en dessous → NaN (défaut 0.6)")
     parser.add_argument("--interp-limit", type=int, default=25,
