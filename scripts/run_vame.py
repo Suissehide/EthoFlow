@@ -281,6 +281,29 @@ def cmd_setup(args) -> None:
         config_path = result
     save_config_pointer(config_path)
 
+    # VAME copie/symlinke les vidéos dans data/raw/ avec leur nom d'origine
+    # (ex: 1001.mp4) mais nomme les .h5 d'après la session (BV-1001.h5).
+    # Les étapes downstream (motif_videos en particulier) construisent les
+    # chemins vidéo à partir du nom de SESSION et cherchent donc BV-1001.mp4.
+    # On aligne ici post-init pour éviter le mismatch.
+    project_path = Path(config_path).parent
+    raw_vame = project_path / "data" / "raw"
+    if raw_vame.exists():
+        n_renamed = 0
+        for video_src, h5_src in pairs:
+            expected_name = h5_src.stem + ".mp4"     # BV-1001.mp4
+            current_name = Path(video_src).name      # 1001.mp4
+            if current_name == expected_name:
+                continue
+            actual = raw_vame / current_name
+            expected = raw_vame / expected_name
+            if actual.exists() and not expected.exists():
+                actual.rename(expected)
+                n_renamed += 1
+        if n_renamed:
+            print(f"\nℹ️  {n_renamed} vidéo(s) renommée(s) pour matcher le "
+                  f"nom de session attendu par VAME downstream.")
+
     # Ajuste pose_confidence dans le config.yaml du projet — par défaut VAME le
     # met à 0.99, ce qui mask la majorité des points SuperAnimal (typiquement
     # 0.5-0.95). On s'aligne sur notre seuil de pré-cleaning (0.6) pour ne
