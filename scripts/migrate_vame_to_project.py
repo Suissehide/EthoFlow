@@ -56,7 +56,6 @@ from paths import (  # noqa: E402
     REPO_ROOT,
     add_project_dir_arg,
     resolve_project,
-    vame_config_pointer,
     vame_dir,
 )
 
@@ -125,12 +124,13 @@ def main() -> None:
     project = resolve_project(args)
     legacy_root = args.legacy_vame_projects_dir or default_legacy_dir()
     src = legacy_root / args.vame_project_name
-    dst_root = vame_dir(project)
-    dst = dst_root / args.vame_project_name
+    # Destination = vame_dir(project) directement (le projet VAME EST data/vame/,
+    # pas data/vame/<name>/). Plus de sous-dossier nominal.
+    dst = vame_dir(project)
 
     print(f"Projet EthoFlow  : {project}")
     print(f"Source legacy    : {src}")
-    print(f"Destination      : {dst}")
+    print(f"Destination      : {dst}  (plat — pas de sous-dossier)")
     if args.dry_run:
         print("\n[DRY RUN] aucune écriture ne sera faite.\n")
 
@@ -141,25 +141,27 @@ def main() -> None:
     if not src.exists():
         print(f"\n❌ Source absente : {src}", file=sys.stderr)
         sys.exit(1)
-    if dst.exists():
-        print(f"\n❌ Destination déjà occupée : {dst}\n"
-              "   Si tu veux refaire la migration, supprime d'abord la "
-              "destination, ou bouge-la manuellement.",
+    if dst.exists() and any(dst.iterdir()):
+        print(f"\n❌ Destination déjà occupée et non vide : {dst}\n"
+              "   Si tu veux refaire la migration, vide la destination d'abord.",
               file=sys.stderr)
         sys.exit(1)
 
-    # 1) Move le dossier
+    # 1) Move le contenu du dossier source DANS dst (et pas dst/<name>/)
     if args.dry_run:
-        print(f"  [dry] move {src} → {dst}")
+        print(f"  [dry] move CONTENU de {src} → {dst}")
     else:
-        print(f"\n📦 Déplacement {src} → {dst}")
-        dst_root.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
+        print(f"\n📦 Déplacement du contenu de {src} → {dst}")
+        dst.mkdir(parents=True, exist_ok=True)
+        for item in src.iterdir():
+            shutil.move(str(item), str(dst / item.name))
+        # Vide, on supprime le dossier source pour pas laisser de squelette
+        src.rmdir()
         print("  ✓ déplacement OK")
 
     # 2) Réécriture du config.yaml
     config_path = dst / "config.yaml" if not args.dry_run else src / "config.yaml"
-    print(f"\n📝 Réécriture des paths dans {config_path.relative_to(REPO_ROOT.parent) if config_path.is_relative_to(REPO_ROOT.parent) else config_path}")
+    print(f"\n📝 Réécriture des paths dans {config_path}")
     if not config_path.exists():
         print(f"  ⚠️  config.yaml introuvable, skip (à vérifier manuellement)")
     else:
@@ -174,30 +176,16 @@ def main() -> None:
         else:
             print(f"    Total : {n} remplacement(s)")
 
-    # 3) Pointer .vame_config_path : nouveau (projet) + cleanup legacy
-    new_pointer = vame_config_pointer(project)
+    # 3) Nettoyage du pointer legacy global s'il pointait vers la source migrée
     legacy_pointer = REPO_ROOT / ".vame_config_path"
-    new_pointer_content = str(dst / "config.yaml")
-
-    if args.dry_run:
-        print(f"\n[dry] write pointer : {new_pointer} → {new_pointer_content}")
-    else:
-        new_pointer.parent.mkdir(parents=True, exist_ok=True)
-        new_pointer.write_text(new_pointer_content)
-        print(f"\n✓ pointer écrit : {new_pointer}")
-
     if legacy_pointer.exists():
         legacy_content = legacy_pointer.read_text().strip()
-        # Le pointer legacy pointait-il vers le projet qu'on vient de migrer ?
         if str(src) in legacy_content or args.vame_project_name in legacy_content:
             if args.dry_run:
-                print(f"[dry] delete legacy pointer : {legacy_pointer}")
+                print(f"\n[dry] delete legacy pointer : {legacy_pointer}")
             else:
                 legacy_pointer.unlink()
-                print(f"✓ pointer legacy supprimé : {legacy_pointer}")
-        else:
-            print(f"ℹ️  pointer legacy {legacy_pointer} pointe vers un autre projet "
-                  f"({legacy_content}), conservé tel quel.")
+                print(f"\n✓ pointer legacy supprimé : {legacy_pointer}")
 
     print(
         "\n✅ Migration terminée.\n\n"

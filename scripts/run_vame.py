@@ -23,8 +23,8 @@ Pré-requis :
 
 Usage typique :
     conda activate vame
-    python scripts/run_vame.py setup --project-name ethoflow-2026-05
-    python scripts/run_vame.py align
+    python scripts/run_vame.py --project-dir <project> setup
+    python scripts/run_vame.py --project-dir <project> align
     python scripts/run_vame.py trainset
     python scripts/run_vame.py train
     python scripts/run_vame.py evaluate
@@ -42,26 +42,26 @@ from pathlib import Path
 # Import des chemins projet-aware
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import (  # noqa: E402
-    REPO_ROOT,
     add_project_dir_arg,
     cropped_dir,
+    data_dir,
     dlc_output_dir,
     raw_dir,
     resolve_project,
-    vame_config_pointer,
     vame_dir,
 )
 
-# VAME_PROJECTS_DIR et CONFIG_POINTER sont MAINTENANT scopées au projet
-# EthoFlow : chaque projet a son sous-dossier `data/vame/` qui contient
-# ses projets VAME, et son propre pointer `.vame_config_path`.
-# Avant cette refactor, les deux étaient globaux au repo (chemin legacy
-# `<repo_parent>/vame-projects/` et `<repo>/.vame_config_path`) — ce qui
-# entraînait des collisions entre un projet topview et un projet bottomview
-# portant le même nom de projet VAME.
-def vame_projects_dir(project: Path) -> Path:
-    """Racine où vit/crée les projets VAME d'un projet EthoFlow donné."""
-    return vame_dir(project)
+# Convention : un projet EthoFlow → un projet VAME, à plat dans data/vame/.
+# Le projet VAME EST le dossier `<ethoflow_project>/data/vame/` lui-même
+# (pas un sous-dossier). On obtient ça en passant à vame.init_new_project
+# `working_directory=<project>/data/` et `project_name="vame"` —
+# l'API crée alors `<project>/data/vame/`.
+VAME_PROJECT_NAME = "vame"
+
+
+def vame_config_yaml(project: Path) -> Path:
+    """Path vers le config.yaml du projet VAME unique du projet EthoFlow."""
+    return vame_dir(project) / "config.yaml"
 
 
 # ============================================================
@@ -144,46 +144,29 @@ def find_pairs(
     return pairs
 
 
-def save_config_pointer(project: Path, config_path: str) -> None:
-    """Écrit le pointer .vame_config_path scoped au projet."""
-    pointer = vame_config_pointer(project)
-    pointer.parent.mkdir(parents=True, exist_ok=True)
-    pointer.write_text(str(config_path))
-
-
 def load_config_pointer(project: Path) -> str:
-    """Lit le pointer .vame_config_path scoped au projet.
+    """Retourne le chemin du config.yaml du projet VAME.
 
-    Fallback : si pas trouvé dans le projet, regarde le legacy
-    <repo>/.vame_config_path pour rester compatible le temps d'une
-    migration. Affiche un warning quand le fallback s'active.
+    Depuis qu'on a flatté le layout (data/vame/ IS le projet), il n'y a
+    plus de pointer .vame_config_path à maintenir : le path est
+    structurellement déterminé par celui du projet EthoFlow. Cette
+    fonction subsiste pour rétro-compat avec les callsites existants.
     """
-    pointer = vame_config_pointer(project)
-    if pointer.exists():
-        return pointer.read_text().strip()
-
-    legacy = REPO_ROOT / ".vame_config_path"
-    if legacy.exists():
-        print(
-            f"⚠️  Pointer VAME legacy détecté ({legacy}). "
-            f"Migre avec : python scripts/migrate_vame_to_project.py "
-            f"--project-dir {project} --vame-project-name <name>",
-            file=sys.stderr,
+    cfg = vame_config_yaml(project)
+    if not cfg.exists():
+        raise FileNotFoundError(
+            f"Pas de projet VAME pour {project}.\n"
+            f"   Attendu : {cfg}\n"
+            f"   Crée-le avec : python scripts/run_vame.py "
+            f"--project-dir {project} setup"
         )
-        return legacy.read_text().strip()
-
-    raise FileNotFoundError(
-        f"Pas de projet VAME initialisé pour {project}.\n"
-        f"   Lance d'abord : python scripts/run_vame.py "
-        f"--project-dir {project} setup"
-    )
+    return str(cfg)
 
 
 def load_vame_config(project: Path) -> dict:
     """vame-py 0.13 attend un config: dict (pas un chemin) dans la plupart des appels."""
     import vame
-    path = load_config_pointer(project)
-    return vame.read_config(path)
+    return vame.read_config(load_config_pointer(project))
 
 
 def detect_pose_ref_index(h5_path: Path) -> list[int]:
@@ -260,18 +243,20 @@ def cmd_setup(args) -> None:
                     else:
                         print(f"   ⚠️  {h.name} : {status}", file=sys.stderr)
 
-    vame_projects = vame_projects_dir(project)
-    vame_projects.mkdir(parents=True, exist_ok=True)
+    # On veut que `<project>/data/vame/` SOIT le projet VAME (pas un parent
+    # qui contient `<project>/data/vame/<name>/`). On obtient ça en passant
+    # working_directory=<project>/data/ et project_name="vame" — vame crée
+    # alors `<project>/data/vame/`.
+    project_dir = vame_dir(project)
+    working_directory = data_dir(project)
+    working_directory.mkdir(parents=True, exist_ok=True)
 
     # Refus d'écraser un projet existant — sauf avec --force, qui supprime
-    # tout le dossier (utile pour rattraper une tentative ratée qui a laissé
-    # un dossier sans config.yaml)
-    project_dir = vame_projects / args.project_name
-    if project_dir.exists():
+    # tout le contenu pour rattraper une tentative ratée.
+    if project_dir.exists() and any(project_dir.iterdir()):
         if not args.force:
-            print(f"❌ Projet déjà présent : {project_dir}\n"
-                  f"   Choisis un autre --project-name, ou relance avec --force "
-                  f"pour écraser (le dossier sera supprimé).",
+            print(f"❌ Projet VAME déjà présent : {project_dir}\n"
+                  f"   Relance avec --force pour écraser (le dossier sera vidé).",
                   file=sys.stderr)
             sys.exit(1)
         import shutil
@@ -294,13 +279,13 @@ def cmd_setup(args) -> None:
         print("ℹ️  Mode COPY (les vidéos sont copiées dans le projet, "
               "pas de symlinks).")
 
-    print(f"\nCréation du projet VAME '{args.project_name}' dans {vame_projects}...")
+    print(f"\nCréation du projet VAME dans {project_dir}...")
     # vame-py 0.13 : init_new_project retourne (config_path, config_dict)
     result = vame.init_new_project(
-        project_name=args.project_name,
+        project_name=VAME_PROJECT_NAME,
         poses_estimations=poses,
         source_software="DeepLabCut",
-        working_directory=str(vame_projects),
+        working_directory=str(working_directory),
         videos=videos,
         video_type=".mp4",
         copy_videos=copy_videos,
@@ -310,7 +295,6 @@ def cmd_setup(args) -> None:
         config_path = result[0]
     else:
         config_path = result
-    save_config_pointer(project, config_path)
 
     # VAME copie/symlinke les vidéos dans data/raw/ avec leur nom d'origine
     # (ex: 1001.mp4) mais nomme les .h5 d'après la session (BV-1001.h5).
@@ -631,65 +615,27 @@ def cmd_community(args) -> None:
     print(f"   Résultats dans : {vame_project / 'results'}")
 
 
-def list_projects(project: Path) -> list[Path]:
-    """Liste tous les projets VAME du projet EthoFlow (qui ont un config.yaml)."""
-    vp_dir = vame_projects_dir(project)
-    if not vp_dir.exists():
-        return []
-    return sorted(
-        d for d in vp_dir.iterdir()
-        if d.is_dir() and (d / "config.yaml").exists()
-    )
-
-
-def cmd_use(args) -> None:
-    """Bascule le projet VAME courant sans toucher au projet lui-même."""
-    project = resolve_project(args)
-    vp_dir = vame_projects_dir(project)
-    vame_project_dir = vp_dir / args.project_name
-    config_path = vame_project_dir / "config.yaml"
-    if not config_path.exists():
-        available = [d.name for d in list_projects(project)]
-        print(f"❌ Projet VAME introuvable : {vame_project_dir}\n"
-              f"Disponibles dans {vp_dir} : "
-              f"{available if available else 'aucun'}",
-              file=sys.stderr)
-        sys.exit(1)
-    save_config_pointer(project, str(config_path))
-    print(f"✅ Projet VAME courant : {config_path}")
-
-
 def cmd_info(args) -> None:
+    """Affiche l'état du projet VAME (unique) du projet EthoFlow."""
     project = resolve_project(args)
-    pointer = vame_config_pointer(project)
-    current = None
-    if pointer.exists():
-        current = pointer.read_text().strip()
-        print(f"Projet VAME courant : {current}")
+    cfg_yaml = vame_config_yaml(project)
+
+    if cfg_yaml.exists():
+        print(f"Projet VAME : {cfg_yaml}")
         try:
             import vame
-            cfg = vame.read_config(current)
+            cfg = vame.read_config(str(cfg_yaml))
             print(f"  → {len(cfg.get('session_names') or [])} session(s) "
                   f"importée(s) dans le projet")
             print(f"  → {len(cfg.get('keypoints') or [])} keypoint(s)")
         except Exception:
             pass
     else:
-        print(f"Pas de projet VAME initialisé pour ce projet EthoFlow ({project}).")
-
-    # Tous les projets VAME disponibles dans <project>/data/vame/
-    projects = list_projects(project)
-    vp_dir = vame_projects_dir(project)
-    if projects:
-        print(f"\nProjets VAME disponibles dans {vp_dir} :")
-        for p in projects:
-            marker = "→" if current and Path(current).parent == p else " "
-            print(f"  {marker} {p.name}")
-        print("\nPour basculer : python scripts/run_vame.py "
-              f"--project-dir {project} use <nom>")
+        print(f"Pas de projet VAME pour {project}.")
+        print(f"  Crée-le avec : python scripts/run_vame.py "
+              f"--project-dir {project} setup")
 
     # Scan optionnel d'un dossier dlc-output (pour planifier un futur setup)
-    project = resolve_project(args)
     input_dir = Path(args.input_dir) if args.input_dir else dlc_output_dir(project)
     crop_dir = Path(args.cropped_dir) if args.cropped_dir else cropped_dir(project)
     if input_dir.exists():
@@ -723,8 +669,6 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_setup = sub.add_parser("setup", help="Init projet VAME")
-    p_setup.add_argument("--project-name", default="ethoflow-vame",
-                         help="Nom du projet VAME (créé dans ../vame-projects/)")
     p_setup.add_argument("--input-dir", default=None,
                          help="Dossier des .h5 (défaut: data/dlc-output/)")
     p_setup.add_argument("--cropped-dir", default=None,
@@ -775,17 +719,13 @@ def main() -> None:
     sub.add_parser("motif-videos", help="Vidéos d'exemple par motif")
     sub.add_parser("community",   help="Regroupement des motifs en communautés")
 
-    p_info = sub.add_parser("info", help="Projet courant + liste des projets")
+    p_info = sub.add_parser("info", help="État du projet VAME unique du projet EthoFlow")
     p_info.add_argument("--input-dir", default=None,
                         help="Scanne ce dossier pour montrer combien de paires "
                              "seraient utilisées par un futur setup")
     p_info.add_argument("--cropped-dir", default=None)
 
-    p_use = sub.add_parser("use", help="Bascule le projet courant (sans re-créer)")
-    p_use.add_argument("project_name",
-                       help="Nom du projet (dans vame-projects/) à activer")
-
-    sub.add_parser("all",      help="Tout enchaîner (très long)")
+    sub.add_parser("all", help="Tout enchaîner (très long)")
 
     args = parser.parse_args()
     {
@@ -798,7 +738,6 @@ def main() -> None:
         "motif-videos": cmd_motif_videos,
         "community":    cmd_community,
         "info":         cmd_info,
-        "use":          cmd_use,
         "all":          cmd_all,
     }[args.cmd](args)
 
