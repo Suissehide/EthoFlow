@@ -36,8 +36,18 @@ Référence officielle (à garder ouverte pour ajuster les hyperparamètres) :
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
+
+# Désactive l'accélération matérielle MSMF de cv2 sur Windows : VAME charge
+# torch+CUDA AVANT d'appeler cv2.VideoCapture, et le hardware decoder MSMF
+# (qui partage des ressources GPU avec CUVID) plante silencieusement quand
+# torch a déjà claimé la GPU. Symptôme : motif_videos lève "Video capture
+# could not be opened" alors que le fichier s'ouvre dans VLC et que cv2
+# l'ouvre en standalone. setdefault pour ne pas écraser une valeur déjà
+# posée par l'utilisateur. No-op hors Windows.
+os.environ.setdefault("OPENCV_VIDEOIO_MSMF_ENABLE_HW_TRANSFORMS", "0")
 
 # Import des chemins projet-aware
 sys.path.insert(0, str(Path(__file__).resolve().parent))
