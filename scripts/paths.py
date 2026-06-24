@@ -141,3 +141,18 @@ def pipeline_config_path(project: Path) -> Path:
     auraient des dlc_project_config distincts).
     """
     return project / "configs" / "pipeline_config.yaml"
+
+
+def vame_config_pointer(project: Path) -> Path:
+    """Pointer vers le config.yaml du projet VAME courant pour CE projet
+    EthoFlow.
+
+    Contenu : un chemin absolu vers le `config.yaml` d'un projet VAME (qui
+    vit dans `vame_output_dir(project)/<name>/`). Permet de basculer entre
+    plusieurs projets VAME (ex: comparer deux entraînements) sans toucher
+    aux scripts.
+
+    Scope au projet (et non global au repo) pour éviter qu'un projet
+    topview et un projet bottomview se marchent dessus.
+    """
+    return project / ".vame_config_path"
