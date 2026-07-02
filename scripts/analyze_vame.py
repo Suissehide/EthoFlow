@@ -76,41 +76,163 @@ def get_project_path(arg_project: str | None) -> Path:
     )
 
 
-def load_motif_labels(labels_path: Path | None) -> dict[int, str]:
+# Catégories reconnues du référentiel ETHOGRAM (cf. streamlit_app/lib/config.py).
+# Utilisé pour détecter le sens des colonnes du CSV utilisateur : si `label`
+# contient une catégorie et `category` un label spécifique, on swap.
+_KNOWN_CATEGORIES = {
+    "locomotion", "stationary", "vertical exploration", "sniffing",
+    "grooming", "exploration", "arena-specific", "specific behaviors",
+    "catch-all", "transitions",
+}
+
+
+def load_motif_labels(labels_path: Path | None) -> dict[int, dict]:
     """
-    Charge un YAML qui mappe motif_id → étiquette comportementale.
+    Charge un mapping motif_id → {label, category, confidence, notes}.
 
-    Format attendu (clés entières, valeurs chaînes) :
+    Deux formats supportés :
 
-        0: immobilité
-        1: locomotion lente
-        2: rearing
-        ...
+    1. YAML plat (rétrocompat historique) :
+           0: immobilité
+           1: locomotion lente
+       → label seul, pas de catégorie.
 
-    Retourne {} si aucun fichier fourni. Les motifs non listés sont tolérés
-    et gardent leur étiquette par défaut "motif_<i>".
+    2. CSV avec en-tête (recommandé, produit par motif_labels_template.csv) :
+           motif_id;label;category;confidence;qc_inspected_sessions;notes
+           0;rearing_exploration;Vertical exploration;high;BV-970;...
+       Séparateur détecté automatiquement (`,` ou `;`).
+
+       **Auto-correction du column swap** : si un utilisateur a rempli le
+       label dans la colonne `category` (piège classique du template), on
+       détecte que les valeurs de `label` correspondent à des catégories
+       ETHOGRAM connues (ou l'inverse) et on swap silencieusement.
+
+    Retourne {} si aucun fichier fourni.
     """
     if labels_path is None:
         return {}
     if not labels_path.exists():
         raise FileNotFoundError(f"Fichier de labels introuvable : {labels_path}")
-    with open(labels_path) as f:
-        raw = yaml.safe_load(f) or {}
-    labels: dict[int, str] = {}
-    for k, v in raw.items():
+
+    # --- YAML (legacy) ---
+    if labels_path.suffix.lower() in {".yaml", ".yml"}:
+        with open(labels_path) as f:
+            raw = yaml.safe_load(f) or {}
+        return {
+            int(k): {"label": str(v), "category": None}
+            for k, v in raw.items()
+        }
+
+    # --- CSV (nouveau format) ---
+    # Détection auto du séparateur
+    with open(labels_path, encoding="utf-8") as f:
+        first_line = f.readline()
+    sep = ";" if first_line.count(";") > first_line.count(",") else ","
+
+    df = pd.read_csv(labels_path, sep=sep, dtype=str, keep_default_na=False)
+    df.columns = [c.strip() for c in df.columns]
+    required = {"motif_id"}
+    if not required.issubset(df.columns):
+        raise ValueError(
+            f"{labels_path} : colonne 'motif_id' manquante "
+            f"(colonnes trouvées : {list(df.columns)})"
+        )
+
+    label_col = "label" if "label" in df.columns else None
+    cat_col = "category" if "category" in df.columns else None
+
+    # Swap `label` ↔ `category` si nécessaire.
+    # Deux cas de figure gérés :
+    # (a) label vide partout, category rempli   → l'utilisateur s'est trompé
+    #     de colonne, on prend category comme label et on met category à None
+    # (b) label ressemble à des catégories ETHOGRAM et category à des noms
+    #     spécifiques → swap complet
+    if label_col and cat_col:
+        label_has_content = any(
+            str(v).strip() for v in df[label_col]
+        )
+        cat_has_content = any(
+            str(v).strip() for v in df[cat_col]
+        )
+
+        if not label_has_content and cat_has_content:
+            # Cas (a) : promeut category → label, laisse category vide
+            print(f"ℹ️  {labels_path.name} : colonne 'label' vide, "
+                  f"utilisation de 'category' comme label.", file=sys.stderr)
+            df[label_col] = df[cat_col]
+            df[cat_col] = ""
+        elif label_has_content and cat_has_content:
+            # Cas (b) : vérifie si les colonnes sont inversées
+            label_vals = [str(v).strip().lower() for v in df[label_col] if str(v).strip()]
+            cat_vals = [str(v).strip().lower() for v in df[cat_col] if str(v).strip()]
+
+            def _looks_like_category(vals: list[str]) -> bool:
+                if not vals:
+                    return False
+                n_cat = sum(
+                    1 for v in vals
+                    if any(kc in v for kc in _KNOWN_CATEGORIES) and len(v.split()) <= 3
+                )
+                return n_cat / len(vals) > 0.5
+
+            if _looks_like_category(label_vals) and not _looks_like_category(cat_vals):
+                print(f"ℹ️  {labels_path.name} : colonnes 'label' et 'category' "
+                      f"inversées — swap automatique.", file=sys.stderr)
+                label_col, cat_col = cat_col, label_col
+
+    labels: dict[int, dict] = {}
+    for _, row in df.iterrows():
+        mid_raw = row.get("motif_id", "").strip()
+        if not mid_raw:
+            continue
         try:
-            labels[int(k)] = str(v)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"Clé non-entière dans {labels_path} : {k!r}"
-            ) from exc
+            mid = int(mid_raw)
+        except (TypeError, ValueError):
+            continue
+        entry = {
+            "label": row.get(label_col, "").strip() if label_col else "",
+            "category": row.get(cat_col, "").strip() if cat_col else "",
+            "confidence": row.get("confidence", "").strip(),
+            "notes": row.get("notes", "").strip(),
+        }
+        # Nettoie les strings vides → None pour lisibilité
+        for k in ("label", "category", "confidence", "notes"):
+            if not entry[k]:
+                entry[k] = None
+        labels[mid] = entry
     return labels
 
 
-def motif_display(motif_id: int, labels: dict[int, str]) -> str:
-    """Forme compacte pour CSV/plots : '3: grooming' si labellisé, sinon 'motif_3'."""
-    label = labels.get(motif_id)
+def motif_display(motif_id: int, labels: dict[int, dict] | dict[int, str]) -> str:
+    """Forme compacte pour CSV/plots : '3: grooming' si labellisé, sinon 'motif_3'.
+
+    Accepte dict[int, dict] (nouveau format riche) ou dict[int, str] (legacy).
+    """
+    entry = labels.get(motif_id)
+    if entry is None:
+        return f"motif_{motif_id}"
+    if isinstance(entry, dict):
+        label = entry.get("label")
+    else:
+        label = entry
     return f"{motif_id}: {label}" if label else f"motif_{motif_id}"
+
+
+def motif_category(motif_id: int, labels: dict[int, dict]) -> str | None:
+    """Retourne la catégorie ETHOGRAM pour ce motif, ou None."""
+    entry = labels.get(motif_id)
+    if not isinstance(entry, dict):
+        return None
+    return entry.get("category")
+
+
+def is_artifact_motif(motif_id: int, labels: dict[int, dict]) -> bool:
+    """True si le motif est marqué confidence=artifact (à exclure de l'analyse)."""
+    entry = labels.get(motif_id)
+    if not isinstance(entry, dict):
+        return False
+    conf = entry.get("confidence")
+    return conf is not None and conf.lower() == "artifact"
 
 
 def find_label_file(motif_usage_path: Path) -> Path | None:
@@ -237,11 +359,23 @@ def load_metadata_index(project: Path) -> dict[tuple[str, str], dict]:
     """
     Construit un dict {(session_id, arena_id) -> dict d'attributs} à partir
     des metadata.yaml d'ethoflow.
+
+    Deux formats auto-détectés :
+
+    - **Topview** : metadata avec `arenes: [...]` — une ligne par arène
+      dans l'index, arena_id = "A1"..."A4", condition = `arene.condition`.
+    - **Bottomview** : metadata plate (pas d'`arenes:`) — une seule ligne
+      par session, arena_id = "", condition = `metadata.group`
+      (MCCiECKO / MCCf/f).
+
+    Cette double approche permet à un même script de traiter les deux
+    types de projets sans branchement en amont.
     """
     index: dict[tuple[str, str], dict] = {}
     ethoflow_raw = raw_dir(project)
     if not ethoflow_raw.exists():
         return index
+
     for session_dir in ethoflow_raw.iterdir():
         meta_path = session_dir / "metadata.yaml"
         if not meta_path.exists():
@@ -249,19 +383,38 @@ def load_metadata_index(project: Path) -> dict[tuple[str, str], dict]:
         with open(meta_path) as f:
             meta = yaml.safe_load(f) or {}
         session_id = meta.get("session_id") or session_dir.name
-        for ar in meta.get("arenes", []):
-            arena_id = ar.get("id")
-            if not arena_id:
-                continue
-            index[(session_id, arena_id)] = {
+        arenes = meta.get("arenes") or []
+
+        if arenes:
+            # Topview : une entrée par arène
+            for ar in arenes:
+                arena_id = ar.get("id")
+                if not arena_id:
+                    continue
+                index[(session_id, arena_id)] = {
+                    "session_id": session_id,
+                    "arena": arena_id,
+                    "mouse_id": ar.get("mouse_id"),
+                    "condition": ar.get("condition"),
+                    "stress": ar.get("stress"),
+                    "angii": ar.get("angii"),
+                    "timepoint": meta.get("timepoint"),
+                    "date": meta.get("date"),
+                }
+        else:
+            # Bottomview : metadata plate, une entrée par session
+            index[(session_id, "")] = {
                 "session_id": session_id,
-                "arena": arena_id,
-                "mouse_id": ar.get("mouse_id"),
-                "condition": ar.get("condition"),
-                "stress": ar.get("stress"),
-                "angii": ar.get("angii"),
-                "timepoint": meta.get("timepoint"),
-                "date": meta.get("date"),
+                "arena": "",
+                "mouse_id": meta.get("mouse_id"),
+                "condition": meta.get("group"),  # MCCiECKO / MCCf/f
+                "sex": meta.get("sex"),
+                "cage": meta.get("cage"),
+                "birth_date": meta.get("birth_date"),
+                "date": meta.get("date_recorded"),
+                "line": meta.get("line"),
+                "genotype_mcc": meta.get("genotype_mcc"),
+                "genotype_cdh5_cre": meta.get("genotype_cdh5_cre"),
             }
     return index
 
@@ -336,17 +489,35 @@ def build_dataframe(seg_files: list[Path],
         usage_norm = usage_for_freq / total if total > 0 else usage_for_freq
 
         for motif_i in range(n_clusters):
+            # Skip les motifs marqués artifact dans motif_labels
+            if is_artifact_motif(motif_i, labels):
+                continue
+
+            entry = labels.get(motif_i)
+            if isinstance(entry, dict):
+                label_str = entry.get("label") or f"motif_{motif_i}"
+                category = entry.get("category")
+            else:
+                label_str = entry if entry else f"motif_{motif_i}"
+                category = None
+
             row = {
                 "session_full": session_name,
                 "session_id": session_id,
                 "arena": arena,
                 "mouse_id": meta.get("mouse_id"),
                 "condition": meta.get("condition"),
+                # Métadonnées topview (peuvent être None sur bottomview)
                 "stress": meta.get("stress"),
                 "angii": meta.get("angii"),
                 "timepoint": meta.get("timepoint"),
+                # Métadonnées bottomview (peuvent être None sur topview)
+                "sex": meta.get("sex"),
+                "cage": meta.get("cage"),
+                "date": meta.get("date"),
                 "motif": motif_i,
-                "label": labels.get(motif_i, f"motif_{motif_i}"),
+                "label": label_str,
+                "category": category,
                 "frequency": float(usage_norm[motif_i]),
                 "count": int(usage_original[motif_i]),
             }
@@ -358,6 +529,93 @@ def build_dataframe(seg_files: list[Path],
                 )
             rows.append(row)
     return pd.DataFrame(rows), pd.DataFrame(validity_rows)
+
+
+def aggregate_by_category(df: pd.DataFrame) -> pd.DataFrame:
+    """Agrège la fréquence par catégorie ETHOGRAM (ex: 'Sniffing') plutôt
+    que par motif individuel. Ignore les motifs sans catégorie assignée.
+
+    Retourne un DataFrame avec 1 ligne par session × catégorie.
+    """
+    df_cat = df[df["category"].notna()].copy()
+    if df_cat.empty:
+        return pd.DataFrame()
+    agg = (
+        df_cat.groupby(
+            ["session_full", "session_id", "arena", "condition",
+             "sex", "cage", "date", "category"],
+            dropna=False,
+        )["frequency"]
+        .sum()
+        .reset_index()
+        .rename(columns={"frequency": "frequency_total"})
+    )
+    return agg
+
+
+def stats_by_motif(df: pd.DataFrame, condition_col: str) -> pd.DataFrame:
+    """Mann-Whitney U par motif entre les groupes de `condition_col`
+    (typiquement 'condition' = MCCiECKO vs MCCf/f pour bottomview).
+
+    Correction BH (Benjamini-Hochberg) sur l'ensemble des motifs testés.
+    Renvoie un DataFrame trié par p-value croissante.
+    """
+    try:
+        from scipy import stats
+    except ImportError:
+        print("⚠  scipy non installé, stats skippées", file=sys.stderr)
+        return pd.DataFrame()
+
+    sub = df.dropna(subset=[condition_col])
+    groups = sorted(sub[condition_col].unique())
+    if len(groups) != 2:
+        print(f"⚠  stats_by_motif : {len(groups)} groupes trouvés dans "
+              f"'{condition_col}' — test Mann-Whitney nécessite exactement 2.",
+              file=sys.stderr)
+        return pd.DataFrame()
+
+    rows = []
+    for m in sorted(sub["motif"].unique()):
+        d = sub[sub["motif"] == m]
+        a = d.loc[d[condition_col] == groups[0], "frequency"].values
+        b = d.loc[d[condition_col] == groups[1], "frequency"].values
+        if len(a) < 3 or len(b) < 3:
+            continue
+        try:
+            u, p = stats.mannwhitneyu(a, b, alternative="two-sided")
+        except ValueError:
+            continue
+        rows.append({
+            "motif": m,
+            "label": d["label"].iloc[0],
+            "category": d["category"].iloc[0] if "category" in d.columns else None,
+            f"mean_{groups[0]}": float(np.mean(a)),
+            f"mean_{groups[1]}": float(np.mean(b)),
+            "diff": float(np.mean(b) - np.mean(a)),
+            "u_stat": float(u),
+            "p_value": float(p),
+            f"n_{groups[0]}": len(a),
+            f"n_{groups[1]}": len(b),
+        })
+    result = pd.DataFrame(rows)
+    if result.empty:
+        return result
+
+    # Correction Benjamini-Hochberg (FDR)
+    ps = result["p_value"].values
+    order = np.argsort(ps)
+    ranked = ps[order]
+    n = len(ranked)
+    q = np.zeros(n)
+    prev = 1.0
+    for i in range(n - 1, -1, -1):
+        prev = min(prev, ranked[i] * n / (i + 1))
+        q[i] = prev
+    q_full = np.zeros(n)
+    q_full[order] = q
+    result["p_adj_bh"] = q_full
+    result["significant_0.05"] = result["p_adj_bh"] < 0.05
+    return result.sort_values("p_value").reset_index(drop=True)
 
 
 def plot_heatmap(df: pd.DataFrame, out_path: Path,
@@ -444,9 +702,10 @@ def main() -> None:
     parser.add_argument("--n-clusters", type=int, default=None,
                         help="Si plusieurs configurations existent, force un nombre de clusters")
     parser.add_argument("--labels", type=Path, default=None,
-                        help="YAML de mapping motif_id → étiquette comportementale. "
-                             "Ajoute une colonne 'label' aux CSV et utilise ces "
-                             "étiquettes sur les axes des graphiques.")
+                        help="Fichier de labels : YAML (legacy, motif_id: nom) "
+                             "OU CSV (recommandé, colonnes "
+                             "motif_id;label;category;confidence;notes). "
+                             "Défaut auto : <vame_project>/motif_labels.csv.")
     parser.add_argument("--validity-source", type=Path, default=None,
                         help="Dossier des .h5 PRÉ-fill (avant fill_nan_h5), "
                              "typiquement data/vame-input/single-enhanced-2026-05. "
@@ -469,6 +728,14 @@ def main() -> None:
     except FileNotFoundError as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Auto-résolution du path des labels : par défaut, motif_labels.csv à la
+    # racine du projet VAME (convention EthoFlow).
+    if args.labels is None:
+        default_labels = project / "motif_labels.csv"
+        if default_labels.exists():
+            args.labels = default_labels
+            print(f"ℹ  Labels auto-détectés : {default_labels}")
 
     print(f"Projet VAME : {project}")
     seg_files = find_segmentations(project, args.algo, args.n_clusters)
@@ -541,11 +808,15 @@ def main() -> None:
 
     # Comparaisons par condition disponibles
     for col, title in [
-        ("condition", "Usage moyen par condition (CUS / SHAM / + ANGII)"),
+        ("condition", "Usage moyen par condition (MCCiECKO / MCCf/f pour bottomview, "
+                      "SHAM / CUS pour topview)"),
         ("timepoint", "Usage moyen par timepoint (M1 vs M2)"),
         ("stress",    "Usage moyen par stress (oui / non)"),
         ("angii",     "Usage moyen par ANGII (oui / non)"),
+        ("sex",       "Usage moyen par sexe (M vs F)"),
     ]:
+        if col not in df.columns:
+            continue
         sub = df.dropna(subset=[col])
         if sub.empty or sub[col].nunique() < 2:
             continue
@@ -558,6 +829,26 @@ def main() -> None:
             box_path = out_dir / f"boxplots_top_by_{col}.png"
             plot_boxplots(sub, col, top, box_path, labels)
             print(f"  → boxplots top motifs : {box_path.name} (motifs {top})")
+
+        # Stats Mann-Whitney U par motif (seulement pour condition à 2 groupes)
+        if col == "condition" and sub[col].nunique() == 2:
+            stats_df = stats_by_motif(sub, col)
+            if not stats_df.empty:
+                stats_path = out_dir / f"stats_by_motif_{col}.csv"
+                stats_df.to_csv(stats_path, index=False)
+                n_sig = int(stats_df["significant_0.05"].sum())
+                print(f"✓ Stats Mann-Whitney (BH-corrected) : {stats_path.name}  "
+                      f"({n_sig}/{len(stats_df)} motifs significatifs à q<0.05)")
+
+    # Agrégation par catégorie ETHOGRAM si des labels ont fourni des catégories
+    if labels and any(
+        isinstance(e, dict) and e.get("category") for e in labels.values()
+    ):
+        cat_df = aggregate_by_category(df)
+        if not cat_df.empty:
+            cat_path = out_dir / "usage_by_category.csv"
+            cat_df.to_csv(cat_path, index=False)
+            print(f"✓ Agrégation par catégorie : {cat_path.name}")
 
     print(f"\n✅ Analyse terminée. Tout est dans {out_dir}")
 
