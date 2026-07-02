@@ -98,6 +98,8 @@ META_FIELDS_OPTIONAL = [
     ("genotype_mcc", "genotype_mcc"),
     ("genotype_cdh5_cre", "genotype_cdh5_cre"),
     ("genotype_col1_egfp", "genotype_col1_egfp"),
+    # Traitement pharmaco (bottomview MCC-2026-06 : oui = 2024 cohort, non = 2026)
+    ("captopril", "captopril"),
     ("notes", "notes"),
 ]
 

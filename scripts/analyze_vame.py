@@ -424,14 +424,27 @@ def load_metadata_index(project: Path) -> dict[tuple[str, str], dict]:
                 }
         else:
             # Bottomview : metadata plate, une entrée par session
+            captopril = meta.get("captopril")
+            birth = meta.get("birth_date")
+            # Fallback : si captopril absent mais birth_date présente, dérive
+            # depuis l'année (convention MCC-2026-06 : 2024=oui, 2026=non).
+            # À sur-écrire via patch_captopril.py si les birth_dates sont fausses.
+            if captopril is None and birth is not None:
+                y = str(birth).strip()[:4]
+                if y == "2024":
+                    captopril = "oui"
+                elif y == "2026":
+                    captopril = "non"
+
             index[(session_id, "")] = {
                 "session_id": session_id,
                 "arena": "",
                 "mouse_id": meta.get("mouse_id"),
                 "condition": meta.get("group"),  # MCCiECKO / MCCf/f
+                "captopril": captopril,
                 "sex": meta.get("sex"),
                 "cage": meta.get("cage"),
-                "birth_date": meta.get("birth_date"),
+                "birth_date": birth,
                 "date": meta.get("date_recorded"),
                 "line": meta.get("line"),
                 "genotype_mcc": meta.get("genotype_mcc"),
@@ -522,12 +535,22 @@ def build_dataframe(seg_files: list[Path],
                 label_str = entry if entry else f"motif_{motif_i}"
                 category = None
 
+            # Groupe composite 4-way pour bottomview : condition × captopril.
+            # None si l'une des deux est manquante — les lignes seront
+            # filtrées automatiquement par dropna dans le loop de comparaison.
+            cond = meta.get("condition")
+            capto = meta.get("captopril")
+            group4 = f"{cond}_{capto}" if (cond and capto) else None
+
             row = {
                 "session_full": session_name,
                 "session_id": session_id,
                 "arena": arena,
                 "mouse_id": meta.get("mouse_id"),
-                "condition": meta.get("condition"),
+                "condition": cond,
+                # Bottomview : traitement pharmacologique
+                "captopril": capto,
+                "group4": group4,
                 # Métadonnées topview (peuvent être None sur bottomview)
                 "stress": meta.get("stress"),
                 "angii": meta.get("angii"),
@@ -561,12 +584,15 @@ def aggregate_by_category(df: pd.DataFrame) -> pd.DataFrame:
     df_cat = df[df["category"].notna()].copy()
     if df_cat.empty:
         return pd.DataFrame()
+    # `captopril` et `group4` sont conservés dans le groupby s'ils existent
+    # (bottomview) — un groupby sur des colonnes absentes casse en pandas.
+    keys = ["session_full", "session_id", "arena", "condition"]
+    for opt in ("captopril", "group4", "sex", "cage", "date"):
+        if opt in df_cat.columns:
+            keys.append(opt)
+    keys.append("category")
     agg = (
-        df_cat.groupby(
-            ["session_full", "session_id", "arena", "condition",
-             "sex", "cage", "date", "category"],
-            dropna=False,
-        )["frequency"]
+        df_cat.groupby(keys, dropna=False)["frequency"]
         .sum()
         .reset_index()
         .rename(columns={"frequency": "frequency_total"})
@@ -705,8 +731,10 @@ def compute_spatial_time_in_center(project_ethoflow: Path, session_id: str,
 
 
 def stats_by_motif(df: pd.DataFrame, condition_col: str) -> pd.DataFrame:
-    """Mann-Whitney U par motif entre les groupes de `condition_col`
-    (typiquement 'condition' = MCCiECKO vs MCCf/f pour bottomview).
+    """Tests statistiques par motif entre les groupes de `condition_col`.
+
+    - 2 groupes → Mann-Whitney U (colonne stat = 'u_stat')
+    - ≥3 groupes → Kruskal-Wallis H (colonne stat = 'h_stat')
 
     Correction BH (Benjamini-Hochberg) sur l'ensemble des motifs testés.
     Renvoie un DataFrame trié par p-value croissante.
@@ -719,35 +747,42 @@ def stats_by_motif(df: pd.DataFrame, condition_col: str) -> pd.DataFrame:
 
     sub = df.dropna(subset=[condition_col])
     groups = sorted(sub[condition_col].unique())
-    if len(groups) != 2:
-        print(f"⚠  stats_by_motif : {len(groups)} groupes trouvés dans "
-              f"'{condition_col}' — test Mann-Whitney nécessite exactement 2.",
-              file=sys.stderr)
+    if len(groups) < 2:
+        print(f"⚠  stats_by_motif : {len(groups)} groupe(s) dans "
+              f"'{condition_col}' — il en faut au moins 2.", file=sys.stderr)
         return pd.DataFrame()
 
+    is_multi = len(groups) > 2
     rows = []
     for m in sorted(sub["motif"].unique()):
         d = sub[sub["motif"] == m]
-        a = d.loc[d[condition_col] == groups[0], "frequency"].values
-        b = d.loc[d[condition_col] == groups[1], "frequency"].values
-        if len(a) < 3 or len(b) < 3:
+        samples = [d.loc[d[condition_col] == g, "frequency"].values for g in groups]
+        # Chaque groupe doit avoir ≥3 obs pour un test défensif
+        if any(len(s) < 3 for s in samples):
             continue
         try:
-            u, p = stats.mannwhitneyu(a, b, alternative="two-sided")
+            if is_multi:
+                stat, p = stats.kruskal(*samples)
+                stat_key = "h_stat"
+            else:
+                stat, p = stats.mannwhitneyu(samples[0], samples[1],
+                                             alternative="two-sided")
+                stat_key = "u_stat"
         except ValueError:
             continue
-        rows.append({
+        row = {
             "motif": m,
             "label": d["label"].iloc[0],
             "category": d["category"].iloc[0] if "category" in d.columns else None,
-            f"mean_{groups[0]}": float(np.mean(a)),
-            f"mean_{groups[1]}": float(np.mean(b)),
-            "diff": float(np.mean(b) - np.mean(a)),
-            "u_stat": float(u),
-            "p_value": float(p),
-            f"n_{groups[0]}": len(a),
-            f"n_{groups[1]}": len(b),
-        })
+        }
+        for g, s in zip(groups, samples):
+            row[f"mean_{g}"] = float(np.mean(s))
+            row[f"n_{g}"] = len(s)
+        if not is_multi:
+            row["diff"] = float(np.mean(samples[1]) - np.mean(samples[0]))
+        row[stat_key] = float(stat)
+        row["p_value"] = float(p)
+        rows.append(row)
     result = pd.DataFrame(rows)
     if result.empty:
         return result
@@ -875,6 +910,12 @@ def main() -> None:
                              "matrices de transitions par groupe, durée moyenne "
                              "de bout par motif, dynamique temporelle (4 quarts), "
                              "analyse spatiale (center/periphery via tail_base).")
+    parser.add_argument("--extended-by", default="condition",
+                        choices=["condition", "captopril", "group4"],
+                        help="Variable de groupement pour les analyses "
+                             "étendues (défaut : condition). Utilise 'captopril' "
+                             "pour comparer oui/non, ou 'group4' pour le 4-way "
+                             "génotype × captopril.")
     parser.add_argument("--fps", type=float, default=30.0,
                         help="Framerate des vidéos source (pour la conversion "
                              "durée frame → secondes). Défaut : 30.")
@@ -965,14 +1006,17 @@ def main() -> None:
     plot_heatmap(df, out_dir / "heatmap_usage.png", labels)
     print(f"✓ Heatmap : {out_dir}/heatmap_usage.png")
 
-    # Comparaisons par condition disponibles
+    # Comparaisons par condition disponibles.
+    # Note : les colonnes non renseignées dans la metadata sont skippées auto
+    # (dropna + nunique >= 2), donc pas besoin de brancher topview/bottomview.
     for col, title in [
-        ("condition", "Usage moyen par condition (MCCiECKO / MCCf/f pour bottomview, "
-                      "SHAM / CUS pour topview)"),
-        ("timepoint", "Usage moyen par timepoint (M1 vs M2)"),
-        ("stress",    "Usage moyen par stress (oui / non)"),
-        ("angii",     "Usage moyen par ANGII (oui / non)"),
-        ("sex",       "Usage moyen par sexe (M vs F)"),
+        ("condition", "Usage moyen par génotype (MCCiECKO vs MCCf/f)"),
+        ("captopril", "Usage moyen par traitement captopril (oui vs non)"),
+        ("group4",    "Usage moyen par génotype × captopril (4 groupes)"),
+        ("timepoint", "Usage moyen par timepoint"),
+        ("stress",    "Usage moyen par stress"),
+        ("angii",     "Usage moyen par ANGII"),
+        ("sex",       "Usage moyen par sexe"),
     ]:
         if col not in df.columns:
             continue
@@ -981,7 +1025,7 @@ def main() -> None:
             continue
         plot_path = out_dir / f"mean_by_{col}.png"
         plot_means_by_condition(sub, col, plot_path, title, labels)
-        print(f"✓ Barres par {col} : {plot_path.name}")
+        print(f"✓ Barres par {col} ({sub[col].nunique()} groupes) : {plot_path.name}")
 
         top = differentiating_motifs(sub, col, top_k=6)
         if top:
@@ -989,14 +1033,17 @@ def main() -> None:
             plot_boxplots(sub, col, top, box_path, labels)
             print(f"  → boxplots top motifs : {box_path.name} (motifs {top})")
 
-        # Stats Mann-Whitney U par motif (seulement pour condition à 2 groupes)
-        if col == "condition" and sub[col].nunique() == 2:
+        # Stats par motif : Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3)
+        # Appliqué à condition, captopril, group4 (les 3 breakdowns bottomview).
+        if col in {"condition", "captopril", "group4"}:
             stats_df = stats_by_motif(sub, col)
             if not stats_df.empty:
                 stats_path = out_dir / f"stats_by_motif_{col}.csv"
                 stats_df.to_csv(stats_path, index=False)
                 n_sig = int(stats_df["significant_0.05"].sum())
-                print(f"✓ Stats Mann-Whitney (BH-corrected) : {stats_path.name}  "
+                test_name = ("Kruskal-Wallis" if sub[col].nunique() > 2
+                             else "Mann-Whitney")
+                print(f"✓ Stats {test_name} (BH-corrected) : {stats_path.name}  "
                       f"({n_sig}/{len(stats_df)} motifs significatifs à q<0.05)")
 
     # Agrégation par catégorie ETHOGRAM si des labels ont fourni des catégories
@@ -1068,11 +1115,14 @@ def main() -> None:
     # Analyses étendues (--extended)
     # =========================================================================
     if args.extended:
-        print("\n=== Analyses étendues ===")
+        group_col = args.extended_by
+        print(f"\n=== Analyses étendues (groupement : {group_col}) ===")
         n_motifs = df["motif"].nunique()
 
-        # Pré-charge labels-per-frame et groupe pour chaque session
-        session_data = {}  # session_full -> dict(labels, condition, session_id)
+        # Pré-charge labels-per-frame et groupe pour chaque session.
+        # `group_val` = la valeur qui servira pour tous les splits étendus
+        # (condition, captopril, ou group4 selon --extended-by).
+        session_data = {}
         for f in seg_files:
             lpf = load_per_frame_labels(f)
             if lpf is None:
@@ -1080,9 +1130,19 @@ def main() -> None:
             session_name = f.parent.parent.parent.name
             sid, arena = parse_session_name(session_name)
             meta = meta_index.get((sid, arena), {})
+            cond = meta.get("condition")
+            capto = meta.get("captopril")
+            if group_col == "condition":
+                group_val = cond
+            elif group_col == "captopril":
+                group_val = capto
+            elif group_col == "group4":
+                group_val = f"{cond}_{capto}" if (cond and capto) else None
+            else:
+                group_val = None
             session_data[session_name] = {
                 "labels_per_frame": lpf,
-                "condition": meta.get("condition"),
+                "condition": group_val,  # sert de clé de groupement générique
                 "session_id": sid,
             }
         print(f"  → {len(session_data)} sessions avec labels par frame chargés")
@@ -1090,7 +1150,7 @@ def main() -> None:
         # (1) Matrices de transitions par groupe -----------------------------
         groups = sorted({s["condition"] for s in session_data.values()
                          if s["condition"] is not None})
-        if len(groups) == 2:
+        if len(groups) >= 2:
             print(f"  Groupes détectés : {groups}")
             T_by_group = {g: [] for g in groups}
             for sname, s in session_data.items():
@@ -1109,10 +1169,12 @@ def main() -> None:
                 print(f"  ✓ Transitions groupe {g} : "
                       f"transitions_{g.replace('/', '-')}.png")
 
-            # Matrice de différence (groupe 1 - groupe 0)
+            # Matrice de différence (groupe 1 - groupe 0). Ne s'applique
+            # que pour 2 groupes — au-delà (group4), la diff paire à paire
+            # devient un pairplot qu'on laisse à un script dédié si besoin.
             T1 = np.mean(T_by_group[groups[0]], axis=0) if T_by_group[groups[0]] else None
             T2 = np.mean(T_by_group[groups[1]], axis=0) if T_by_group[groups[1]] else None
-            if T1 is not None and T2 is not None:
+            if len(groups) == 2 and T1 is not None and T2 is not None:
                 diff = T2 - T1
                 fig, ax = plt.subplots(figsize=(max(8, 0.5 * n_motifs),) * 2)
                 vmax = max(abs(diff.min()), abs(diff.max()))
@@ -1143,8 +1205,9 @@ def main() -> None:
                 .agg(["mean", "median", "count"])
                 .reset_index()
             )
-            bout_summary.to_csv(out_dir / "bout_durations.csv", index=False)
-            print(f"  ✓ Durées de bout : bout_durations.csv")
+            bout_csv = out_dir / f"bout_durations_by_{group_col}.csv"
+            bout_summary.to_csv(bout_csv, index=False)
+            print(f"  ✓ Durées de bout : {bout_csv.name}")
             # Plot
             if "condition" in bout_summary.columns and bout_summary["condition"].nunique() >= 2:
                 fig, ax = plt.subplots(figsize=(max(8, 0.6 * n_motifs), 5))
@@ -1152,13 +1215,15 @@ def main() -> None:
                 pivot.index = [motif_display(int(m), labels) for m in pivot.index]
                 pivot.plot(kind="bar", ax=ax)
                 ax.set_ylabel("Durée moyenne d'un bout (s)")
-                ax.set_title("Persistance dans chaque motif")
+                ax.set_title(f"Persistance dans chaque motif (par {group_col})")
                 ax.set_xlabel("Motif")
+                ax.legend(title=group_col, fontsize=8)
                 plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
                 fig.tight_layout()
-                fig.savefig(out_dir / "bout_duration_by_condition.png", dpi=120)
+                bout_png = out_dir / f"bout_duration_by_{group_col}.png"
+                fig.savefig(bout_png, dpi=120)
                 plt.close(fig)
-                print(f"  ✓ Barres durées : bout_duration_by_condition.png")
+                print(f"  ✓ Barres durées : {bout_png.name}")
 
         # (3) Dynamique temporelle par quart de session ----------------------
         temporal_rows = []
@@ -1175,8 +1240,9 @@ def main() -> None:
                     })
         if temporal_rows:
             tmp_df = pd.DataFrame(temporal_rows)
-            tmp_df.to_csv(out_dir / "temporal_quarters.csv", index=False)
-            print(f"  ✓ Dynamique temporelle : temporal_quarters.csv")
+            tmp_csv = out_dir / f"temporal_quarters_by_{group_col}.csv"
+            tmp_df.to_csv(tmp_csv, index=False)
+            print(f"  ✓ Dynamique temporelle : {tmp_csv.name}")
 
             # Plot par motif : moyenne par quart × groupe
             if tmp_df["condition"].nunique() >= 2:
@@ -1201,9 +1267,10 @@ def main() -> None:
                     axes[m].set_visible(False)
                 fig.suptitle("Évolution des motifs au cours de la session")
                 fig.tight_layout()
-                fig.savefig(out_dir / "temporal_by_motif.png", dpi=120)
+                tmp_png = out_dir / f"temporal_by_motif_{group_col}.png"
+                fig.savefig(tmp_png, dpi=120)
                 plt.close(fig)
-                print(f"  ✓ Évolution temporelle : temporal_by_motif.png")
+                print(f"  ✓ Évolution temporelle : {tmp_png.name}")
 
         # (4) Analyse spatiale (center vs periphery) -------------------------
         spatial_rows = []
@@ -1217,23 +1284,28 @@ def main() -> None:
                 spatial_rows.append(spatial)
         if spatial_rows:
             spatial_df = pd.DataFrame(spatial_rows)
-            spatial_df.to_csv(out_dir / "spatial_center_periphery.csv", index=False)
-            print(f"  ✓ Spatial : spatial_center_periphery.csv")
+            spat_csv = out_dir / f"spatial_center_periphery_by_{group_col}.csv"
+            spatial_df.to_csv(spat_csv, index=False)
+            print(f"  ✓ Spatial : {spat_csv.name}")
 
-            # Barplot thigmotaxie (temps dans le centre) par groupe
-            if "in_center_frac_total" in spatial_df.columns and spatial_df["condition"].nunique() >= 2:
-                fig, ax = plt.subplots(figsize=(6, 4))
+            # Barplot thigmotaxie (temps dans le centre) par groupe.
+            # Palette étendue à 4 couleurs pour group4.
+            if ("in_center_frac_total" in spatial_df.columns
+                    and spatial_df["condition"].nunique() >= 2):
+                fig, ax = plt.subplots(figsize=(max(6, 1.5 * spatial_df["condition"].nunique()), 4))
                 grouped = spatial_df.groupby("condition")["in_center_frac_total"]
                 means = grouped.mean(); errs = grouped.sem()
-                means.plot(kind="bar", yerr=errs, ax=ax, color=["#1f77b4", "#ff7f0e"], capsize=5)
+                palette = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"][:len(means)]
+                means.plot(kind="bar", yerr=errs, ax=ax, color=palette, capsize=5)
                 ax.set_ylabel("Fraction du temps dans le centre")
-                ax.set_title("Thigmotaxie (moins de temps au centre = plus de thigmotaxie)")
-                ax.set_xlabel("")
+                ax.set_title(f"Thigmotaxie par {group_col} (moins de centre = plus de thigmotaxie)")
+                ax.set_xlabel(group_col)
                 plt.setp(ax.get_xticklabels(), rotation=0)
                 fig.tight_layout()
-                fig.savefig(out_dir / "thigmotaxis.png", dpi=120)
+                thig_png = out_dir / f"thigmotaxis_by_{group_col}.png"
+                fig.savefig(thig_png, dpi=120)
                 plt.close(fig)
-                print(f"  ✓ Thigmotaxie : thigmotaxis.png")
+                print(f"  ✓ Thigmotaxie : {thig_png.name}")
 
     print(f"\n✅ Analyse terminée. Tout est dans {out_dir}")
 
