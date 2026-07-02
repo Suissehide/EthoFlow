@@ -70,12 +70,20 @@ TAB20 = np.array([
 
 
 def find_latent_vector(vame_project: Path, session: str) -> Path | None:
-    """Trouve latent_vector_<session>.npy. Convention VAME :
-       <vame>/results/<session>/<model>/latent_vector_<session>.npy
+    """Trouve le fichier de latent vectors pour cette session.
+
+    Deux conventions VAME possibles selon la version :
+    - VAME 0.11 : results/<session>/<model>/latent_vector_<session>.npy
+    - VAME 0.13+ : results/<session>/<model>/latent_vectors.npy (pluriel,
+      pas de nom de session dans le fichier)
     """
     results = vame_project / "results" / session
     if not results.exists():
         return None
+    # Nouveau format d'abord (plus courant)
+    for f in results.rglob("latent_vectors.npy"):
+        return f
+    # Legacy avec session dans le nom
     for f in results.rglob(f"latent_vector_{session}.npy"):
         return f
     return None
