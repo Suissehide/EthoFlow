@@ -61,18 +61,39 @@ from paths import (  # noqa: E402
     resolve_project,
 )
 
-# Le pointeur du projet VAME courant reste au repo root : c'est un état
-# session-wide (quelle config VAME utiliser), pas une donnée du projet.
+# Le pointer legacy repo-root .vame_config_path a été supprimé lors du flatten
+# du layout VAME (data/vame/ EST le projet VAME). On garde le nom pour la
+# détection legacy uniquement, au cas où un utilisateur aurait encore ce
+# fichier lui traînant.
 CONFIG_POINTER = REPO_ROOT / ".vame_config_path"
 
 
-def get_project_path(arg_project: str | None) -> Path:
+def get_project_path(arg_project: str | None,
+                     ethoflow_project: Path | None = None) -> Path:
+    """Résout le chemin du projet VAME à analyser.
+
+    Ordre de priorité :
+      1. --project explicite (chemin absolu vers un dossier VAME)
+      2. Si --project-dir (projet EthoFlow) est fourni : vame_dir(project)
+         = <ethoflow_project>/data/vame/ (convention EthoFlow actuelle)
+      3. Pointer legacy `<repo>/.vame_config_path` pour compat.
+      4. Sinon erreur explicite.
+    """
     if arg_project:
         return Path(arg_project)
+    if ethoflow_project is not None:
+        # Le vame_dir(project) est directement le projet VAME (flat layout).
+        from paths import vame_dir  # noqa: WPS433
+        vame_project = vame_dir(ethoflow_project)
+        if (vame_project / "config.yaml").exists():
+            return vame_project
     if CONFIG_POINTER.exists():
         return Path(CONFIG_POINTER.read_text().strip()).parent
     raise FileNotFoundError(
-        "Aucun projet VAME actif. Lance `run_vame.py use <nom>` ou passe --project."
+        "Aucun projet VAME trouvé.\n"
+        "  Passe --project-dir <ethoflow_project> pour utiliser "
+        "<project>/data/vame/,\n"
+        "  ou --project <chemin_absolu> pour un dossier VAME spécifique."
     )
 
 
@@ -724,7 +745,7 @@ def main() -> None:
     ethoflow_project = resolve_project(args)
 
     try:
-        project = get_project_path(args.project)
+        project = get_project_path(args.project, ethoflow_project)
     except FileNotFoundError as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)
