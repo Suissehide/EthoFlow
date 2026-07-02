@@ -107,6 +107,30 @@ _KNOWN_CATEGORIES = {
 }
 
 
+def _map_captopril(raw) -> str | None:
+    """Normalise une valeur captopril de la metadata vers un label lisible.
+
+    - oui / yes / true / 1  → "Captopril"
+    - non / no  / false / 0 → "Control"
+    - autre chose (déjà normalisé, ex. "Captopril", "Control") : renvoie tel quel
+    - None / vide : renvoie None
+
+    Ce mapping est appliqué au moment de l'analyse, la metadata reste brute
+    (oui/non côté YAML) pour rester alignée avec l'Excel maître.
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    low = s.lower()
+    if low in {"oui", "yes", "y", "true", "1"}:
+        return "Captopril"
+    if low in {"non", "no", "n", "false", "0"}:
+        return "Control"
+    return s  # déjà lisible
+
+
 def load_motif_labels(labels_path: Path | None) -> dict[int, dict]:
     """
     Charge un mapping motif_id → {label, category, confidence, notes}.
@@ -536,10 +560,11 @@ def build_dataframe(seg_files: list[Path],
                 category = None
 
             # Groupe composite 4-way pour bottomview : condition × captopril.
-            # None si l'une des deux est manquante — les lignes seront
-            # filtrées automatiquement par dropna dans le loop de comparaison.
+            # `captopril` est normalisé oui/non → Captopril/Control pour tous
+            # les affichages et regroupements. None si l'une des deux est
+            # manquante — les lignes seront filtrées auto par dropna en aval.
             cond = meta.get("condition")
-            capto = meta.get("captopril")
+            capto = _map_captopril(meta.get("captopril"))
             group4 = f"{cond}_{capto}" if (cond and capto) else None
 
             row = {
@@ -806,6 +831,11 @@ def stats_by_motif(df: pd.DataFrame, condition_col: str) -> pd.DataFrame:
 
 def plot_heatmap(df: pd.DataFrame, out_path: Path,
                  labels: dict[int, str]) -> None:
+    """Heatmap sessions × motifs, sessions triées alphabétiquement.
+
+    Version historique (aucun regroupement). Conservée pour compat.
+    Voir plot_heatmap_grouped pour la version regroupée par condition.
+    """
     pivot = df.pivot_table(
         index="session_full", columns="motif", values="frequency", aggfunc="mean"
     )
@@ -823,6 +853,109 @@ def plot_heatmap(df: pd.DataFrame, out_path: Path,
     fig.colorbar(im, ax=ax, label="proportion")
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+
+
+def plot_heatmap_grouped(df: pd.DataFrame, group_col: str, out_path: Path,
+                          labels: dict[int, str]) -> None:
+    """Heatmap sessions × motifs, sessions triées ET séparées par `group_col`.
+
+    Différences avec plot_heatmap :
+      1. Les sessions sont triées par valeur de `group_col`, puis par nom.
+         Toutes les MCCiECKO d'affilée, puis toutes les MCCf/f, etc.
+      2. Un bandeau coloré à gauche indique le groupe de chaque session
+         (une couleur par valeur unique du `group_col`).
+      3. Des lignes noires horizontales séparent visuellement les groupes.
+      4. Les tick labels des sessions sont préfixés par leur groupe pour
+         lecture rapide (ex. "MCCiECKO_Captopril | BV-970").
+    """
+    sub = df.dropna(subset=[group_col])
+    if sub.empty:
+        return
+    # 1 valeur de group_col par session
+    session_group = (
+        sub[["session_full", group_col]]
+        .drop_duplicates()
+        .set_index("session_full")[group_col]
+    )
+    # Tri stable : d'abord par groupe, puis par nom de session
+    session_order = (
+        session_group
+        .sort_values(kind="stable")
+        .index
+        .tolist()
+    )
+    pivot = sub.pivot_table(
+        index="session_full", columns="motif", values="frequency", aggfunc="mean"
+    ).reindex(session_order)
+
+    # Palette : une couleur par groupe unique, dans l'ordre alphabétique
+    groups_sorted = sorted(session_group.unique())
+    # Palette qualitative fiable jusqu'à 8 groupes
+    base_palette = [
+        "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+        "#9467bd", "#8c564b", "#e377c2", "#7f7f7f",
+    ]
+    color_by_group = {g: base_palette[i % len(base_palette)]
+                      for i, g in enumerate(groups_sorted)}
+    row_colors = [color_by_group[session_group[s]] for s in session_order]
+
+    # Layout : bandeau couleurs (col 0, largeur fixe) + heatmap (col 1)
+    fig = plt.figure(figsize=(13, max(6, 0.28 * len(pivot))))
+    gs = fig.add_gridspec(1, 2, width_ratios=[0.03, 1.0], wspace=0.02)
+    ax_band = fig.add_subplot(gs[0, 0])
+    ax = fig.add_subplot(gs[0, 1], sharey=ax_band)
+
+    # Bandeau couleurs : imshow d'une colonne RGB
+    from matplotlib.colors import to_rgb
+    band = np.array([to_rgb(c) for c in row_colors]).reshape(-1, 1, 3)
+    ax_band.imshow(band, aspect="auto")
+    ax_band.set_xticks([])
+    ax_band.set_yticks(range(len(session_order)))
+    ax_band.set_yticklabels(
+        [f"{session_group[s]} | {s}" for s in session_order],
+        fontsize=7,
+    )
+    ax_band.set_ylabel(group_col, fontsize=9)
+
+    # Heatmap principale
+    im = ax.imshow(pivot.values, aspect="auto", cmap="viridis")
+    ax.set_yticks([])  # tick labels sont côté bandeau
+    ax.set_xticks(range(len(pivot.columns)))
+    ax.set_xticklabels(
+        [motif_display(int(m), labels) for m in pivot.columns],
+        fontsize=8, rotation=45, ha="right",
+    )
+    ax.set_xlabel("Motif")
+
+    # Lignes horizontales entre groupes
+    boundaries = []
+    prev_g = None
+    for i, s in enumerate(session_order):
+        g = session_group[s]
+        if prev_g is not None and g != prev_g:
+            boundaries.append(i - 0.5)
+        prev_g = g
+    for b in boundaries:
+        ax.axhline(b, color="black", linewidth=1.2)
+        ax_band.axhline(b, color="black", linewidth=1.2)
+
+    ax.set_title(f"Usage par session (regroupé par {group_col})")
+
+    # Colorbar à droite (créée sur ax pour être bien alignée)
+    fig.colorbar(im, ax=ax, label="proportion", fraction=0.03, pad=0.02)
+
+    # Légende des groupes en bas
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=color_by_group[g], label=str(g))
+               for g in groups_sorted]
+    fig.legend(
+        handles=handles, title=group_col,
+        loc="lower center", bbox_to_anchor=(0.5, -0.02),
+        ncol=min(len(groups_sorted), 4), frameon=False, fontsize=9,
+    )
+
+    fig.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -1002,17 +1135,33 @@ def main() -> None:
         validity_df.to_csv(out_dir / "validity_per_session.csv", index=False)
         print(f"✓ Validity par session : {out_dir}/validity_per_session.csv")
 
-    # Plots
+    # Heatmap "brute" (sessions triées alphabétiquement, aucun regroupement).
+    # Utile pour un audit global mais peu lisible dès qu'il y a plusieurs
+    # conditions — les heatmaps groupées ci-dessous sont plus parlantes.
     plot_heatmap(df, out_dir / "heatmap_usage.png", labels)
-    print(f"✓ Heatmap : {out_dir}/heatmap_usage.png")
+    print(f"✓ Heatmap : heatmap_usage.png")
+
+    # Heatmaps regroupées par condition / captopril / group4 (bottomview).
+    # Chaque heatmap = sessions triées par groupe, bandeau couleur à gauche,
+    # séparateurs entre groupes. Beaucoup plus lisible pour repérer les
+    # motifs qui distinguent visuellement les groupes.
+    for col in ("condition", "captopril", "group4"):
+        if col not in df.columns:
+            continue
+        sub = df.dropna(subset=[col])
+        if sub.empty or sub[col].nunique() < 2:
+            continue
+        heat_path = out_dir / f"heatmap_usage_by_{col}.png"
+        plot_heatmap_grouped(sub, col, heat_path, labels)
+        print(f"✓ Heatmap groupée par {col} : {heat_path.name}")
 
     # Comparaisons par condition disponibles.
     # Note : les colonnes non renseignées dans la metadata sont skippées auto
     # (dropna + nunique >= 2), donc pas besoin de brancher topview/bottomview.
     for col, title in [
         ("condition", "Usage moyen par génotype (MCCiECKO vs MCCf/f)"),
-        ("captopril", "Usage moyen par traitement captopril (oui vs non)"),
-        ("group4",    "Usage moyen par génotype × captopril (4 groupes)"),
+        ("captopril", "Usage moyen par traitement Captopril vs Control"),
+        ("group4",    "Usage moyen par génotype × Captopril (4 groupes)"),
         ("timepoint", "Usage moyen par timepoint"),
         ("stress",    "Usage moyen par stress"),
         ("angii",     "Usage moyen par ANGII"),
@@ -1057,57 +1206,115 @@ def main() -> None:
             cat_df.to_csv(cat_path, index=False)
             print(f"✓ Agrégation par catégorie : {cat_path.name}")
 
-            # Plot par catégorie × condition + stats
-            if "condition" in cat_df.columns and cat_df["condition"].nunique() >= 2:
-                fig, ax = plt.subplots(figsize=(max(8, 0.6 * cat_df["category"].nunique()), 5))
-                pivot = cat_df.groupby(["category", "condition"])["frequency_total"].mean().unstack("condition")
+            # Plots + stats par catégorie × {condition, captopril, group4}.
+            # Un fichier par breakdown ; le user compare visuellement les 3.
+            for grp_col, grp_title in [
+                ("condition", "génotype"),
+                ("captopril", "Captopril"),
+                ("group4",    "génotype × Captopril"),
+            ]:
+                if grp_col not in cat_df.columns:
+                    continue
+                sub_cat = cat_df.dropna(subset=[grp_col])
+                if sub_cat.empty or sub_cat[grp_col].nunique() < 2:
+                    continue
+
+                # ---- Bar plot catégorie × groupe ----
+                fig, ax = plt.subplots(
+                    figsize=(max(8, 0.6 * sub_cat["category"].nunique()), 5)
+                )
+                pivot = (
+                    sub_cat.groupby(["category", grp_col])["frequency_total"]
+                    .mean().unstack(grp_col)
+                )
                 pivot.plot(kind="bar", ax=ax)
                 ax.set_ylabel("Proportion moyenne (somme des motifs par catégorie)")
-                ax.set_title("Usage par catégorie ETHOGRAM × condition")
+                ax.set_title(f"Usage par catégorie ETHOGRAM × {grp_title}")
                 ax.set_xlabel("Catégorie")
+                ax.legend(title=grp_col, fontsize=8)
                 plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
                 fig.tight_layout()
-                fig.savefig(out_dir / "mean_by_category.png", dpi=120)
+                bar_path = out_dir / f"mean_by_category_by_{grp_col}.png"
+                fig.savefig(bar_path, dpi=120)
                 plt.close(fig)
-                print(f"✓ Barres par catégorie : mean_by_category.png")
+                print(f"✓ Barres catégorie × {grp_col} : {bar_path.name}")
 
-                # Mann-Whitney par catégorie
+                # ---- Boxplots par catégorie × groupe ----
+                cats = sorted(sub_cat["category"].dropna().unique())
+                groups = sorted(sub_cat[grp_col].dropna().unique())
+                fig, axes = plt.subplots(
+                    1, len(cats), figsize=(3 * len(cats), 4), sharey=True
+                )
+                if len(cats) == 1:
+                    axes = [axes]
+                for ax, cat in zip(axes, cats):
+                    d = sub_cat[sub_cat["category"] == cat]
+                    data = [
+                        d.loc[d[grp_col] == g, "frequency_total"].values
+                        for g in groups
+                    ]
+                    ax.boxplot(data, tick_labels=[str(g) for g in groups])
+                    plt.setp(ax.get_xticklabels(), rotation=30, ha="right", fontsize=8)
+                    ax.set_title(cat, fontsize=10)
+                    ax.set_ylabel("Proportion")
+                fig.suptitle(f"Distribution par catégorie × {grp_title}")
+                fig.tight_layout()
+                box_path = out_dir / f"boxplots_by_category_by_{grp_col}.png"
+                fig.savefig(box_path, dpi=120)
+                plt.close(fig)
+                print(f"  → boxplots catégorie × {grp_col} : {box_path.name}")
+
+                # ---- Stats par catégorie (Mann-Whitney ou Kruskal-Wallis) ----
                 try:
                     from scipy import stats as _stats
-                    groups = sorted(cat_df["condition"].dropna().unique())
-                    if len(groups) == 2:
-                        rows = []
-                        for cat in cat_df["category"].unique():
-                            d = cat_df[cat_df["category"] == cat]
-                            a = d.loc[d["condition"] == groups[0], "frequency_total"].values
-                            b = d.loc[d["condition"] == groups[1], "frequency_total"].values
-                            if len(a) < 3 or len(b) < 3:
-                                continue
-                            try:
-                                u, p = _stats.mannwhitneyu(a, b, alternative="two-sided")
-                            except ValueError:
-                                continue
-                            rows.append({
-                                "category": cat, f"mean_{groups[0]}": float(np.mean(a)),
-                                f"mean_{groups[1]}": float(np.mean(b)),
-                                "u_stat": float(u), "p_value": float(p),
-                            })
-                        if rows:
-                            stats_cat = pd.DataFrame(rows).sort_values("p_value")
-                            # BH correction
-                            ps = stats_cat["p_value"].values
-                            n = len(ps)
-                            order = np.argsort(ps)
-                            ranked = ps[order]
-                            q = np.zeros(n); prev = 1.0
-                            for i in range(n - 1, -1, -1):
-                                prev = min(prev, ranked[i] * n / (i + 1))
-                                q[i] = prev
-                            q_full = np.zeros(n); q_full[order] = q
-                            stats_cat["p_adj_bh"] = q_full
-                            stats_cat["significant_0.05"] = stats_cat["p_adj_bh"] < 0.05
-                            stats_cat.to_csv(out_dir / "stats_by_category.csv", index=False)
-                            print(f"✓ Stats par catégorie : stats_by_category.csv")
+                    is_multi = len(groups) > 2
+                    rows = []
+                    for cat in cats:
+                        d = sub_cat[sub_cat["category"] == cat]
+                        samples = [
+                            d.loc[d[grp_col] == g, "frequency_total"].values
+                            for g in groups
+                        ]
+                        if any(len(s) < 3 for s in samples):
+                            continue
+                        try:
+                            if is_multi:
+                                stat, p = _stats.kruskal(*samples)
+                                stat_key = "h_stat"
+                            else:
+                                stat, p = _stats.mannwhitneyu(
+                                    samples[0], samples[1], alternative="two-sided"
+                                )
+                                stat_key = "u_stat"
+                        except ValueError:
+                            continue
+                        row = {"category": cat}
+                        for g, s in zip(groups, samples):
+                            row[f"mean_{g}"] = float(np.mean(s))
+                            row[f"n_{g}"] = len(s)
+                        row[stat_key] = float(stat)
+                        row["p_value"] = float(p)
+                        rows.append(row)
+                    if rows:
+                        stats_cat = pd.DataFrame(rows).sort_values("p_value")
+                        # BH correction
+                        ps = stats_cat["p_value"].values
+                        nps = len(ps)
+                        order = np.argsort(ps)
+                        ranked = ps[order]
+                        q = np.zeros(nps); prev = 1.0
+                        for i in range(nps - 1, -1, -1):
+                            prev = min(prev, ranked[i] * nps / (i + 1))
+                            q[i] = prev
+                        q_full = np.zeros(nps); q_full[order] = q
+                        stats_cat["p_adj_bh"] = q_full
+                        stats_cat["significant_0.05"] = stats_cat["p_adj_bh"] < 0.05
+                        stats_path = out_dir / f"stats_by_category_by_{grp_col}.csv"
+                        stats_cat.to_csv(stats_path, index=False)
+                        test_name = "Kruskal-Wallis" if is_multi else "Mann-Whitney"
+                        n_sig = int(stats_cat["significant_0.05"].sum())
+                        print(f"  → Stats {test_name} : {stats_path.name} "
+                              f"({n_sig}/{len(stats_cat)} catégories q<0.05)")
                 except ImportError:
                     pass
 
@@ -1131,7 +1338,7 @@ def main() -> None:
             sid, arena = parse_session_name(session_name)
             meta = meta_index.get((sid, arena), {})
             cond = meta.get("condition")
-            capto = meta.get("captopril")
+            capto = _map_captopril(meta.get("captopril"))
             if group_col == "condition":
                 group_val = cond
             elif group_col == "captopril":
@@ -1147,49 +1354,11 @@ def main() -> None:
             }
         print(f"  → {len(session_data)} sessions avec labels par frame chargés")
 
-        # (1) Matrices de transitions par groupe -----------------------------
-        groups = sorted({s["condition"] for s in session_data.values()
-                         if s["condition"] is not None})
-        if len(groups) >= 2:
-            print(f"  Groupes détectés : {groups}")
-            T_by_group = {g: [] for g in groups}
-            for sname, s in session_data.items():
-                if s["condition"] not in groups:
-                    continue
-                T = compute_transition_matrix(s["labels_per_frame"], n_motifs)
-                T_by_group[s["condition"]].append(T)
-            for g, Ts in T_by_group.items():
-                if not Ts:
-                    continue
-                T_mean = np.mean(Ts, axis=0)
-                plot_transition_matrix(
-                    T_mean, f"Transitions moyennes — {g}",
-                    out_dir / f"transitions_{g.replace('/', '-')}.png", labels,
-                )
-                print(f"  ✓ Transitions groupe {g} : "
-                      f"transitions_{g.replace('/', '-')}.png")
-
-            # Matrice de différence (groupe 1 - groupe 0). Ne s'applique
-            # que pour 2 groupes — au-delà (group4), la diff paire à paire
-            # devient un pairplot qu'on laisse à un script dédié si besoin.
-            T1 = np.mean(T_by_group[groups[0]], axis=0) if T_by_group[groups[0]] else None
-            T2 = np.mean(T_by_group[groups[1]], axis=0) if T_by_group[groups[1]] else None
-            if len(groups) == 2 and T1 is not None and T2 is not None:
-                diff = T2 - T1
-                fig, ax = plt.subplots(figsize=(max(8, 0.5 * n_motifs),) * 2)
-                vmax = max(abs(diff.min()), abs(diff.max()))
-                im = ax.imshow(diff, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
-                labs = [motif_display(i, labels) for i in range(n_motifs)]
-                ax.set_xticks(range(n_motifs)); ax.set_yticks(range(n_motifs))
-                ax.set_xticklabels(labs, rotation=45, ha="right", fontsize=8)
-                ax.set_yticklabels(labs, fontsize=8)
-                ax.set_xlabel("Motif suivant"); ax.set_ylabel("Motif courant")
-                ax.set_title(f"Δ transitions ({groups[1]} − {groups[0]})")
-                fig.colorbar(im, ax=ax)
-                fig.tight_layout()
-                fig.savefig(out_dir / "transitions_diff.png", dpi=120)
-                plt.close(fig)
-                print(f"  ✓ Diff transitions : transitions_diff.png")
+        # Note : les matrices de transitions ont été retirées de l'analyse
+        # standard. Pour une version labellisée et propre au niveau projet,
+        # utilise `scripts/community_dendrogram.py` qui synthétise la même
+        # information (proximité des motifs par transitions) de manière plus
+        # lisible qu'une matrice N×N.
 
         # (2) Durée moyenne de bout par motif × groupe -----------------------
         bouts_rows = []
