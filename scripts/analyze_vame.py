@@ -574,6 +574,136 @@ def aggregate_by_category(df: pd.DataFrame) -> pd.DataFrame:
     return agg
 
 
+def load_per_frame_labels(seg_file: Path) -> np.ndarray | None:
+    """Charge le fichier de labels par frame associé à un motif_usage."""
+    lf = find_label_file(seg_file)
+    if lf is None or not lf.exists():
+        return None
+    return np.load(lf).astype(int)
+
+
+def compute_transition_matrix(labels_per_frame: np.ndarray,
+                              n_motifs: int) -> np.ndarray:
+    """Matrice T[i,j] = P(motif_{t+1} = j | motif_t = i), self-loops exclus."""
+    T = np.zeros((n_motifs, n_motifs), dtype=float)
+    curr = labels_per_frame[:-1]
+    nxt = labels_per_frame[1:]
+    mask = curr != nxt  # ignore self-loops (durée dans motif = non-transition)
+    for i, j in zip(curr[mask], nxt[mask]):
+        if 0 <= i < n_motifs and 0 <= j < n_motifs:
+            T[i, j] += 1
+    row_sums = T.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1
+    return T / row_sums
+
+
+def plot_transition_matrix(T: np.ndarray, title: str, out_path: Path,
+                           labels: dict[int, dict]) -> None:
+    n = T.shape[0]
+    labs = [motif_display(i, labels) for i in range(n)]
+    fig, ax = plt.subplots(figsize=(max(8, 0.5 * n), max(6, 0.5 * n)))
+    im = ax.imshow(T, cmap="viridis", aspect="auto", vmin=0)
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels(labs, rotation=45, ha="right", fontsize=8)
+    ax.set_yticklabels(labs, fontsize=8)
+    ax.set_xlabel("Motif suivant")
+    ax.set_ylabel("Motif courant")
+    ax.set_title(title)
+    fig.colorbar(im, ax=ax, label="P(next | current)")
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=120)
+    plt.close(fig)
+
+
+def compute_bouts(labels_per_frame: np.ndarray, fps: float) -> pd.DataFrame:
+    """Renvoie une liste de bouts (motif, duration_sec)."""
+    if len(labels_per_frame) == 0:
+        return pd.DataFrame(columns=["motif", "duration_sec"])
+    changes = np.diff(labels_per_frame) != 0
+    boundaries = np.concatenate(([0], np.where(changes)[0] + 1, [len(labels_per_frame)]))
+    rows = []
+    for start, end in zip(boundaries[:-1], boundaries[1:]):
+        rows.append({
+            "motif": int(labels_per_frame[start]),
+            "duration_sec": (end - start) / fps,
+        })
+    return pd.DataFrame(rows)
+
+
+def compute_temporal_quarters(labels_per_frame: np.ndarray,
+                              n_motifs: int,
+                              n_quarters: int = 4) -> dict[int, np.ndarray]:
+    """Fréquence par motif dans chaque quart de session."""
+    result = {}
+    L = len(labels_per_frame)
+    edges = np.linspace(0, L, n_quarters + 1, dtype=int)
+    for q in range(n_quarters):
+        seg = labels_per_frame[edges[q]:edges[q + 1]]
+        if len(seg) == 0:
+            result[q] = np.zeros(n_motifs)
+            continue
+        counts = np.bincount(seg, minlength=n_motifs).astype(float)
+        result[q] = counts / counts.sum() if counts.sum() > 0 else counts
+    return result
+
+
+def compute_spatial_time_in_center(project_ethoflow: Path, session_id: str,
+                                    labels_per_frame: np.ndarray,
+                                    center_frac: float = 0.5) -> dict:
+    """Temps en centre par motif à partir du h5 nettoyé (tail_base).
+
+    center_frac : fraction du diamètre de l'arène considérée comme "centre"
+                  (défaut 0.5 = disque central couvrant 25% de l'aire).
+    """
+    from paths import cleaned_h5_path
+    h5 = cleaned_h5_path(project_ethoflow, session_id)
+    if not h5.exists():
+        return {}
+    df = pd.read_hdf(h5)
+    # Cherche tail_base x,y (peu importe le scorer)
+    tail_x_col = tail_y_col = None
+    for col in df.columns:
+        if not isinstance(col, tuple) or len(col) < 3:
+            continue
+        bp, coord = col[-2], col[-1]
+        if bp == "tail_base" and coord == "x":
+            tail_x_col = col
+        elif bp == "tail_base" and coord == "y":
+            tail_y_col = col
+    if tail_x_col is None or tail_y_col is None:
+        return {}
+    x = df[tail_x_col].values
+    y = df[tail_y_col].values
+    # Centre de l'arène = médiane des positions (robuste aux NaN)
+    cx = np.nanmedian(x)
+    cy = np.nanmedian(y)
+    # Rayon de l'arène = 95e percentile de la distance au centre
+    dist = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+    arena_radius = np.nanpercentile(dist, 95)
+    center_radius = arena_radius * center_frac
+    in_center = dist < center_radius  # bool per frame
+    # Aligne les longueurs — labels_per_frame et in_center devraient avoir la même
+    # longueur, mais des décalages ±1 arrivent parfois. Coupe au min.
+    L = min(len(labels_per_frame), len(in_center))
+    labels_L = labels_per_frame[:L]
+    in_center_L = in_center[:L]
+    # % dans le centre global + par motif
+    result = {
+        "in_center_frac_total": float(np.nanmean(in_center_L)),
+        "arena_radius_px": float(arena_radius),
+    }
+    for m in np.unique(labels_L):
+        mask = labels_L == m
+        n = int(mask.sum())
+        if n == 0:
+            continue
+        result[f"motif_{int(m)}_in_center_frac"] = (
+            float(np.nanmean(in_center_L[mask])) if n > 0 else 0.0
+        )
+    return result
+
+
 def stats_by_motif(df: pd.DataFrame, condition_col: str) -> pd.DataFrame:
     """Mann-Whitney U par motif entre les groupes de `condition_col`
     (typiquement 'condition' = MCCiECKO vs MCCf/f pour bottomview).
@@ -740,6 +870,14 @@ def main() -> None:
                         help="Recalcule les fréquences en excluant les frames "
                              "empty-arena du dénominateur (le count original "
                              "reste dans la colonne 'count' pour audit).")
+    parser.add_argument("--extended", action="store_true",
+                        help="Analyses étendues (~5-10 min supplémentaires) : "
+                             "matrices de transitions par groupe, durée moyenne "
+                             "de bout par motif, dynamique temporelle (4 quarts), "
+                             "analyse spatiale (center/periphery via tail_base).")
+    parser.add_argument("--fps", type=float, default=30.0,
+                        help="Framerate des vidéos source (pour la conversion "
+                             "durée frame → secondes). Défaut : 30.")
     args = parser.parse_args()
 
     ethoflow_project = resolve_project(args)
@@ -862,14 +1000,240 @@ def main() -> None:
                       f"({n_sig}/{len(stats_df)} motifs significatifs à q<0.05)")
 
     # Agrégation par catégorie ETHOGRAM si des labels ont fourni des catégories
-    if labels and any(
+    has_categories = labels and any(
         isinstance(e, dict) and e.get("category") for e in labels.values()
-    ):
+    )
+    if has_categories:
         cat_df = aggregate_by_category(df)
         if not cat_df.empty:
             cat_path = out_dir / "usage_by_category.csv"
             cat_df.to_csv(cat_path, index=False)
             print(f"✓ Agrégation par catégorie : {cat_path.name}")
+
+            # Plot par catégorie × condition + stats
+            if "condition" in cat_df.columns and cat_df["condition"].nunique() >= 2:
+                fig, ax = plt.subplots(figsize=(max(8, 0.6 * cat_df["category"].nunique()), 5))
+                pivot = cat_df.groupby(["category", "condition"])["frequency_total"].mean().unstack("condition")
+                pivot.plot(kind="bar", ax=ax)
+                ax.set_ylabel("Proportion moyenne (somme des motifs par catégorie)")
+                ax.set_title("Usage par catégorie ETHOGRAM × condition")
+                ax.set_xlabel("Catégorie")
+                plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+                fig.tight_layout()
+                fig.savefig(out_dir / "mean_by_category.png", dpi=120)
+                plt.close(fig)
+                print(f"✓ Barres par catégorie : mean_by_category.png")
+
+                # Mann-Whitney par catégorie
+                try:
+                    from scipy import stats as _stats
+                    groups = sorted(cat_df["condition"].dropna().unique())
+                    if len(groups) == 2:
+                        rows = []
+                        for cat in cat_df["category"].unique():
+                            d = cat_df[cat_df["category"] == cat]
+                            a = d.loc[d["condition"] == groups[0], "frequency_total"].values
+                            b = d.loc[d["condition"] == groups[1], "frequency_total"].values
+                            if len(a) < 3 or len(b) < 3:
+                                continue
+                            try:
+                                u, p = _stats.mannwhitneyu(a, b, alternative="two-sided")
+                            except ValueError:
+                                continue
+                            rows.append({
+                                "category": cat, f"mean_{groups[0]}": float(np.mean(a)),
+                                f"mean_{groups[1]}": float(np.mean(b)),
+                                "u_stat": float(u), "p_value": float(p),
+                            })
+                        if rows:
+                            stats_cat = pd.DataFrame(rows).sort_values("p_value")
+                            # BH correction
+                            ps = stats_cat["p_value"].values
+                            n = len(ps)
+                            order = np.argsort(ps)
+                            ranked = ps[order]
+                            q = np.zeros(n); prev = 1.0
+                            for i in range(n - 1, -1, -1):
+                                prev = min(prev, ranked[i] * n / (i + 1))
+                                q[i] = prev
+                            q_full = np.zeros(n); q_full[order] = q
+                            stats_cat["p_adj_bh"] = q_full
+                            stats_cat["significant_0.05"] = stats_cat["p_adj_bh"] < 0.05
+                            stats_cat.to_csv(out_dir / "stats_by_category.csv", index=False)
+                            print(f"✓ Stats par catégorie : stats_by_category.csv")
+                except ImportError:
+                    pass
+
+    # =========================================================================
+    # Analyses étendues (--extended)
+    # =========================================================================
+    if args.extended:
+        print("\n=== Analyses étendues ===")
+        n_motifs = df["motif"].nunique()
+
+        # Pré-charge labels-per-frame et groupe pour chaque session
+        session_data = {}  # session_full -> dict(labels, condition, session_id)
+        for f in seg_files:
+            lpf = load_per_frame_labels(f)
+            if lpf is None:
+                continue
+            session_name = f.parent.parent.parent.name
+            sid, arena = parse_session_name(session_name)
+            meta = meta_index.get((sid, arena), {})
+            session_data[session_name] = {
+                "labels_per_frame": lpf,
+                "condition": meta.get("condition"),
+                "session_id": sid,
+            }
+        print(f"  → {len(session_data)} sessions avec labels par frame chargés")
+
+        # (1) Matrices de transitions par groupe -----------------------------
+        groups = sorted({s["condition"] for s in session_data.values()
+                         if s["condition"] is not None})
+        if len(groups) == 2:
+            print(f"  Groupes détectés : {groups}")
+            T_by_group = {g: [] for g in groups}
+            for sname, s in session_data.items():
+                if s["condition"] not in groups:
+                    continue
+                T = compute_transition_matrix(s["labels_per_frame"], n_motifs)
+                T_by_group[s["condition"]].append(T)
+            for g, Ts in T_by_group.items():
+                if not Ts:
+                    continue
+                T_mean = np.mean(Ts, axis=0)
+                plot_transition_matrix(
+                    T_mean, f"Transitions moyennes — {g}",
+                    out_dir / f"transitions_{g.replace('/', '-')}.png", labels,
+                )
+                print(f"  ✓ Transitions groupe {g} : "
+                      f"transitions_{g.replace('/', '-')}.png")
+
+            # Matrice de différence (groupe 1 - groupe 0)
+            T1 = np.mean(T_by_group[groups[0]], axis=0) if T_by_group[groups[0]] else None
+            T2 = np.mean(T_by_group[groups[1]], axis=0) if T_by_group[groups[1]] else None
+            if T1 is not None and T2 is not None:
+                diff = T2 - T1
+                fig, ax = plt.subplots(figsize=(max(8, 0.5 * n_motifs),) * 2)
+                vmax = max(abs(diff.min()), abs(diff.max()))
+                im = ax.imshow(diff, cmap="RdBu_r", vmin=-vmax, vmax=vmax)
+                labs = [motif_display(i, labels) for i in range(n_motifs)]
+                ax.set_xticks(range(n_motifs)); ax.set_yticks(range(n_motifs))
+                ax.set_xticklabels(labs, rotation=45, ha="right", fontsize=8)
+                ax.set_yticklabels(labs, fontsize=8)
+                ax.set_xlabel("Motif suivant"); ax.set_ylabel("Motif courant")
+                ax.set_title(f"Δ transitions ({groups[1]} − {groups[0]})")
+                fig.colorbar(im, ax=ax)
+                fig.tight_layout()
+                fig.savefig(out_dir / "transitions_diff.png", dpi=120)
+                plt.close(fig)
+                print(f"  ✓ Diff transitions : transitions_diff.png")
+
+        # (2) Durée moyenne de bout par motif × groupe -----------------------
+        bouts_rows = []
+        for sname, s in session_data.items():
+            b = compute_bouts(s["labels_per_frame"], args.fps)
+            b["session_full"] = sname
+            b["condition"] = s["condition"]
+            bouts_rows.append(b)
+        if bouts_rows:
+            bouts_df = pd.concat(bouts_rows, ignore_index=True)
+            bout_summary = (
+                bouts_df.groupby(["condition", "motif"])["duration_sec"]
+                .agg(["mean", "median", "count"])
+                .reset_index()
+            )
+            bout_summary.to_csv(out_dir / "bout_durations.csv", index=False)
+            print(f"  ✓ Durées de bout : bout_durations.csv")
+            # Plot
+            if "condition" in bout_summary.columns and bout_summary["condition"].nunique() >= 2:
+                fig, ax = plt.subplots(figsize=(max(8, 0.6 * n_motifs), 5))
+                pivot = bout_summary.groupby(["motif", "condition"])["mean"].first().unstack("condition")
+                pivot.index = [motif_display(int(m), labels) for m in pivot.index]
+                pivot.plot(kind="bar", ax=ax)
+                ax.set_ylabel("Durée moyenne d'un bout (s)")
+                ax.set_title("Persistance dans chaque motif")
+                ax.set_xlabel("Motif")
+                plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+                fig.tight_layout()
+                fig.savefig(out_dir / "bout_duration_by_condition.png", dpi=120)
+                plt.close(fig)
+                print(f"  ✓ Barres durées : bout_duration_by_condition.png")
+
+        # (3) Dynamique temporelle par quart de session ----------------------
+        temporal_rows = []
+        for sname, s in session_data.items():
+            quarters = compute_temporal_quarters(s["labels_per_frame"], n_motifs, 4)
+            for q, freqs in quarters.items():
+                for m, f in enumerate(freqs):
+                    temporal_rows.append({
+                        "session_full": sname,
+                        "condition": s["condition"],
+                        "quarter": q + 1,
+                        "motif": m,
+                        "frequency": float(f),
+                    })
+        if temporal_rows:
+            tmp_df = pd.DataFrame(temporal_rows)
+            tmp_df.to_csv(out_dir / "temporal_quarters.csv", index=False)
+            print(f"  ✓ Dynamique temporelle : temporal_quarters.csv")
+
+            # Plot par motif : moyenne par quart × groupe
+            if tmp_df["condition"].nunique() >= 2:
+                cols_per_row = 4
+                rows_needed = (n_motifs + cols_per_row - 1) // cols_per_row
+                fig, axes = plt.subplots(rows_needed, cols_per_row,
+                                          figsize=(4 * cols_per_row, 2.5 * rows_needed),
+                                          sharex=True)
+                axes = axes.flatten() if rows_needed > 1 else np.atleast_1d(axes)
+                for m in range(n_motifs):
+                    ax = axes[m]
+                    d = tmp_df[tmp_df["motif"] == m]
+                    for cond, sub in d.groupby("condition"):
+                        agg = sub.groupby("quarter")["frequency"].agg(["mean", "std"])
+                        ax.errorbar(agg.index, agg["mean"], yerr=agg["std"],
+                                     marker="o", label=cond, capsize=3)
+                    ax.set_title(motif_display(m, labels), fontsize=9)
+                    ax.set_xlabel("Quart de session"); ax.set_xticks([1, 2, 3, 4])
+                    ax.set_ylabel("Freq.", fontsize=8)
+                    ax.legend(fontsize=7)
+                for m in range(n_motifs, len(axes)):
+                    axes[m].set_visible(False)
+                fig.suptitle("Évolution des motifs au cours de la session")
+                fig.tight_layout()
+                fig.savefig(out_dir / "temporal_by_motif.png", dpi=120)
+                plt.close(fig)
+                print(f"  ✓ Évolution temporelle : temporal_by_motif.png")
+
+        # (4) Analyse spatiale (center vs periphery) -------------------------
+        spatial_rows = []
+        for sname, s in session_data.items():
+            spatial = compute_spatial_time_in_center(
+                ethoflow_project, s["session_id"], s["labels_per_frame"]
+            )
+            if spatial:
+                spatial["session_full"] = sname
+                spatial["condition"] = s["condition"]
+                spatial_rows.append(spatial)
+        if spatial_rows:
+            spatial_df = pd.DataFrame(spatial_rows)
+            spatial_df.to_csv(out_dir / "spatial_center_periphery.csv", index=False)
+            print(f"  ✓ Spatial : spatial_center_periphery.csv")
+
+            # Barplot thigmotaxie (temps dans le centre) par groupe
+            if "in_center_frac_total" in spatial_df.columns and spatial_df["condition"].nunique() >= 2:
+                fig, ax = plt.subplots(figsize=(6, 4))
+                grouped = spatial_df.groupby("condition")["in_center_frac_total"]
+                means = grouped.mean(); errs = grouped.sem()
+                means.plot(kind="bar", yerr=errs, ax=ax, color=["#1f77b4", "#ff7f0e"], capsize=5)
+                ax.set_ylabel("Fraction du temps dans le centre")
+                ax.set_title("Thigmotaxie (moins de temps au centre = plus de thigmotaxie)")
+                ax.set_xlabel("")
+                plt.setp(ax.get_xticklabels(), rotation=0)
+                fig.tight_layout()
+                fig.savefig(out_dir / "thigmotaxis.png", dpi=120)
+                plt.close(fig)
+                print(f"  ✓ Thigmotaxie : thigmotaxis.png")
 
     print(f"\n✅ Analyse terminée. Tout est dans {out_dir}")
 
