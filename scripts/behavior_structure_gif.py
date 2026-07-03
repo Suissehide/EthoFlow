@@ -45,6 +45,11 @@ Usage :
     # Sortie MP4 au lieu de GIF (meilleur ratio taille/qualité)
     python scripts/behavior_structure_gif.py \\
         --project-dir <...> --session BV-970 --output-format mp4
+
+    # Side-by-side avec la vidéo réelle de la souris à gauche
+    python scripts/behavior_structure_gif.py \\
+        --project-dir <...> --session BV-970 \\
+        --with-video --start 120 --duration 30 --output-format mp4
 """
 from __future__ import annotations
 
@@ -56,7 +61,26 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from paths import add_project_dir_arg, resolve_project, vame_dir  # noqa: E402
+from paths import add_project_dir_arg, raw_dir, resolve_project, vame_dir  # noqa: E402
+
+
+def find_source_video(project_ethoflow: Path, session: str) -> Path | None:
+    """Lit source_video depuis la metadata.yaml de la session.
+
+    Retourne None si metadata ou vidéo introuvable — dans ce cas le GIF est
+    généré sans le panneau vidéo (--with-video fallback silencieux).
+    """
+    import yaml
+    meta_path = raw_dir(project_ethoflow) / session / "metadata.yaml"
+    if not meta_path.exists():
+        return None
+    with open(meta_path) as f:
+        meta = yaml.safe_load(f) or {}
+    src = meta.get("source_video")
+    if not src:
+        return None
+    p = Path(src)
+    return p if p.exists() else None
 
 
 # Même palette que motif_gif.py pour cohérence
@@ -178,6 +202,16 @@ def main() -> None:
                         help="Taille du marqueur courant")
     parser.add_argument("--background-alpha", type=float, default=0.15,
                         help="Transparence des points background (défaut 0.15)")
+    parser.add_argument("--with-video", action="store_true",
+                        help="Ajoute un panneau vidéo à côté du manifold "
+                             "(la vraie souris à gauche, sa trajectoire "
+                             "dans l'espace latent à droite). Nécessite "
+                             "OpenCV et un source_video valide dans la "
+                             "metadata. Ralentit un peu le rendu.")
+    parser.add_argument("--video-max-width", type=int, default=480,
+                        help="Largeur max du panneau vidéo en pixels "
+                             "(l'image est downscalée à cette taille pour "
+                             "garder le GIF léger). Défaut 480.")
     args = parser.parse_args()
 
     try:
@@ -244,8 +278,64 @@ def main() -> None:
     print(f"  animation : {n_anim} frames à {fps_out} fps "
           f"(step={step}, trail={trail_frames} points)\n")
 
+    # ----- (Optionnel) Ouvre la vidéo source pour panneau side-by-side -----
+    video_cap = None
+    video_size = None  # (H, W) après resize
+    if args.with_video:
+        try:
+            import cv2  # noqa: WPS433
+        except ImportError:
+            print("⚠  OpenCV absent, --with-video ignoré", file=sys.stderr)
+        else:
+            src_video = find_source_video(project, args.session)
+            if src_video is None:
+                print(f"⚠  source_video introuvable pour {args.session}, "
+                      f"--with-video ignoré (vérifie metadata.yaml)",
+                      file=sys.stderr)
+            else:
+                video_cap = cv2.VideoCapture(str(src_video))
+                if not video_cap.isOpened():
+                    print(f"⚠  Impossible d'ouvrir {src_video}, "
+                          f"--with-video ignoré", file=sys.stderr)
+                    video_cap = None
+                else:
+                    src_w = int(video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    src_h = int(video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    if src_w > args.video_max_width:
+                        scale = args.video_max_width / src_w
+                        video_size = (int(src_h * scale), args.video_max_width)
+                    else:
+                        video_size = (src_h, src_w)
+                    print(f"Vidéo     : {src_video.name}  {src_w}×{src_h} "
+                          f"→ {video_size[1]}×{video_size[0]}")
+
     # ----- Setup figure -----
-    fig, ax = plt.subplots(figsize=(9, 8))
+    if video_cap is not None:
+        # Layout : vidéo à gauche (carrée-ish), manifold à droite (carré)
+        fig, (ax_video, ax) = plt.subplots(
+            1, 2, figsize=(14, 7),
+            gridspec_kw={"width_ratios": [1.0, 1.1]},
+        )
+        ax_video.set_facecolor("black")
+        ax_video.set_xticks([]); ax_video.set_yticks([])
+        ax_video.set_title(f"Vidéo — {args.session}", fontsize=11)
+        # Placeholder gris tant qu'on n'a pas la 1re frame
+        video_im = ax_video.imshow(
+            np.zeros((*video_size, 3), dtype=np.uint8)
+        )
+        # Petit badge motif superposé sur la vidéo
+        video_osd = ax_video.text(
+            0.02, 0.98, "", transform=ax_video.transAxes,
+            va="top", ha="left", fontsize=11, fontweight="bold",
+            color="white",
+            bbox=dict(boxstyle="round,pad=0.4", facecolor="black",
+                      edgecolor="white", alpha=0.75),
+        )
+    else:
+        fig, ax = plt.subplots(figsize=(9, 8))
+        ax_video = None
+        video_im = None
+        video_osd = None
     ax.set_facecolor("white")
 
     # Background : tous les points de la session (color par motif)
@@ -317,6 +407,23 @@ def main() -> None:
         osd.set_text(f"[{current_motif}] {name}")
         elapsed = (idx - start_frame) / fps_src
         time_text.set_text(f"t = {elapsed:6.1f} s")
+
+        # Panneau vidéo (si activé) : va chercher la frame idx et l'affiche
+        if video_cap is not None:
+            import cv2  # noqa: WPS433
+            video_cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = video_cap.read()
+            if ok:
+                if (frame.shape[0], frame.shape[1]) != video_size:
+                    frame = cv2.resize(
+                        frame, (video_size[1], video_size[0]),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                # BGR (cv2) → RGB (matplotlib)
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                video_im.set_data(frame_rgb)
+                video_osd.set_text(f"[{current_motif}] {name}")
+
         return trail_line, marker, osd, time_text
 
     print("Rendu de l'animation...")
@@ -326,7 +433,8 @@ def main() -> None:
     out_dir = vame_proj / "analysis" / "behavior_structure"
     out_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_{args.start:.0f}s_{args.duration:.0f}s" if args.duration else "_full"
-    stem = f"{args.session}_manifold_{args.projection}{suffix}"
+    side = "_sidebyside" if video_cap is not None else ""
+    stem = f"{args.session}_manifold_{args.projection}{side}{suffix}"
 
     if args.output_format == "gif":
         out_path = out_dir / f"{stem}.gif"
@@ -350,11 +458,16 @@ def main() -> None:
             tmp_gif.unlink(missing_ok=True)
 
     plt.close(fig)
+    if video_cap is not None:
+        video_cap.release()
     size_mb = out_path.stat().st_size / 1e6
     print(f"\n✅ {out_path}  ({size_mb:.1f} MB)")
     if args.output_format == "gif" and size_mb > 30:
         print(f"   ⚠  >30MB : considère --duration plus court, "
               f"--fps-output plus bas, ou --output-format mp4")
+    if args.with_video and args.output_format == "gif":
+        print(f"   ℹ Avec --with-video le GIF grossit vite — préfère "
+              f"--output-format mp4 pour les extraits > 30 s.")
 
 
 if __name__ == "__main__":
