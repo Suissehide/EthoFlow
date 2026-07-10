@@ -167,11 +167,14 @@ def build_pooled_projection(
     algo: str,
     method: str,
     cache_path: Path,
+    target_session: str,
+    max_frames: int = 300000,
+    reproducible: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, tuple[int, int]]]:
     """Projette en 2D toutes les sessions du projet dans un référentiel commun.
 
     Renvoie :
-        - all_coords_2d (N, 2) : projection 2D poolée de tous les frames
+        - all_coords_2d (N, 2) : projection 2D poolée
         - all_labels (N,)       : motif de chaque frame
         - session_slices        : {session_id: (start_idx, end_idx)} pour
                                   retrouver la tranche d'une session dans
@@ -179,8 +182,13 @@ def build_pooled_projection(
 
     Le résultat est cache-persistent : la 1re fois on fit UMAP/PCA sur
     l'ensemble (peut prendre plusieurs minutes) ; les fois suivantes on
-    recharge depuis le .npz — donc plusieurs runs successifs sur des
-    sessions différentes réutilisent la même projection sans refit.
+    recharge depuis le .npz.
+
+    **Gestion de la taille** : au-delà de `max_frames` frames au total,
+    la session `target_session` est gardée en full-res (l'animation en a
+    besoin frame-par-frame), tandis que les autres sessions sont
+    subsampled uniformément avec un step calculé pour que le pool
+    approche `max_frames`. Passer `max_frames=0` désactive le cap.
     """
     if cache_path.exists():
         print(f"  Cache hit : réutilise {cache_path.name}")
@@ -194,28 +202,53 @@ def build_pooled_projection(
                             f"{vame_project / 'results'}")
     print(f"  Poolage sur {len(sessions)} sessions...")
 
+    # Premier passage : lit juste les tailles (mmap_mode évite de tout
+    # charger en mémoire à ce stade)
+    session_info = []
+    for s in sessions:
+        lat_f = find_latent_vector(vame_project, s)
+        lab_f = find_label_file(vame_project, s, algo)
+        lat_shape = np.load(lat_f, mmap_mode="r").shape
+        lab_shape = np.load(lab_f, mmap_mode="r").shape
+        L = min(lat_shape[0], lab_shape[0])
+        session_info.append((s, lat_f, lab_f, L))
+
+    total_raw = sum(L for _, _, _, L in session_info)
+    target_L = next(L for s, _, _, L in session_info if s == target_session)
+    non_target_total = total_raw - target_L
+
+    # Décide le step d'échantillonnage pour les non-target
+    if max_frames > 0 and total_raw > max_frames and non_target_total > 0:
+        budget_others = max(1, max_frames - target_L)
+        keep_frac = min(1.0, budget_others / non_target_total)
+        step_others = max(1, int(round(1 / keep_frac)))
+        print(f"  Cap {max_frames:,} → target ({target_session}) en full-res, "
+              f"non-target subsampled 1/{step_others}")
+    else:
+        step_others = 1
+
     latent_arrays = []
     label_arrays = []
     session_slices: dict[str, tuple[int, int]] = {}
     cursor = 0
-    for s in sessions:
-        lat_f = find_latent_vector(vame_project, s)
-        lab_f = find_label_file(vame_project, s, algo)
-        lat = np.load(lat_f)
-        lab = np.load(lab_f).astype(int)
-        L = min(len(lat), len(lab))
-        lat = lat[:L]; lab = lab[:L]
+    for s, lat_f, lab_f, L in session_info:
+        lat = np.load(lat_f)[:L]
+        lab = np.load(lab_f)[:L].astype(int)
+        if s != target_session and step_others > 1:
+            lat = lat[::step_others]
+            lab = lab[::step_others]
         latent_arrays.append(lat)
         label_arrays.append(lab)
-        session_slices[s] = (cursor, cursor + L)
-        cursor += L
-        print(f"    · {s}: {L:,} frames")
+        session_slices[s] = (cursor, cursor + len(lat))
+        cursor += len(lat)
+        print(f"    · {s}: {L:,} → {len(lat):,} frames")
 
     all_latents = np.concatenate(latent_arrays, axis=0)
     all_labels = np.concatenate(label_arrays, axis=0)
-    print(f"  Total poolé : {len(all_latents):,} frames × {all_latents.shape[1]} dims")
+    print(f"  Total poolé : {total_raw:,} → {len(all_latents):,} frames "
+          f"× {all_latents.shape[1]} dims")
 
-    all_coords_2d = project_to_2d(all_latents, method)
+    all_coords_2d = project_to_2d(all_latents, method, reproducible=reproducible)
 
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(
@@ -255,16 +288,27 @@ def load_motif_names(labels_csv: Path | None) -> dict[int, str]:
     return out
 
 
-def project_to_2d(latents: np.ndarray, method: str) -> np.ndarray:
-    """Projette (N, D) → (N, 2) via UMAP ou PCA."""
+def project_to_2d(latents: np.ndarray, method: str,
+                   reproducible: bool = False) -> np.ndarray:
+    """Projette (N, D) → (N, 2) via UMAP ou PCA.
+
+    Par défaut UMAP tourne en parallèle (n_jobs=-1, sans seed). Passer
+    `reproducible=True` fixe random_state=42 mais retombe sur un seul
+    thread — sur >200k points, c'est de l'ordre de 5-10x plus lent.
+    Pour de la viz, la reproductibilité au pixel près n'est pas critique :
+    la topologie des clusters est stable entre runs.
+    """
     if method == "umap":
         try:
             import umap  # type: ignore
-            print(f"  UMAP fitting sur {len(latents)} points...")
-            reducer = umap.UMAP(
-                n_components=2, n_neighbors=30, min_dist=0.3,
-                random_state=42, low_memory=True,
-            )
+            print(f"  UMAP fitting sur {len(latents):,} points"
+                  f" ({'reproducible/single-thread' if reproducible else 'parallel'})...")
+            kwargs = dict(n_components=2, n_neighbors=30, min_dist=0.3,
+                          low_memory=True)
+            if reproducible:
+                kwargs["random_state"] = 42
+            # Sinon on ne fixe PAS n_jobs (par défaut -1 = tous les cores)
+            reducer = umap.UMAP(**kwargs)
             return reducer.fit_transform(latents)
         except ImportError:
             print("  umap-learn non installé, fallback sur PCA",
@@ -272,7 +316,7 @@ def project_to_2d(latents: np.ndarray, method: str) -> np.ndarray:
             method = "pca"
     # PCA
     from sklearn.decomposition import PCA
-    print(f"  PCA fitting sur {len(latents)} points...")
+    print(f"  PCA fitting sur {len(latents):,} points...")
     return PCA(n_components=2, random_state=42).fit_transform(latents)
 
 
@@ -341,6 +385,19 @@ def main() -> None:
                              "1M+ points, ce qui rend le rendu prohibitif. "
                              "On subsample stratifié par motif pour "
                              "préserver la structure. Défaut 80000.")
+    parser.add_argument("--pool-max-frames", type=int, default=300000,
+                        help="Cap sur le nombre total de frames envoyées à "
+                             "UMAP en mode --pool-all-sessions. La session "
+                             "--session est TOUJOURS gardée en full-res (pour "
+                             "l'animation) ; les autres sont subsampled "
+                             "uniformément si nécessaire. Défaut 300000 "
+                             "(~5-10 min UMAP parallèle). Mets à 0 pour "
+                             "désactiver le cap.")
+    parser.add_argument("--umap-reproducible", action="store_true",
+                        help="Fixe random_state=42 sur UMAP → même manifold "
+                             "d'un run à l'autre, MAIS force single-thread "
+                             "(5-10x plus lent). Utile pour un run final "
+                             "de publication ; à éviter en exploration.")
     args = parser.parse_args()
 
     try:
@@ -390,12 +447,18 @@ def main() -> None:
     #   de la session ciblée pour l'animation. Le background scatter reste
     #   sur TOUT le pool (le contexte global du dataset).
     if args.pool_all_sessions:
+        # Cache : sensible à target_session + max_frames car ils changent
+        # les données envoyées à UMAP (target en full-res, autres subsampled)
+        cap_tag = "nocap" if args.pool_max_frames == 0 else f"max{args.pool_max_frames}"
         cache_path = args.pool_cache or (
             vame_proj / "analysis" / "behavior_structure"
-            / f"pooled_{args.projection}.npz"
+            / f"pooled_{args.projection}_{cap_tag}_target-{args.session}.npz"
         )
         pool_coords, pool_labels, pool_slices = build_pooled_projection(
             vame_proj, args.algo, args.projection, cache_path,
+            target_session=args.session,
+            max_frames=args.pool_max_frames,
+            reproducible=args.umap_reproducible,
         )
         if args.session not in pool_slices:
             print(f"❌ {args.session} n'est pas dans le pool "
