@@ -997,17 +997,21 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
         return
     groups = sorted(df[condition_col].dropna().unique())
     n_groups = len(groups)
+    # Grille : max 3 colonnes, autant de lignes que nécessaire. 6 motifs
+    # → 2×3 (plus lisible qu'un long 1×6 quand les labels sont longs).
+    ncols = min(3, len(motifs))
+    nrows = (len(motifs) + ncols - 1) // ncols
     # Largeur adaptative : les labels de group4 (MCCiECKO_Captopril...) sont
     # longs. Compte le pire label pour ajuster la largeur par subplot.
     max_label_len = max((len(str(g)) for g in groups), default=1)
-    # ~0.15" par caractère, cap à 2.5" min par subplot
-    per_subplot_w = max(2.5, 0.15 * max_label_len * n_groups / 2)
+    per_subplot_w = max(2.8, 0.15 * max_label_len * n_groups / 2)
     fig, axes = plt.subplots(
-        1, len(motifs),
-        figsize=(per_subplot_w * len(motifs), 4.5), sharey=True,
+        nrows, ncols,
+        figsize=(per_subplot_w * ncols, 4.2 * nrows),
+        sharey=True,
     )
-    if len(motifs) == 1:
-        axes = [axes]
+    # Normalise en array 1D pour itérer proprement quelque soit la forme
+    axes = np.atleast_1d(axes).flatten()
     for ax, motif in zip(axes, motifs):
         d = df[df["motif"] == motif]
         data = [d.loc[d[condition_col] == g, "frequency"].values for g in groups]
@@ -1022,6 +1026,9 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
                  fontsize=8)
         ax.set_title(motif_display(motif, labels), fontsize=10)
         ax.set_ylabel("Proportion")
+    # Cache les subplots vides (ex : 5 motifs sur grille 2×3 → 1 case vide)
+    for ax in axes[len(motifs):]:
+        ax.set_visible(False)
     fig.suptitle(f"Top motifs différenciants par {condition_col}", y=1.02)
     fig.tight_layout()
     fig.savefig(out_path, dpi=120, bbox_inches="tight")
