@@ -50,6 +50,16 @@ Usage :
     python scripts/behavior_structure_gif.py \\
         --project-dir <...> --session BV-970 \\
         --with-video --start 120 --duration 30 --output-format mp4
+
+    # Manifold POOLÉ sur toutes les sessions du projet (référentiel commun).
+    # La 1re fois : ~5-15 min pour fit UMAP sur ~1M points, cache écrit
+    # dans <vame>/analysis/behavior_structure/pooled_umap.npz.
+    # Les runs suivants sur d'autres sessions réutilisent le cache
+    # instantanément — parfait pour générer 1 anim par groupe expérimental
+    # avec un référentiel identique entre les figures.
+    python scripts/behavior_structure_gif.py \\
+        --project-dir <...> --session BV-970 \\
+        --pool-all-sessions --with-video --output-format mp4
 """
 from __future__ import annotations
 
@@ -135,6 +145,87 @@ def find_label_file(vame_project: Path, session: str,
         for f in algo_dir.glob(f"*_{algo}_label_{session}.npy"):
             return f
     return None
+
+
+def discover_all_sessions(vame_project: Path, algo: str) -> list[str]:
+    """Liste les sessions VAME qui ont à la fois un latent + un label file."""
+    results = vame_project / "results"
+    if not results.exists():
+        return []
+    out = []
+    for d in sorted(results.iterdir()):
+        if not d.is_dir():
+            continue
+        s = d.name
+        if find_latent_vector(vame_project, s) and find_label_file(vame_project, s, algo):
+            out.append(s)
+    return out
+
+
+def build_pooled_projection(
+    vame_project: Path,
+    algo: str,
+    method: str,
+    cache_path: Path,
+) -> tuple[np.ndarray, np.ndarray, dict[str, tuple[int, int]]]:
+    """Projette en 2D toutes les sessions du projet dans un référentiel commun.
+
+    Renvoie :
+        - all_coords_2d (N, 2) : projection 2D poolée de tous les frames
+        - all_labels (N,)       : motif de chaque frame
+        - session_slices        : {session_id: (start_idx, end_idx)} pour
+                                  retrouver la tranche d'une session dans
+                                  les arrays poolés.
+
+    Le résultat est cache-persistent : la 1re fois on fit UMAP/PCA sur
+    l'ensemble (peut prendre plusieurs minutes) ; les fois suivantes on
+    recharge depuis le .npz — donc plusieurs runs successifs sur des
+    sessions différentes réutilisent la même projection sans refit.
+    """
+    if cache_path.exists():
+        print(f"  Cache hit : réutilise {cache_path.name}")
+        cache = np.load(cache_path, allow_pickle=True)
+        return (cache["coords_2d"], cache["labels"],
+                cache["session_slices"].item())
+
+    sessions = discover_all_sessions(vame_project, algo)
+    if not sessions:
+        raise RuntimeError(f"Aucune session avec latent+label dans "
+                            f"{vame_project / 'results'}")
+    print(f"  Poolage sur {len(sessions)} sessions...")
+
+    latent_arrays = []
+    label_arrays = []
+    session_slices: dict[str, tuple[int, int]] = {}
+    cursor = 0
+    for s in sessions:
+        lat_f = find_latent_vector(vame_project, s)
+        lab_f = find_label_file(vame_project, s, algo)
+        lat = np.load(lat_f)
+        lab = np.load(lab_f).astype(int)
+        L = min(len(lat), len(lab))
+        lat = lat[:L]; lab = lab[:L]
+        latent_arrays.append(lat)
+        label_arrays.append(lab)
+        session_slices[s] = (cursor, cursor + L)
+        cursor += L
+        print(f"    · {s}: {L:,} frames")
+
+    all_latents = np.concatenate(latent_arrays, axis=0)
+    all_labels = np.concatenate(label_arrays, axis=0)
+    print(f"  Total poolé : {len(all_latents):,} frames × {all_latents.shape[1]} dims")
+
+    all_coords_2d = project_to_2d(all_latents, method)
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        cache_path,
+        coords_2d=all_coords_2d,
+        labels=all_labels,
+        session_slices=np.array(session_slices, dtype=object),
+    )
+    print(f"  Cache écrit : {cache_path}")
+    return all_coords_2d, all_labels, session_slices
 
 
 def load_motif_names(labels_csv: Path | None) -> dict[int, str]:
@@ -229,6 +320,21 @@ def main() -> None:
                              "afficher dans le panneau. Ignore ce qui est "
                              "dans metadata.yaml (utile quand le drive de "
                              "recording n'est plus mappé à la même lettre).")
+    parser.add_argument("--pool-all-sessions", action="store_true",
+                        help="Calcule le manifold sur TOUTES les sessions "
+                             "du projet (référentiel commun) au lieu de la "
+                             "seule session --session. Le nuage de fond "
+                             "représente alors ton dataset entier ; "
+                             "l'animation reste sur la trajectoire de la "
+                             "session ciblée. Plus long (UMAP sur N× plus "
+                             "de points) mais beaucoup plus parlant pour "
+                             "une figure de publi.")
+    parser.add_argument("--pool-cache", type=Path, default=None,
+                        help="Fichier .npz où mettre en cache la projection "
+                             "poolée. Défaut auto : "
+                             "<vame>/analysis/behavior_structure/"
+                             "pooled_<projection>.npz. Supprime-le pour "
+                             "recomputer.")
     args = parser.parse_args()
 
     try:
@@ -272,8 +378,36 @@ def main() -> None:
     latents = latents[:L]
     labels = labels[:L]
 
-    # Projection 2D
-    coords_2d = project_to_2d(latents, args.projection)
+    # Projection 2D — deux modes :
+    # - single-session (défaut) : UMAP/PCA sur les frames de --session seul
+    # - pool-all-sessions : UMAP/PCA sur tout le projet, extrait la tranche
+    #   de la session ciblée pour l'animation. Le background scatter reste
+    #   sur TOUT le pool (le contexte global du dataset).
+    if args.pool_all_sessions:
+        cache_path = args.pool_cache or (
+            vame_proj / "analysis" / "behavior_structure"
+            / f"pooled_{args.projection}.npz"
+        )
+        pool_coords, pool_labels, pool_slices = build_pooled_projection(
+            vame_proj, args.algo, args.projection, cache_path,
+        )
+        if args.session not in pool_slices:
+            print(f"❌ {args.session} n'est pas dans le pool "
+                  f"(sessions présentes : {list(pool_slices)})",
+                  file=sys.stderr)
+            sys.exit(1)
+        s_start, s_end = pool_slices[args.session]
+        # Coords + labels utilisés pour l'ANIMATION (marker + trail)
+        coords_2d = pool_coords[s_start:s_end]
+        labels = pool_labels[s_start:s_end]
+        L = len(coords_2d)
+        # `pool_coords` + `pool_labels` restent dispo pour le background
+        bg_coords = pool_coords
+        bg_labels = pool_labels
+    else:
+        coords_2d = project_to_2d(latents, args.projection)
+        bg_coords = coords_2d  # single-session : background = anim
+        bg_labels = labels
 
     # Downsample pour l'animation : cible n_frames_out
     fps_src = args.fps_source
@@ -365,13 +499,14 @@ def main() -> None:
         video_osd = None
     ax.set_facecolor("white")
 
-    # Background : tous les points de la session (color par motif)
-    unique_motifs = np.unique(labels)
+    # Background : tous les points (color par motif). En mode pooled c'est
+    # le dataset entier ; sinon la seule session active.
+    unique_motifs = np.unique(bg_labels)
     for m in unique_motifs:
-        mask = labels == m
+        mask = bg_labels == m
         color = TAB20[m % len(TAB20)]
         ax.scatter(
-            coords_2d[mask, 0], coords_2d[mask, 1],
+            bg_coords[mask, 0], bg_coords[mask, 1],
             s=8, c=[color], alpha=args.background_alpha,
             edgecolors="none",
         )
@@ -397,7 +532,11 @@ def main() -> None:
 
     ax.set_xlabel(f"{args.projection.upper()}-1")
     ax.set_ylabel(f"{args.projection.upper()}-2")
-    ax.set_title(f"Behavior manifold — {args.session}")
+    title_scope = "pooled dataset" if args.pool_all_sessions else args.session
+    ax.set_title(f"Behavior manifold — {title_scope}\n"
+                 f"animated trajectory : {args.session}"
+                 if args.pool_all_sessions
+                 else f"Behavior manifold — {args.session}")
     # Retire les ticks pour un look propre
     ax.set_xticks([]); ax.set_yticks([])
 
@@ -461,7 +600,8 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_{args.start:.0f}s_{args.duration:.0f}s" if args.duration else "_full"
     side = "_sidebyside" if video_cap is not None else ""
-    stem = f"{args.session}_manifold_{args.projection}{side}{suffix}"
+    pool = "_pooled" if args.pool_all_sessions else ""
+    stem = f"{args.session}_manifold_{args.projection}{pool}{side}{suffix}"
 
     if args.output_format == "gif":
         out_path = out_dir / f"{stem}.gif"
