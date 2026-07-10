@@ -995,19 +995,36 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
                   out_path: Path, labels: dict[int, str]) -> None:
     if not motifs:
         return
-    fig, axes = plt.subplots(1, len(motifs), figsize=(3 * len(motifs), 4), sharey=True)
+    groups = sorted(df[condition_col].dropna().unique())
+    n_groups = len(groups)
+    # Largeur adaptative : les labels de group4 (MCCiECKO_Captopril...) sont
+    # longs. Compte le pire label pour ajuster la largeur par subplot.
+    max_label_len = max((len(str(g)) for g in groups), default=1)
+    # ~0.15" par caractère, cap à 2.5" min par subplot
+    per_subplot_w = max(2.5, 0.15 * max_label_len * n_groups / 2)
+    fig, axes = plt.subplots(
+        1, len(motifs),
+        figsize=(per_subplot_w * len(motifs), 4.5), sharey=True,
+    )
     if len(motifs) == 1:
         axes = [axes]
-    groups = sorted(df[condition_col].dropna().unique())
     for ax, motif in zip(axes, motifs):
         d = df[df["motif"] == motif]
         data = [d.loc[d[condition_col] == g, "frequency"].values for g in groups]
         ax.boxplot(data, tick_labels=[str(g) for g in groups])
+        # Rotation adaptative selon la longueur du plus grand label :
+        # 30° pour des labels courts (Captopril, Control, F, M...)
+        # 45° pour des labels longs (MCCiECKO_Captopril, etc.)
+        rot = 45 if max_label_len > 12 else 30
+        # `ha="right"` aligne le coin haut-droit du texte avec le tick,
+        # empêche que les labels rentrent sous le subplot voisin
+        plt.setp(ax.get_xticklabels(), rotation=rot, ha="right",
+                 fontsize=8)
         ax.set_title(motif_display(motif, labels), fontsize=10)
         ax.set_ylabel("Proportion")
-    fig.suptitle(f"Top motifs différenciants par {condition_col}")
+    fig.suptitle(f"Top motifs différenciants par {condition_col}", y=1.02)
     fig.tight_layout()
-    fig.savefig(out_path, dpi=120)
+    fig.savefig(out_path, dpi=120, bbox_inches="tight")
     plt.close(fig)
 
 
