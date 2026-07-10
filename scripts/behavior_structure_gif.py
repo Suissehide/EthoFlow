@@ -68,19 +68,31 @@ def find_source_video(project_ethoflow: Path, session: str) -> Path | None:
     """Lit source_video depuis la metadata.yaml de la session.
 
     Retourne None si metadata ou vidéo introuvable — dans ce cas le GIF est
-    généré sans le panneau vidéo (--with-video fallback silencieux).
+    généré sans le panneau vidéo. Écrit sur stderr la raison exacte du
+    fallback pour faciliter le debug (drive débranché vs metadata manquante
+    vs champ vide sont trois problèmes très différents à corriger).
     """
     import yaml
     meta_path = raw_dir(project_ethoflow) / session / "metadata.yaml"
     if not meta_path.exists():
+        print(f"    · pas de metadata.yaml pour {session} à {meta_path}",
+              file=sys.stderr)
         return None
     with open(meta_path) as f:
         meta = yaml.safe_load(f) or {}
     src = meta.get("source_video")
     if not src:
+        print(f"    · champ 'source_video' absent de {meta_path}",
+              file=sys.stderr)
         return None
     p = Path(src)
-    return p if p.exists() else None
+    if not p.exists():
+        print(f"    · source_video pointe vers {p}, qui n'existe pas.\n"
+              f"    · Vérifie que le disque contenant les vidéos est monté,\n"
+              f"    · ou passe --source-video <chemin> pour override.",
+              file=sys.stderr)
+        return None
+    return p
 
 
 # Même palette que motif_gif.py pour cohérence
@@ -212,6 +224,11 @@ def main() -> None:
                         help="Largeur max du panneau vidéo en pixels "
                              "(l'image est downscalée à cette taille pour "
                              "garder le GIF léger). Défaut 480.")
+    parser.add_argument("--source-video", type=Path, default=None,
+                        help="Chemin explicite vers la vidéo source à "
+                             "afficher dans le panneau. Ignore ce qui est "
+                             "dans metadata.yaml (utile quand le drive de "
+                             "recording n'est plus mappé à la même lettre).")
     args = parser.parse_args()
 
     try:
@@ -287,10 +304,20 @@ def main() -> None:
         except ImportError:
             print("⚠  OpenCV absent, --with-video ignoré", file=sys.stderr)
         else:
-            src_video = find_source_video(project, args.session)
+            # Priorité : --source-video CLI, sinon metadata.yaml
+            if args.source_video is not None:
+                if args.source_video.exists():
+                    src_video = args.source_video
+                    print(f"    Override CLI : source_video = {src_video}")
+                else:
+                    print(f"⚠  --source-video={args.source_video} n'existe pas",
+                          file=sys.stderr)
+                    src_video = None
+            else:
+                src_video = find_source_video(project, args.session)
             if src_video is None:
                 print(f"⚠  source_video introuvable pour {args.session}, "
-                      f"--with-video ignoré (vérifie metadata.yaml)",
+                      f"--with-video ignoré (voir raison ci-dessus)",
                       file=sys.stderr)
             else:
                 video_cap = cv2.VideoCapture(str(src_video))
