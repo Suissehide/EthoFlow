@@ -335,6 +335,12 @@ def main() -> None:
                              "<vame>/analysis/behavior_structure/"
                              "pooled_<projection>.npz. Supprime-le pour "
                              "recomputer.")
+    parser.add_argument("--background-max-points", type=int, default=80000,
+                        help="Nombre max de points affichés en background. "
+                             "En mode --pool-all-sessions on peut avoir "
+                             "1M+ points, ce qui rend le rendu prohibitif. "
+                             "On subsample stratifié par motif pour "
+                             "préserver la structure. Défaut 80000.")
     args = parser.parse_args()
 
     try:
@@ -500,15 +506,37 @@ def main() -> None:
     ax.set_facecolor("white")
 
     # Background : tous les points (color par motif). En mode pooled c'est
-    # le dataset entier ; sinon la seule session active.
-    unique_motifs = np.unique(bg_labels)
+    # le dataset entier ; sinon la seule session active. On cape le nombre
+    # de points affichés (subsample stratifié par motif) car sinon le
+    # rendu matplotlib devient prohibitif à partir de ~500k points.
+    n_bg_total = len(bg_coords)
+    if n_bg_total > args.background_max_points:
+        rng = np.random.default_rng(42)
+        keep_frac = args.background_max_points / n_bg_total
+        keep_mask = np.zeros(n_bg_total, dtype=bool)
+        for m in np.unique(bg_labels):
+            m_idx = np.where(bg_labels == m)[0]
+            n_keep_m = max(1, int(round(len(m_idx) * keep_frac)))
+            chosen = rng.choice(m_idx, size=min(n_keep_m, len(m_idx)),
+                                 replace=False)
+            keep_mask[chosen] = True
+        bg_coords_show = bg_coords[keep_mask]
+        bg_labels_show = bg_labels[keep_mask]
+        print(f"  Background : {n_bg_total:,} → {len(bg_coords_show):,} points "
+              f"(subsample stratifié pour rendu rapide)")
+    else:
+        bg_coords_show = bg_coords
+        bg_labels_show = bg_labels
+
+    unique_motifs = np.unique(bg_labels_show)
     for m in unique_motifs:
-        mask = bg_labels == m
+        mask = bg_labels_show == m
         color = TAB20[m % len(TAB20)]
         ax.scatter(
-            bg_coords[mask, 0], bg_coords[mask, 1],
+            bg_coords_show[mask, 0], bg_coords_show[mask, 1],
             s=8, c=[color], alpha=args.background_alpha,
             edgecolors="none",
+            rasterized=True,  # transforme en bitmap, ~10x plus rapide à re-render
         )
 
     # Marqueur courant + trail
@@ -556,6 +584,35 @@ def main() -> None:
     )
     fig.tight_layout()
 
+    # ----- Pré-extraction des frames vidéo (bien plus rapide que seek par frame) -----
+    # cv2.VideoCapture.set(POS_FRAMES) est très lent sur MP4/h264 (décode
+    # depuis la dernière keyframe à chaque appel). On lit séquentiellement
+    # une seule fois et on garde en mémoire les frames dont on aura besoin.
+    video_frames = None
+    if video_cap is not None:
+        import cv2  # noqa: WPS433
+        print("Pré-lecture des frames vidéo (évite les seeks lents)...")
+        needed = set(anim_indices.tolist())
+        max_idx = max(needed)
+        video_frames = {}
+        # Seek une seule fois au début du range utile, puis read séquentiel
+        video_cap.set(cv2.CAP_PROP_POS_FRAMES, int(min(needed)))
+        cur = int(min(needed))
+        while cur <= max_idx:
+            ok, frame = video_cap.read()
+            if not ok:
+                break
+            if cur in needed:
+                if (frame.shape[0], frame.shape[1]) != video_size:
+                    frame = cv2.resize(
+                        frame, (video_size[1], video_size[0]),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                video_frames[cur] = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            cur += 1
+        print(f"  → {len(video_frames)} frames en cache mémoire "
+              f"(~{sum(f.nbytes for f in video_frames.values()) / 1e6:.0f} MB)")
+
     # ----- Animation -----
     def update(frame_i: int):
         idx = anim_indices[frame_i]
@@ -574,21 +631,10 @@ def main() -> None:
         elapsed = (idx - start_frame) / fps_src
         time_text.set_text(f"t = {elapsed:6.1f} s")
 
-        # Panneau vidéo (si activé) : va chercher la frame idx et l'affiche
-        if video_cap is not None:
-            import cv2  # noqa: WPS433
-            video_cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-            ok, frame = video_cap.read()
-            if ok:
-                if (frame.shape[0], frame.shape[1]) != video_size:
-                    frame = cv2.resize(
-                        frame, (video_size[1], video_size[0]),
-                        interpolation=cv2.INTER_AREA,
-                    )
-                # BGR (cv2) → RGB (matplotlib)
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                video_im.set_data(frame_rgb)
-                video_osd.set_text(f"[{current_motif}] {name}")
+        # Panneau vidéo : lecture depuis le cache mémoire
+        if video_frames is not None and idx in video_frames:
+            video_im.set_data(video_frames[idx])
+            video_osd.set_text(f"[{current_motif}] {name}")
 
         return trail_line, marker, osd, time_text
 
@@ -603,20 +649,34 @@ def main() -> None:
     pool = "_pooled" if args.pool_all_sessions else ""
     stem = f"{args.session}_manifold_{args.projection}{pool}{side}{suffix}"
 
+    # Callback de progression : matplotlib appelle ce truc à chaque frame
+    # sauvée par le writer → on affiche un pourcentage rassurant.
+    def _progress(current: int, total: int) -> None:
+        pct = int(100 * (current + 1) / total)
+        # Écrit sur la même ligne (ne pas polluer le terminal)
+        print(f"\r  Encoding frame {current + 1}/{total}  ({pct}%)",
+              end="", flush=True)
+
     if args.output_format == "gif":
         out_path = out_dir / f"{stem}.gif"
         writer = PillowWriter(fps=fps_out)
-        anim.save(str(out_path), writer=writer, dpi=80)
+        anim.save(str(out_path), writer=writer, dpi=80,
+                  progress_callback=_progress)
+        print()  # newline après la barre
     else:
         out_path = out_dir / f"{stem}.mp4"
         try:
             writer = FFMpegWriter(fps=fps_out, bitrate=2000)
-            anim.save(str(out_path), writer=writer, dpi=100)
+            anim.save(str(out_path), writer=writer, dpi=100,
+                      progress_callback=_progress)
+            print()
         except Exception as e:
-            print(f"⚠  FFMpegWriter échoué ({e}), fallback en gif+ffmpeg",
+            print(f"\n⚠  FFMpegWriter échoué ({e}), fallback en gif+ffmpeg",
                   file=sys.stderr)
             tmp_gif = out_dir / f"{stem}_tmp.gif"
-            anim.save(str(tmp_gif), writer=PillowWriter(fps=fps_out), dpi=80)
+            anim.save(str(tmp_gif), writer=PillowWriter(fps=fps_out), dpi=80,
+                      progress_callback=_progress)
+            print()
             subprocess.run(
                 ["ffmpeg", "-y", "-i", str(tmp_gif), "-c:v", "libx264",
                  "-pix_fmt", "yuv420p", str(out_path)],
