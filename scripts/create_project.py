@@ -5,28 +5,35 @@ Un projet EthoFlow est un dossier auto-suffisant qui contient :
     <project>/
     ├── data/
     │   ├── raw/                 # data/raw/<session>/metadata.yaml
-    │   ├── cropped/             # cropped videos (topview seulement)
+    │   ├── cropped/             # cropped videos (multi-animal seulement)
     │   ├── dlc-output/          # output DLC + h5 nettoyés (_clean.h5, _A*.h5)
     │   ├── vame/                # projets VAME par sous-dossier
     │   └── results/             # exports figures/csv finaux
     └── configs/
-        └── pipeline_config.yaml # DLC project config + (topview) arena coords
+        └── pipeline_config.yaml # DLC project config + (multi-animal) arena coords
 
 Ce script crée la structure de dossiers vide + une pipeline_config.yaml
 template adaptée au type de projet.
 
+Le `--kind` détermine si le projet contient plusieurs animaux par vidéo
+(nécessite un split par arène) ou un seul animal par vidéo. C'est
+indépendant de l'angle caméra (top vs bottom) : un projet bottom-view
+avec 4 souris dans 4 arènes séparées est un `--kind multi`, tandis
+qu'un projet top-view avec une seule souris dans une arène ouverte
+est un `--kind single`.
+
 Usage :
-    # Projet bottom-view (1 souris = 1 vidéo, pas d'arènes)
+    # 1 animal par vidéo (pas d'arènes)
     python scripts/create_project.py \\
         --project-dir D:/ethoflow/projects/bottomview-MCC-2026-06 \\
-        --kind bottomview \\
+        --kind single \\
         --dlc-config "E:/dlc-projects/souris-bottomview-labo-2026-06-05/config.yaml"
 
-    # Projet topview (4 souris par vidéo, splitting d'arènes)
+    # N animaux par vidéo (splitting d'arènes)
     python scripts/create_project.py \\
-        --project-dir D:/ethoflow/projects/openfield-topview \\
-        --kind topview \\
-        --dlc-config <chemin vers config.yaml topview>
+        --project-dir D:/ethoflow/projects/openfield-4mice \\
+        --kind multi \\
+        --dlc-config <chemin vers config.yaml>
 """
 from __future__ import annotations
 
@@ -51,9 +58,10 @@ from paths import (  # noqa: E402
 )
 
 
-# Coords par défaut des 4 arènes (topview, vidéo 1024×1080, grille 2×2 du
-# setup actuel du labo). À ajuster par session via calibrate_arenes.py.
-DEFAULT_TOPVIEW_ARENA_COORDS = {
+# Coords par défaut des 4 arènes (setup labo actuel : vidéo 1024×1080, grille
+# 2×2). Utilisées quand `--kind multi` sans autre précision — à ajuster par
+# session via `calibrate_arenes.py` si la caméra bouge ou si le layout change.
+DEFAULT_MULTI_ARENA_COORDS = {
     "A1": [599, 40, 495, 465],
     "A2": [599, 506, 496, 503],
     "A3": [106, 501, 490, 505],
@@ -67,10 +75,10 @@ def build_pipeline_config(kind: str, dlc_config: str | None) -> dict:
     if dlc_config:
         config["dlc_project_config"] = dlc_config
 
-    if kind == "topview":
-        config["default_arenes_coords"] = DEFAULT_TOPVIEW_ARENA_COORDS
+    if kind == "multi":
+        config["default_arenes_coords"] = DEFAULT_MULTI_ARENA_COORDS
 
-    # bottomview : pas d'arenes coords, c'est tout
+    # single : pas d'arenes coords, c'est tout
     return config
 
 
@@ -78,11 +86,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_project_dir_arg(parser, required=True)
     parser.add_argument(
-        "--kind", choices=["bottomview", "topview"], required=True,
+        "--kind", choices=["single", "multi"], required=True,
         help=(
-            "Type de projet : 'bottomview' = 1 souris par vidéo (pas "
-            "d'arena splitting) ; 'topview' = 4 souris par vidéo (arena "
-            "coords dans la config)."
+            "Nombre d'animaux par vidéo. "
+            "'single' = 1 animal par vidéo (pas d'arena splitting), "
+            "'multi' = N animaux par vidéo dans N arènes séparées "
+            "(arena splitting activé + coords par défaut écrites dans "
+            "pipeline_config.yaml). Indépendant de l'angle caméra."
         ),
     )
     parser.add_argument(
@@ -139,18 +149,18 @@ def main() -> None:
     next_step = (
         "Étape suivante :\n"
         "  - Sync des sessions depuis Excel :\n"
-        "      python scripts/sync_from_excel_bottomview.py "
+        "      python scripts/sync_from_excel_single.py "
         f"--project-dir {project} \\\n"
         "          --excel <chemin> --videos-dir <chemin>\n"
         "  - Puis lancer l'inférence DLC :\n"
         f"      python scripts/run_dlc_inference.py --project-dir {project} "
         "--all --mode custom\n"
-        if args.kind == "bottomview" else
+        if args.kind == "single" else
         "Étape suivante :\n"
-        "  - Sync des sessions depuis Excel topview :\n"
-        "      python scripts/sync_from_excel.py "
+        "  - Sync des sessions depuis Excel multi-animal :\n"
+        "      python scripts/sync_from_excel_multi.py "
         f"--project-dir {project} --excel <chemin>\n"
-        "  - Puis le pipeline topview complet (crop + DLC + assign + clean) :\n"
+        "  - Puis le pipeline multi-animal complet (crop + DLC + assign + clean) :\n"
         f"      python scripts/run_pipeline.py --project-dir {project} --all\n"
     )
     print(next_step)

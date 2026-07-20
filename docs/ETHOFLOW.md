@@ -257,11 +257,11 @@ Les chercheurs maintiennent un fichier `OpenField_trials_<équipe>.xlsx` qui con
 - onglet **Trials_Videos** : une ligne par vidéo (TrialCode, date, fps, dimensions, notes)
 - onglet **Arena_Mapping** : une ligne par (TrialCode, Arène) avec le MouseID assigné
 
-EthoFlow lit ce fichier et **ne le modifie jamais**. Le script `scripts/sync_from_excel.py` génère un `metadata.yaml` par session à partir de cet Excel.
+EthoFlow lit ce fichier et **ne le modifie jamais**. Le script `scripts/sync_from_excel_multi.py` génère un `metadata.yaml` par session à partir de cet Excel.
 
 ```bash
 conda activate ethoflow
-python scripts/sync_from_excel.py
+python scripts/sync_from_excel_multi.py
 # ou via l'interface Streamlit, page "Sync depuis Excel"
 ```
 

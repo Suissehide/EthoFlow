@@ -16,13 +16,13 @@ ou édité à la main) :
 
 Workflow type avec deux journées d'acquisition :
 
-    python scripts/sync_from_excel_bottomview.py \\
+    python scripts/sync_from_excel_single.py \\
         --project-dir D:/ethoflow/projects/bottomview-MCC-2026-06 \\
         --excel D:/ethoflow/projects/bottomview-MCC-2026-06/bottomview_sessions.xlsx \\
         --videos-dir E:/data/bottom_view/08062026 \\
         --date 2026-06-08
 
-    python scripts/sync_from_excel_bottomview.py \\
+    python scripts/sync_from_excel_single.py \\
         --project-dir D:/ethoflow/projects/bottomview-MCC-2026-06 \\
         --excel D:/ethoflow/projects/bottomview-MCC-2026-06/bottomview_sessions.xlsx \\
         --videos-dir E:/data/bottom_view/11062026 \\

@@ -12,10 +12,10 @@ Le metadata contient toutes les infos nécessaires au pipeline :
 - pour chaque arène : MouseID + condition dérivée (CUS / SHAM, ANGII, stress)
 
 Usage:
-    python scripts/sync_from_excel.py
-    python scripts/sync_from_excel.py --excel /chemin/vers/fichier.xlsx
-    python scripts/sync_from_excel.py --videos-dir /chemin/vers/videos/
-    python scripts/sync_from_excel.py --dry-run    # affiche sans écrire
+    python scripts/sync_from_excel_multi.py
+    python scripts/sync_from_excel_multi.py --excel /chemin/vers/fichier.xlsx
+    python scripts/sync_from_excel_multi.py --videos-dir /chemin/vers/videos/
+    python scripts/sync_from_excel_multi.py --dry-run    # affiche sans écrire
 
 Defaults:
     --excel       : ../data/OpenField_trials_CDUPLAA.xlsx

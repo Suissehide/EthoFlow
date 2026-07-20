@@ -9,7 +9,12 @@ Le pipeline gère **deux dimensions indépendantes** :
 
 Les deux se combinent librement : tu peux faire du bottom-view avec 4 souris dans 4 arènes séparées, ou du top-view avec une souris seule dans une arène ouverte. Le mode d'inférence DLC (`--mode superanimal` multi-animal + arena split, ou crop préalable + `--mode custom` single-animal) est **choisi à l'étape 5** en fonction du nombre d'animaux par vidéo, indépendamment de l'angle.
 
-> ℹ **Note sur le CLI** : dans `create_project.py`, le flag `--kind {topview, bottomview}` est un raccourci historique qui contrôle uniquement s'il faut écrire ou non des coordonnées d'arène par défaut. Concrètement, `--kind topview` = « multi-animal par vidéo, arena split nécessaire », `--kind bottomview` = « 1 animal par vidéo, pas d'arena split ». Le nom est un abus de langage — dans le doute, choisis en fonction du nombre d'animaux par vidéo, pas de l'angle caméra.
+La CLI reflète cette distinction :
+
+- `create_project.py --kind single` = 1 animal par vidéo, pas d'arena split
+- `create_project.py --kind multi` = N animaux par vidéo, arena split activé + coords par défaut écrites
+- `sync_from_excel_single.py` = schéma Excel « 1 ligne par souris »
+- `sync_from_excel_multi.py` = schéma Excel « 1 ligne par vidéo + Arena_Mapping »
 
 Le pipeline part d'une acquisition brute (vidéo + Excel des souris) et produit des CSV statistiques, des figures et des vidéos annotées, groupables par n'importe quelle variable expérimentale (génotype, traitement, sexe, etc.).
 
@@ -125,15 +130,15 @@ Le même modèle DLC entraîné une fois est réutilisé pour tous les projets E
 conda activate ethoflow
 python scripts\create_project.py ^
     --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 ^
-    --kind bottomview ^
+    --kind single ^
     --dlc-config "E:\dlc-projects\souris-bottomview-labo-2026-06-05\config.yaml"
 ```
 
 Options :
-- `--kind bottomview` — **1 animal par vidéo**, pas d'arena splitting (nom historique, s'applique aussi à du top-view mono-animal)
-- `--kind topview` — **N animaux par vidéo dans N arènes**, arena splitting activé + coords d'arène par défaut écrites dans `pipeline_config.yaml` (nom historique, s'applique aussi à du bottom-view multi-animal)
+- `--kind single` — **1 animal par vidéo**, pas d'arena splitting
+- `--kind multi` — **N animaux par vidéo dans N arènes**, arena splitting activé + coords d'arène par défaut écrites dans `pipeline_config.yaml`
 
-Le choix se fait sur le nombre d'animaux par vidéo, pas sur l'angle caméra. Pour un projet bottom-view avec 4 souris dans 4 arènes séparées, choisis `--kind topview` puis édite les `default_arenes_coords` avec `calibrate_arenes.py`.
+Choisis en fonction du nombre d'animaux par vidéo, pas de l'angle caméra. Pour un projet bottom-view avec 4 souris dans 4 arènes séparées, prends `--kind multi` puis ajuste les `default_arenes_coords` avec `calibrate_arenes.py`.
 
 Résultat : arborescence vide + `configs/pipeline_config.yaml` qui pointe vers ton config DLC.
 
@@ -156,10 +161,10 @@ Le pipeline lit un Excel maître qui décrit tes souris. Deux schémas selon **l
 
 Deux scripts selon le schéma Excel utilisé :
 
-**1 animal / vidéo** — `sync_from_excel_bottomview.py` (nom historique, marche pour tout mono-animal, quel que soit l'angle caméra) :
+**1 animal / vidéo** — `sync_from_excel_single.py` :
 
 ```cmd
-python scripts\sync_from_excel_bottomview.py ^
+python scripts\sync_from_excel_single.py ^
     --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 ^
     --excel D:\ethoflow\projects\bottomview-MCC-2026-06\bottomview_sessions.xlsx ^
     --videos-dir E:\data\bottom_view\08062026 ^
@@ -168,10 +173,10 @@ python scripts\sync_from_excel_bottomview.py ^
 
 Répète la commande pour chaque batch d'acquisition (`--videos-dir` change, l'Excel reste le même). Utilise `--overwrite` pour re-générer sur une metadata déjà existante.
 
-**N animaux / vidéo** — `sync_from_excel.py` (nom historique, marche pour tout multi-animal) :
+**N animaux / vidéo** — `sync_from_excel_multi.py` :
 
 ```cmd
-python scripts\sync_from_excel.py ^
+python scripts\sync_from_excel_multi.py ^
     --project-dir D:\ethoflow\projects\openfield-M1-2025-10 ^
     --excel D:\path\to\OpenField_trials.xlsx
 ```
@@ -538,7 +543,7 @@ default_arenes_coords:
 - `create_project.py` — Init un nouveau projet EthoFlow (dossiers vides + pipeline_config)
 
 **Sync depuis Excel**
-- `sync_from_excel.py` (schéma multi-animal / vidéo) / `sync_from_excel_bottomview.py` (schéma 1 animal / vidéo) — Excel maître → 1 metadata.yaml par session
+- `sync_from_excel_multi.py` (schéma N animaux / vidéo) / `sync_from_excel_single.py` (schéma 1 animal / vidéo) — Excel maître → 1 metadata.yaml par session
 - `patch_captopril.py` — Backfill le champ captopril sans re-syncer (schéma 1 animal / vidéo)
 
 **Multi-animal par vidéo — préparation**

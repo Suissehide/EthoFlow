@@ -1,6 +1,6 @@
 """Ajoute le champ `captopril` aux metadata.yaml sans re-syncer l'Excel.
 
-Si tu as déjà généré tes metadata.yaml via sync_from_excel_bottomview.py et
+Si tu as déjà généré tes metadata.yaml via sync_from_excel_single.py et
 que tu veux juste ajouter (ou corriger) le champ `captopril` sans tout
 regénérer, ce script te permet de patcher en place.
 
@@ -17,7 +17,7 @@ Trois modes d'attribution (mutuellement exclusifs) :
 
     3) --from-excel <path> [--sheet Sessions]
        Relit l'Excel maître et applique la colonne `captopril` par mouse_id.
-       Comme sync_from_excel_bottomview mais sans écraser le reste de la
+       Comme sync_from_excel_single mais sans écraser le reste de la
        metadata. Pratique si tu as juste ajouté la colonne captopril dans
        l'Excel et ne veux pas repartir de zéro.
 

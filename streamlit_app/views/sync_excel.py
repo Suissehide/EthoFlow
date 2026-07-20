@@ -137,7 +137,7 @@ def _section_import_excel() -> None:
 
         if st.button("Lancer le sync", type="primary", key="btn_sync"):
             cmd = [
-                sys.executable, str(SCRIPTS_DIR / "sync_from_excel.py"),
+                sys.executable, str(SCRIPTS_DIR / "sync_from_excel_multi.py"),
                 "--excel", excel_path,
                 "--videos-dir", videos_dir,
             ]

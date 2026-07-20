@@ -65,7 +65,7 @@ def add_project_dir_arg(
     sur l'arbo legacy `<repo>/data/`. Si `required=True`, le script refuse
     de tourner sans projet explicite — utile pour les nouvelles features
     qui ne devraient jamais s'appliquer à l'arbo legacy (e.g.
-    sync_from_excel_bottomview).
+    sync_from_excel_single).
     """
     parser.add_argument(
         "--project-dir",
