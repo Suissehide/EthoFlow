@@ -34,11 +34,9 @@ import argparse
 import sys
 from pathlib import Path
 
-import deeplabcut as dlc
-
-# Import du config centralisé
+# Insère le dossier du script en tête de sys.path pour trouver _load_config
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _config import CONFIG, RESULTS_DIR, VIDEOS_TO_ANALYZE  # noqa: E402
+from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
 def main() -> None:
@@ -46,6 +44,7 @@ def main() -> None:
         description="Régénère la vidéo annotée à un pcutoff différent "
                     "(réutilise le .h5 existant, pas de nouvelle inférence)."
     )
+    add_config_dir_arg(parser)
     parser.add_argument(
         "--pcutoff",
         type=float,
@@ -62,6 +61,10 @@ def main() -> None:
              "VIDEOS_TO_ANALYZE de _config.py.",
     )
     args = parser.parse_args()
+    load_config(args)
+
+    import deeplabcut as dlc  # noqa: E402
+    from _config import CONFIG, RESULTS_DIR, VIDEOS_TO_ANALYZE  # noqa: E402
 
     if args.video:
         videos = [Path(args.video)]

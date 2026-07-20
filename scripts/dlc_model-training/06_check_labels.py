@@ -53,8 +53,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import argparse
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _config import CONFIG, PROJECT_DIR  # noqa: E402
+from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
 PAWS = [
@@ -92,6 +94,13 @@ def cross_sign_vec(
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    add_config_dir_arg(parser)
+    args = parser.parse_args()
+    load_config(args)
+
+    from _config import CONFIG, EXPERIMENTER, PROJECT_DIR  # noqa: E402
+
     # ------------------------------------------------------------------
     # 1) Génère les images annotées (markers superposés)
     # ------------------------------------------------------------------
@@ -117,7 +126,6 @@ def main() -> None:
         # DLC nomme le fichier de labels manuels CollectedData_<EXPERIMENTER>.h5
         # → cherche celui qui matche notre config, sinon le premier disponible
         # (utile si tu as repris un projet DLC créé par quelqu'un d'autre).
-        from _config import EXPERIMENTER
         h5 = vdir / f"CollectedData_{EXPERIMENTER}.h5"
         if not h5.exists():
             fallback = sorted(vdir.glob("CollectedData_*.h5"))

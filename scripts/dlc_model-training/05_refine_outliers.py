@@ -68,23 +68,15 @@ Note sur l'algorithme "jump" :
 """
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
-import deeplabcut as dlc
 import yaml
 
-# Import du config centralisé
+# Insère le dossier du script en tête de sys.path pour trouver _load_config
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _config import (  # noqa: E402
-    CONFIG,
-    OUTLIER_ALGORITHM,
-    OUTLIER_EPSILON,
-    OUTLIER_NUMFRAMES,
-    PROJECT_DIR,
-    RESULTS_DIR,
-    TRAINING_VIDEOS_FOR_REFINE,
-)
+from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
 def update_numframes2pick(project_config_path: Path, n: int) -> int:
@@ -105,6 +97,17 @@ def update_numframes2pick(project_config_path: Path, n: int) -> int:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    add_config_dir_arg(parser)
+    args = parser.parse_args()
+    load_config(args)
+
+    import deeplabcut as dlc  # noqa: E402
+    from _config import (  # noqa: E402
+        CONFIG, OUTLIER_ALGORITHM, OUTLIER_EPSILON, OUTLIER_NUMFRAMES,
+        PROJECT_DIR, RESULTS_DIR, TRAINING_VIDEOS_FOR_REFINE,
+    )
+
     if not TRAINING_VIDEOS_FOR_REFINE:
         print("⚠ TRAINING_VIDEOS_FOR_REFINE est vide dans _config.py")
         return

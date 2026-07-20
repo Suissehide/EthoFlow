@@ -78,6 +78,46 @@ N_AUTO_FRAMES = 120
 
 
 # ----------------------------------------------------------------------
+# Anatomie souris (bodyparts + skeleton, écrits dans le config.yaml DLC)
+# ----------------------------------------------------------------------
+
+# 12 keypoints bottom-view / quadrupède générique. Pour du top-view
+# ouvert (pattes non visibles), remplace par une liste plus courte
+# (typiquement nose + ears + center + tail_base + tail_tip).
+DEFAULT_BODYPARTS: list[str] = [
+    "nose",
+    "left_ear",
+    "right_ear",
+    "front_paw_left",
+    "front_paw_right",
+    "hind_paw_left",
+    "hind_paw_right",
+    "tail_base",
+    "tail_mid",
+    "tail_tip",
+    "center",
+    "left_flank",
+]
+
+# Skeleton = liaisons anatomiques entre keypoints. Sert au regroupement
+# multi-animal DLC et au tracking. Format : liste de [kp_A, kp_B].
+DEFAULT_SKELETON: list[list[str]] = [
+    ["nose", "left_ear"],
+    ["nose", "right_ear"],
+    ["left_ear", "right_ear"],
+    ["nose", "center"],
+    ["center", "left_flank"],
+    ["center", "front_paw_left"],
+    ["center", "front_paw_right"],
+    ["center", "hind_paw_left"],
+    ["center", "hind_paw_right"],
+    ["center", "tail_base"],
+    ["tail_base", "tail_mid"],
+    ["tail_mid", "tail_tip"],
+]
+
+
+# ----------------------------------------------------------------------
 # Transfer learning (02_train.py)
 # ----------------------------------------------------------------------
 
