@@ -2,12 +2,14 @@
 
 Pipeline d'analyse comportementale souris à partir de vidéos brutes, basé sur **DeepLabCut** (estimation de pose) et **VAME** (segmentation comportementale non-supervisée).
 
-Le pipeline supporte **une vidéo → 1 à 4 sessions**, quel que soit l'angle de prise de vue :
+Le pipeline gère **deux dimensions indépendantes** :
 
-- **Bottomview** (caméra sous plancher transparent IR, 1 souris/vidéo) : 1 vidéo → 1 session, DLC single-animal direct
-- **Topview** (caméra au plafond, 4 souris dans 4 arènes séparées) : 1 vidéo → 4 sessions, soit via DLC multi-animal (SuperAnimal) + split par arène, soit via crop préalable de chaque arène en vidéo single-animal
+- **Angle de la caméra** — top-view (au plafond) ou bottom-view (sous plancher transparent IR). Ça détermine uniquement quelle SuperAnimal utiliser pour le transfer learning DLC (`superanimal_topviewmouse` vs `superanimal_quadruped`).
+- **Nombre d'animaux par vidéo** — 1 seul animal (**1 vidéo = 1 session**) ou plusieurs animaux dans des arènes physiquement séparées (**1 vidéo = N sessions**, typiquement 4). Ça détermine si tu as besoin d'un split par arène ou pas.
 
-Le choix entre les deux voies topview se fait via une option CLI (`--mode superanimal` ou crop + `--mode custom`), sans changement de structure de projet.
+Les deux se combinent librement : tu peux faire du bottom-view avec 4 souris dans 4 arènes séparées, ou du top-view avec une souris seule dans une arène ouverte. Le mode d'inférence DLC (`--mode superanimal` multi-animal + arena split, ou crop préalable + `--mode custom` single-animal) est **choisi à l'étape 5** en fonction du nombre d'animaux par vidéo, indépendamment de l'angle.
+
+> ℹ **Note sur le CLI** : dans `create_project.py`, le flag `--kind {topview, bottomview}` est un raccourci historique qui contrôle uniquement s'il faut écrire ou non des coordonnées d'arène par défaut. Concrètement, `--kind topview` = « multi-animal par vidéo, arena split nécessaire », `--kind bottomview` = « 1 animal par vidéo, pas d'arena split ». Le nom est un abus de langage — dans le doute, choisis en fonction du nombre d'animaux par vidéo, pas de l'angle caméra.
 
 Le pipeline part d'une acquisition brute (vidéo + Excel des souris) et produit des CSV statistiques, des figures et des vidéos annotées, groupables par n'importe quelle variable expérimentale (génotype, traitement, sexe, etc.).
 
@@ -32,7 +34,11 @@ Le pipeline part d'une acquisition brute (vidéo + Excel des souris) et produit 
 
 **Un projet EthoFlow** = un dossier autonome qui contient les données brutes, les sorties DLC/VAME et la config, pour une expérience donnée. Chaque projet vit à un chemin absolu (ex : `D:\ethoflow\projects\bottomview-MCC-2026-06`) et tous les scripts prennent `--project-dir <chemin>`. Tu peux avoir autant de projets en parallèle que tu veux — ils sont indépendants.
 
-**Une session** = une acquisition (une vidéo + les metadata associées : ID souris, groupe, traitement, date, etc.). Sur bottomview, 1 vidéo = 1 session. Sur topview, 1 vidéo = 4 sessions.
+**Une session** = une acquisition (une vidéo + les metadata associées : ID souris, groupe, traitement, date, etc.). Le nombre de sessions par vidéo dépend uniquement du **nombre d'animaux dans la vidéo** :
+- 1 animal par vidéo → 1 session
+- N animaux dans N arènes physiquement séparées → N sessions (une par arène)
+
+Cette distinction est indépendante de l'angle de la caméra : tu peux avoir du bottom-view mono-animal, du bottom-view multi-animal, du top-view mono-animal, du top-view multi-animal.
 
 **Un modèle DLC** = un réseau pré-entraîné qui détecte les points anatomiques (nez, oreilles, pattes, queue, etc.). Un modèle DLC vit **hors** du projet EthoFlow (dans `E:\dlc-projects\...` par exemple) et est **réutilisé** entre projets. C'est la partie coûteuse à produire (labellisation manuelle + jour de calcul GPU) et la partie qu'on partage entre expérimentateurs.
 
@@ -124,16 +130,18 @@ python scripts\create_project.py ^
 ```
 
 Options :
-- `--kind bottomview` — 1 souris par vidéo, pas d'arena splitting
-- `--kind topview` — 4 souris par vidéo, split arènes
+- `--kind bottomview` — **1 animal par vidéo**, pas d'arena splitting (nom historique, s'applique aussi à du top-view mono-animal)
+- `--kind topview` — **N animaux par vidéo dans N arènes**, arena splitting activé + coords d'arène par défaut écrites dans `pipeline_config.yaml` (nom historique, s'applique aussi à du bottom-view multi-animal)
+
+Le choix se fait sur le nombre d'animaux par vidéo, pas sur l'angle caméra. Pour un projet bottom-view avec 4 souris dans 4 arènes séparées, choisis `--kind topview` puis édite les `default_arenes_coords` avec `calibrate_arenes.py`.
 
 Résultat : arborescence vide + `configs/pipeline_config.yaml` qui pointe vers ton config DLC.
 
 ### Étape 2 — préparer l'Excel de sessions
 
-Le pipeline lit un Excel maître qui décrit tes souris. Le schéma diffère topview / bottomview :
+Le pipeline lit un Excel maître qui décrit tes souris. Deux schémas selon **le nombre d'animaux par vidéo** :
 
-**Bottomview** (feuille `Sessions`) — 1 ligne par souris :
+**1 animal / vidéo** — schéma `Sessions` — 1 ligne par souris (=1 vidéo=1 session) :
 
 | mouse_id | sex | group | cage | tail_label | birth_date | animal_id | line | genotype_mcc | captopril |
 |---|---|---|---|---|---|---|---|---|---|
@@ -142,11 +150,13 @@ Le pipeline lit un Excel maître qui décrit tes souris. Le schéma diffère top
 
 `mouse_id` = nom du fichier vidéo attendu (`970.mp4`, `971.mp4`). `group` = ta variable de comparaison principale.
 
-**Topview** (feuilles `Trials_Videos` + `Subjects` + `Arena_Mapping`) — voir `configs/metadata_template.yaml` pour un exemple.
+**N animaux / vidéo** — schéma `Trials_Videos` + `Subjects` + `Arena_Mapping` — 1 ligne par vidéo dans `Trials_Videos`, mapping arène↔souris dans `Arena_Mapping`. Voir `configs/metadata_template.yaml` pour un exemple complet.
 
 ### Étape 3 — sync des sessions
 
-**Bottomview** :
+Deux scripts selon le schéma Excel utilisé :
+
+**1 animal / vidéo** — `sync_from_excel_bottomview.py` (nom historique, marche pour tout mono-animal, quel que soit l'angle caméra) :
 
 ```cmd
 python scripts\sync_from_excel_bottomview.py ^
@@ -158,7 +168,7 @@ python scripts\sync_from_excel_bottomview.py ^
 
 Répète la commande pour chaque batch d'acquisition (`--videos-dir` change, l'Excel reste le même). Utilise `--overwrite` pour re-générer sur une metadata déjà existante.
 
-**Topview** :
+**N animaux / vidéo** — `sync_from_excel.py` (nom historique, marche pour tout multi-animal) :
 
 ```cmd
 python scripts\sync_from_excel.py ^
@@ -168,48 +178,50 @@ python scripts\sync_from_excel.py ^
 
 Résultat dans les deux cas : un `metadata.yaml` par session dans `data/raw/<session_id>/`. Vérifie qu'au moins un fichier contient `source_video:` avec un chemin qui existe.
 
-### Étape 4 — (topview seulement) crop optionnel des arènes
+### Étape 4 — (multi-animal seulement) crop optionnel des arènes
 
-Sur topview, tu as deux options équivalentes pour arriver aux .h5 single-animal :
+Si tu as **N animaux par vidéo** (peu importe l'angle caméra), tu as deux voies équivalentes pour arriver aux .h5 single-animal :
 
-- **Voie A — DLC multi-animal + split** : lance DLC directement sur la vidéo entière, puis split la sortie multi-animal en 4 par arène (via `assign_arenas.py`). Plus rapide au global.
-- **Voie B — crop puis DLC single-animal** : découpe d'abord la vidéo en 4 vidéos single-animal (via `crop_arenes.py`), puis lance DLC en mode single-animal sur chacune. Sortie plus propre, indispensable si tu veux **labelliser** des frames pour améliorer le modèle.
+- **Voie A — DLC multi-animal + split** : lance DLC directement sur la vidéo entière, puis split la sortie multi-animal en N par arène (via `assign_arenas.py`). Plus rapide au global.
+- **Voie B — crop puis DLC single-animal** : découpe d'abord la vidéo en N vidéos single-animal (via `crop_arenes.py`), puis lance DLC en mode single-animal sur chacune. Sortie plus propre, indispensable si tu veux **labelliser** des frames pour améliorer le modèle.
 
 Pour la voie B (crop) :
 
 ```cmd
-:: (Une seule fois par setup) trace les 4 rectangles d'arène si pas déjà fait
+:: (Une seule fois par setup) trace les N rectangles d'arène si pas déjà fait
 python scripts\calibrate_arenes.py --project-dir <...>
 
 :: Ensuite crop de toutes les sessions
 python scripts\crop_arenes.py --project-dir <...> --all
 ```
 
-Sur bottomview, cette étape n'existe pas — passe directement à l'étape 5.
+Si tu as **1 animal par vidéo**, cette étape n'existe pas — passe directement à l'étape 5.
 
 ### Étape 5 — inférence DLC
 
-**Bottomview** (modèle custom déjà pointé dans pipeline_config) :
+Trois modes possibles selon le combo (nombre d'animaux, modèle DLC dispo) :
+
+**1 animal / vidéo, modèle DLC custom** (le cas typique bottom-view) :
 
 ```cmd
 conda activate dlc
-python scripts\run_dlc_inference.py --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 --all --mode custom
+python scripts\run_dlc_inference.py --project-dir <...> --all --mode custom
 ```
 
-**Topview voie A** (DLC multi-animal SuperAnimal, défaut) :
+**N animaux / vidéo, DLC multi-animal SuperAnimal** (voie A, défaut sans training custom) :
 
 ```cmd
 python scripts\run_dlc_inference.py --project-dir <...> --all
 ```
 
-**Topview voie B** (single-animal sur vidéos croppées) :
+**N animaux / vidéo, single-animal sur vidéos croppées** (voie B, quand tu as croppé à l'étape 4) :
 
 ```cmd
 python scripts\run_dlc_inference.py --project-dir <...> --all --mode single-animal ^
     --video-adapt --video-adapt-batch-size 2
 ```
 
-Options utiles pour toutes les voies :
+Options utiles pour tous les modes :
 - `--all` — traite toutes les sessions non encore traitées
 - `<session_id>` en argument positionnel — cible une session précise
 - `--video-adapt` sur des vidéos assez différentes du training set → adapte le modèle sur les statistiques de tes vidéos (lent mais améliore la précision)
@@ -219,9 +231,9 @@ Sortie : `data/dlc-output/<session>/<hash>.h5` + éventuellement `_labeled.mp4`.
 
 ### Étape 6 — préparer les fichiers pour VAME
 
-VAME veut un h5 single-animal par session, sans NaN aggressifs, avec les mauvaises prédictions déjà masquées.
+VAME veut un h5 single-animal par session, sans NaN aggressifs, avec les mauvaises prédictions déjà masquées. Selon ce que tu as en entrée à cette étape :
 
-**Bottomview** :
+**Sortie DLC custom (1 animal/vidéo ou voie B multi-animal)** — nettoyage temporel + masking + interpolation :
 
 ```cmd
 python scripts\prepare_vame_input_custom.py --project-dir <...>
@@ -229,7 +241,7 @@ python scripts\prepare_vame_input_custom.py --project-dir <...>
 
 Fait pour chaque session : `dlc.filterpredictions` (median filter temporel) + masking des prédictions à likelihood < 0.3 + interpolation linéaire des trous ≤ 25 frames. Écrit `<session>_clean.h5` à côté du .h5 brut.
 
-**Topview voie A** — split par arène en amont :
+**Sortie DLC multi-animal (voie A)** — split par arène en amont, avant le nettoyage :
 
 ```cmd
 conda activate ethoflow
@@ -526,13 +538,13 @@ default_arenes_coords:
 - `create_project.py` — Init un nouveau projet EthoFlow (dossiers vides + pipeline_config)
 
 **Sync depuis Excel**
-- `sync_from_excel.py` (topview) / `sync_from_excel_bottomview.py` (bottomview) — Excel maître → 1 metadata.yaml par session
-- `patch_captopril.py` (bottomview) — Backfill le champ captopril sans re-syncer
+- `sync_from_excel.py` (schéma multi-animal / vidéo) / `sync_from_excel_bottomview.py` (schéma 1 animal / vidéo) — Excel maître → 1 metadata.yaml par session
+- `patch_captopril.py` — Backfill le champ captopril sans re-syncer (schéma 1 animal / vidéo)
 
-**Topview — préparation**
-- `calibrate_arenes.py` — GUI pour tracer les 4 rectangles d'arène
-- `crop_arenes.py` — Split vidéo brute en 4 vidéos single-animal
-- `assign_arenas.py` — Split .h5 DLC multi-animal en 4 .h5 single-animal par frame
+**Multi-animal par vidéo — préparation**
+- `calibrate_arenes.py` — GUI pour tracer les rectangles d'arène
+- `crop_arenes.py` — Split vidéo brute en N vidéos single-animal (voie B)
+- `assign_arenas.py` — Split .h5 DLC multi-animal en N .h5 single-animal par frame (voie A)
 
 **DLC training** (`scripts/dlc_model-training/`) — top-view ou bottom-view, contrôlé via `_config.py`
 - `_config.py` — Config centralisée (à éditer une fois par projet DLC)
@@ -543,7 +555,7 @@ default_arenes_coords:
 - `run_dlc_inference.py` — Inférence DLC (SuperAnimal ou custom)
 
 **DLC → VAME prep**
-- `prepare_vame_input_custom.py` (bottomview) — filterpredictions + mask + interp → `<session>_clean.h5`
+- `prepare_vame_input_custom.py` — filterpredictions + mask + interp → `<session>_clean.h5` (pour tout .h5 single-animal sorti par modèle custom)
 - `filter_keypoints.py` — Vire les keypoints non fiables (queue distale, etc.)
 - `fill_nan_h5.py` — Impute agressivement les NaN restants
 - `rekey_h5.py` — Re-clé un h5 à la convention VAME (`df_with_missing`)
@@ -617,7 +629,7 @@ Sur 1M+ points UMAP fitté seul-threadé prend >30 min. Le script cape à `--poo
 
 ### VAME plante avec "no such file: cropped/<session>/<session>_A1.mp4"
 
-Sur topview voie B, VAME veut des vidéos croppées. Lance `crop_arenes.py --all` avant `run_vame.py setup`. Sur bottomview, VAME attend `<session>_clean.h5` dans `dlc-output/<session>/` — vérifie que `prepare_vame_input_custom.py` a bien tourné.
+Si tu es en multi-animal voie B, VAME veut des vidéos croppées. Lance `crop_arenes.py --all` avant `run_vame.py setup`. Si tu es en 1 animal / vidéo, VAME attend `<session>_clean.h5` dans `dlc-output/<session>/` — vérifie que `prepare_vame_input_custom.py` a bien tourné.
 
 ### Metadata avec chemins Windows sur machine Linux (ou inversement)
 
