@@ -358,32 +358,45 @@ Un exemple de vidéo qui « fait le job » côté qualité est celui de la publi
 
 Message important : même avec une qualité vidéo moyenne, DLC peut absorber un peu de flou de mouvement **si le training dataset est bon**. Le training dataset est le levier principal, la qualité vidéo est le levier secondaire.
 
-### B.1 — Configurer `_config.py`
+### B.1 — Générer un dossier de config avec le wizard
 
-Édite `scripts/dlc_model-training/_config.py` :
-
-```python
-PROJECT_NAME = "souris-bottomview"        # nom du projet DLC (arbitraire)
-EXPERIMENTER = "labo"                     # ton identifiant (utilisé par DLC dans les noms de fichiers)
-WORKDIR = Path(r"E:\dlc-projects")        # où créer le projet
-PILOT_VIDEO = Path(r"D:\path\to\une_video_representative.mp4")
-SUPERANIMAL_NAME = "superanimal_quadruped"    # ou "superanimal_topviewmouse" pour top-view
-```
-
-`PROJECT_DIR` sera calculé automatiquement à partir de `WORKDIR + PROJECT_NAME + EXPERIMENTER + date`. Tu devras mettre à jour cette variable après le setup (l'étape 01 imprime la vraie valeur).
-
-### B.2 — Setup du projet DLC + extraction de frames
+Plutôt que d'éditer le `_config.py` versionné du repo, le wizard te crée un fichier custom dans un dossier hors du repo. Chaque projet DLC = son propre dossier de config.
 
 ```cmd
 conda activate dlc
-python scripts\dlc_model-training\01_setup_project.py
+python scripts\dlc_model-training\00_init_training_config.py
 ```
 
-Crée un projet DLC vierge + extrait **120 frames par k-means** de la vidéo pilote (paramètre `N_AUTO_FRAMES` dans `_config.py`). K-means garantit une couverture visuelle diversifiée — c'est le premier tiers du training set.
+Le wizard te demande à l'invite : où créer le dossier de config, nom du projet DLC, identifiant expérimentateur, WORKDIR (où DLC créera le projet), chemin de la vidéo pilote, choix SuperAnimal (`quadruped` ou `topviewmouse`), et nombre de frames k-means (défaut 120).
 
-Sortie : `<WORKDIR>\<PROJECT_NAME>-<EXPERIMENTER>-<date>\labeled-data\<video_stem>\img*.png`.
+Résultat : un `_config.py` rempli avec tes valeurs dans le dossier de ton choix (ex : `E:\dlc-training-configs\mon-projet\_config.py`).
 
-**Mets à jour `PROJECT_DIR`** dans `_config.py` avec le vrai nom (avec la date figée par DLC).
+### B.2 — Setup du projet DLC + auto-extraction de frames
+
+```cmd
+python scripts\dlc_model-training\01_setup_project.py ^
+    --config-dir E:\dlc-training-configs\mon-projet
+```
+
+Cette commande fait **tout en une passe** :
+1. Crée le projet DLC dans `WORKDIR\<PROJECT_NAME>-<EXPERIMENTER>-<date>\`
+2. **Auto-patche** le `config.yaml` DLC :
+   - Écrit les 12 bodyparts (`nose`, `left_ear`, `right_ear`, `front_paw_left/right`, `hind_paw_left/right`, `tail_base/mid/tip`, `center`, `left_flank`) — modifiable via `DEFAULT_BODYPARTS` dans `_config.py`
+   - Écrit le skeleton anatomique (12 liaisons) — modifiable via `DEFAULT_SKELETON`
+   - Règle `numframes2pick = 120` (ou la valeur `N_AUTO_FRAMES` de ton config)
+3. Lance `dlc.extract_frames` en mode k-means automatique
+
+**Étape manuelle** après 01 : le nom du projet créé contient la date, il faut mettre à jour `PROJECT_DIR` dans ton `_config.py` avec le vrai nom (le script te l'imprime).
+
+Tous les scripts numérotés 02-06 acceptent le même `--config-dir` :
+
+```cmd
+python scripts\dlc_model-training\02_train.py --config-dir E:\dlc-training-configs\mon-projet
+python scripts\dlc_model-training\03_apply.py --config-dir E:\dlc-training-configs\mon-projet
+:: etc.
+```
+
+Sans `--config-dir`, les scripts retombent sur le template `_config.py` du repo (utile pour tester, pas pour un vrai projet).
 
 ### B.3 — Labellisation manuelle : la stratégie qui compte vraiment
 
@@ -552,8 +565,10 @@ default_arenes_coords:
 - `assign_arenas.py` — Split .h5 DLC multi-animal en N .h5 single-animal par frame (voie A)
 
 **DLC training** (`scripts/dlc_model-training/`) — top-view ou bottom-view, contrôlé via `_config.py`
-- `_config.py` — Config centralisée (à éditer une fois par projet DLC)
-- `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
+- `00_init_training_config.py` — Wizard interactif qui crée un `_config.py` custom dans un dossier hors du repo
+- `_config.py` — Template versionné (défauts + `DEFAULT_BODYPARTS` + `DEFAULT_SKELETON`)
+- `_load_config.py` — Helper commun pour le flag `--config-dir` (partagé par tous les scripts numérotés)
+- `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement, tous acceptent `--config-dir` (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
 - `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent
 
 **DLC inférence**
