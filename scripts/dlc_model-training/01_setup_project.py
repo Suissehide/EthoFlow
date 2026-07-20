@@ -2,7 +2,7 @@
 
 Workflow :
     1. Édite les constantes dans `_config.py` (PILOT_VIDEO, WORKDIR, etc.)
-    2. (env: dlc) python scripts/dlc_bottomview/01_setup_project.py
+    2. (env: dlc) python scripts/dlc_model-training/01_setup_project.py
     3. Édite manuellement le config.yaml généré pour mettre la liste des
        12 bodyparts et le skeleton (voir docs/ETHOFLOW.md §10)
     4. Mets à jour `PROJECT_DIR` dans _config.py avec le nom exact du

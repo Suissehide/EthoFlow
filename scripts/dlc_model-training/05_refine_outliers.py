@@ -37,7 +37,7 @@ Workflow complet :
        pas nécessaire pour cette étape, tu peux passer
        MAKE_LABELED_VIDEO=False le temps de juste produire les .h5.
 
-    3. Lance ce script : python scripts/dlc_bottomview/05_refine_outliers.py
+    3. Lance ce script : python scripts/dlc_model-training/05_refine_outliers.py
        Il appelle extract_outlier_frames pour chaque vidéo.
 
     4. Ouvre la GUI de refinement :
@@ -45,7 +45,7 @@ Workflow complet :
            python
            >>> import deeplabcut as dlc
            >>> import sys
-           >>> sys.path.insert(0, "scripts/dlc_bottomview")
+           >>> sys.path.insert(0, "scripts/dlc_model-training")
            >>> from _config import CONFIG
            >>> dlc.refine_labels(CONFIG)
        Concentre-toi sur les pattes. Pour chaque frame, fais glisser le
@@ -188,7 +188,7 @@ def main() -> None:
         "       python\n"
         "       >>> import deeplabcut as dlc\n"
         "       >>> import sys\n"
-        "       >>> sys.path.insert(0, 'scripts/dlc_bottomview')\n"
+        "       >>> sys.path.insert(0, 'scripts/dlc_model-training')\n"
         "       >>> from _config import CONFIG\n"
         "       >>> dlc.refine_labels(CONFIG)\n"
         "     Corrige les pattes (drag and drop). Ctrl+S régulièrement.\n"
@@ -205,7 +205,7 @@ def main() -> None:
         "         \"<PROJECT_DIR>\\dlc-models-pytorch\"\n"
         "\n"
         "  4. Relance le training :\n"
-        "       python scripts/dlc_bottomview/02_train.py\n"
+        "       python scripts/dlc_model-training/02_train.py\n"
         "\n"
         "  5. Évalue : test rmse_pcutoff doit baisser, et la likelihood\n"
         "     moyenne des pattes doit monter (regarde la vidéo annotée\n"

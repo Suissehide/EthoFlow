@@ -16,12 +16,12 @@ Workflow phase 2 :
      (dlc.check_labels(CONFIG) et inspection visuelle). Si tu as inversé
      L/R sur certaines frames de la vidéo 1, corrige AVANT d'en accumuler
      de nouvelles sur le même biais.
-  4. (env: dlc) python scripts/dlc_bottomview/04_add_videos.py
+  4. (env: dlc) python scripts/dlc_model-training/04_add_videos.py
   5. Labellise les nouvelles frames :
          import deeplabcut as dlc
          from _config import CONFIG
          dlc.label_frames(CONFIG)
-  6. Relance python scripts/dlc_bottomview/02_train.py
+  6. Relance python scripts/dlc_model-training/02_train.py
 
 Ce script :
   - met à jour `numframes2pick` dans le config.yaml DU PROJET DLC pour
@@ -124,13 +124,13 @@ def main() -> None:
         "       python\n"
         "       >>> import deeplabcut as dlc\n"
         "       >>> import sys\n"
-        "       >>> sys.path.insert(0, 'scripts/dlc_bottomview')\n"
+        "       >>> sys.path.insert(0, 'scripts/dlc_model-training')\n"
         "       >>> from _config import CONFIG\n"
         "       >>> dlc.label_frames(CONFIG)\n"
         "  2. Vérifie la convention L/R sur toutes les vidéos (Ctrl+S\n"
         "     régulier pendant la labellisation).\n"
         "  3. Relance le training sur le dataset enrichi :\n"
-        "       python scripts/dlc_bottomview/02_train.py\n"
+        "       python scripts/dlc_model-training/02_train.py\n"
     )
 
 

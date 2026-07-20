@@ -1,6 +1,6 @@
 # Chemin absolu vers le config.yaml du projet DLC custom utilisé en
 # `--mode custom` par run_dlc_inference.py.
-dlc_project_config: E:\DLC\souris-bottomview-Leo-2026-06-05\config.yaml
+dlc_project_config: E:\dlc-projects\souris-bottomview-labo-2026-06-05\config.yaml
 
 
 default_arenes_coords:

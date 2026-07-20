@@ -20,7 +20,7 @@ Usage :
     python scripts/create_project.py \\
         --project-dir D:/ethoflow/projects/bottomview-MCC-2026-06 \\
         --kind bottomview \\
-        --dlc-config "E:/DLC/souris-bottomview-Leo-2026-06-05/config.yaml"
+        --dlc-config "E:/dlc-projects/souris-bottomview-labo-2026-06-05/config.yaml"
 
     # Projet topview (4 souris par vidéo, splitting d'arènes)
     python scripts/create_project.py \\

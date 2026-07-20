@@ -32,7 +32,7 @@ Usage type dans un script CLI :
     sessions = sorted((raw_dir(project)).iterdir())
     out_dir = dlc_output_dir(project) / session_id
 
-Pour les sous-scripts (e.g. scripts/dlc_bottomview/*), insère le dossier
+Pour les sous-scripts (e.g. scripts/dlc_model-training/*), insère le dossier
 parent dans sys.path avant l'import :
 
     import sys

@@ -1,16 +1,15 @@
 # EthoFlow
 
-Pipeline d'analyse comportementale souris à partir de vidéos brutes, basé sur **DeepLabCut** (estimation de pose) et **VAME** (segmentation comportementale non-supervisée). Deux vues supportées :
+Pipeline d'analyse comportementale souris à partir de vidéos brutes, basé sur **DeepLabCut** (estimation de pose) et **VAME** (segmentation comportementale non-supervisée).
 
-- **Topview** — caméra au plafond, 4 souris dans 4 arènes physiquement séparées, 1 vidéo → 4 sessions.
-- **Bottomview** — caméra sous le plancher transparent IR, 1 souris par vidéo, 1 vidéo → 1 session.
+Le pipeline supporte **une vidéo → 1 à 4 sessions**, quel que soit l'angle de prise de vue :
+
+- **Bottomview** (caméra sous plancher transparent IR, 1 souris/vidéo) : 1 vidéo → 1 session, DLC single-animal direct
+- **Topview** (caméra au plafond, 4 souris dans 4 arènes séparées) : 1 vidéo → 4 sessions, soit via DLC multi-animal (SuperAnimal) + split par arène, soit via crop préalable de chaque arène en vidéo single-animal
+
+Le choix entre les deux voies topview se fait via une option CLI (`--mode superanimal` ou crop + `--mode custom`), sans changement de structure de projet.
 
 Le pipeline part d'une acquisition brute (vidéo + Excel des souris) et produit des CSV statistiques, des figures et des vidéos annotées, groupables par n'importe quelle variable expérimentale (génotype, traitement, sexe, etc.).
-
-Ce README couvre deux parcours :
-
-- **[Parcours A](#parcours-a--utiliser-un-modèle-dlc-existant)** — tu as déjà un modèle DLC entraîné (le cas typique en labo : le modèle a été entraîné une fois pour ton setup expérimental et sert pour tous les projets suivants).
-- **[Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc)** — tu montes un nouveau setup expérimental et il faut entraîner un modèle DLC from scratch (ou fine-tuner sur de nouvelles données).
 
 ---
 
@@ -19,12 +18,13 @@ Ce README couvre deux parcours :
 1. [Concepts](#concepts)
 2. [Prérequis machine](#prérequis-machine)
 3. [Installation](#installation-first-time)
-4. [Environnements conda](#environnements-conda-cheat-sheet)
-5. [Parcours A — modèle DLC existant](#parcours-a--utiliser-un-modèle-dlc-existant)
-6. [Parcours B — nouveau modèle DLC](#parcours-b--entraîner-un-nouveau-modèle-dlc)
-7. [Structure d'un projet](#structure-dun-projet)
-8. [Index des scripts](#index-des-scripts)
-9. [Troubleshooting](#troubleshooting)
+4. [Environnements conda](#environnements-conda)
+5. [Parcours pipeline](#parcours-pipeline)
+   - [Étape 0 — bifurcation modèle DLC](#étape-0--bifurcation-modèle-dlc)
+   - [Étapes 1-9 — pipeline principal](#étape-1--créer-un-projet-ethoflow)
+6. [Structure d'un projet](#structure-dun-projet)
+7. [Index des scripts](#index-des-scripts)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -32,13 +32,11 @@ Ce README couvre deux parcours :
 
 **Un projet EthoFlow** = un dossier autonome qui contient les données brutes, les sorties DLC/VAME et la config, pour une expérience donnée. Chaque projet vit à un chemin absolu (ex : `D:\ethoflow\projects\bottomview-MCC-2026-06`) et tous les scripts prennent `--project-dir <chemin>`. Tu peux avoir autant de projets en parallèle que tu veux — ils sont indépendants.
 
-**Une session** = une acquisition (une vidéo + les metadata associées : ID souris, groupe, traitement, date, etc.). Sur bottomview, 1 vidéo = 1 session. Sur topview, 1 vidéo = 4 sessions (une par arène).
+**Une session** = une acquisition (une vidéo + les metadata associées : ID souris, groupe, traitement, date, etc.). Sur bottomview, 1 vidéo = 1 session. Sur topview, 1 vidéo = 4 sessions.
 
-**Un modèle DLC** = un réseau pré-entraîné qui détecte les points anatomiques (nez, oreilles, pattes, queue, etc.) sur chaque frame. Un modèle DLC vit hors du projet EthoFlow (dans `E:\LEO\dlc-projects\souris-bottomview-...` par exemple) et est **réutilisé** entre projets EthoFlow.
+**Un modèle DLC** = un réseau pré-entraîné qui détecte les points anatomiques (nez, oreilles, pattes, queue, etc.). Un modèle DLC vit **hors** du projet EthoFlow (dans `E:\dlc-projects\...` par exemple) et est **réutilisé** entre projets. C'est la partie coûteuse à produire (labellisation manuelle + jour de calcul GPU) et la partie qu'on partage entre expérimentateurs.
 
-**Un modèle VAME** = un VAE entraîné à segmenter les séquences de pose en motifs comportementaux. Contrairement à DLC, VAME s'entraîne **une fois par projet** (parce que sa segmentation dépend des animaux dans le projet).
-
-**Modèle existant vs nouveau modèle** : la partie coûteuse est l'entraînement DLC (labellisation manuelle de plusieurs centaines de frames + jour de calcul GPU). Une fois qu'un modèle DLC est bien entraîné pour ton setup imaging, tu le réutilises pour tous les projets futurs — tu es en Parcours A. Le Parcours B ne se refait que quand tu changes de setup (nouvelle caméra, nouvel angle, nouvelles souris très différentes visuellement).
+**Un modèle VAME** = un VAE entraîné à segmenter les séquences de pose en motifs comportementaux. Contrairement à DLC, VAME s'entraîne **une fois par projet** — sa segmentation dépend des animaux qui sont dedans.
 
 ---
 
@@ -90,36 +88,39 @@ python -c "import vame; print(vame.__version__)"
 
 ---
 
-## Environnements conda — cheat sheet
+## Environnements conda
 
-| Env | À quoi ça sert | Requis pour |
-|---|---|---|
-| `ethoflow` (env-pipeline) | Utilitaires légers (pandas, PyYAML, ffmpeg, streamlit, openpyxl) | Sync depuis Excel, orchestrateur `run_pipeline.py`, app Streamlit |
-| `dlc` (env-dlc) | DeepLabCut 3.x + PyTorch | Inférence DLC, entraînement DLC, GUI de labellisation |
-| `vame` (env-vame) | VAME + scipy/matplotlib/UMAP | Setup/train/segment VAME, analyses, visualisations |
-
-**L'env `ethoflow` est-il indispensable ?** Oui pour deux usages :
-- **Application Streamlit** (`streamlit run streamlit_app/app.py`) — c'est l'unique env qui contient streamlit.
-- **`run_pipeline.py`** — l'orchestrateur enchaîne DLC → VAME en appelant `conda run -n <env>` entre les étapes ; il tourne lui-même depuis `ethoflow`.
-
-Pour un usage purement CLI script-par-script (ce que fait ce README), tu peux techniquement t'en passer : `sync_from_excel*.py` marche depuis l'env `vame` puisqu'il n'utilise que pandas/pyyaml/openpyxl. Mais garder les 3 envs séparés reste la manière propre de bosser (pas de risque de collision de dépendances).
+| Env | À quoi ça sert |
+|---|---|
+| `ethoflow` (env-pipeline) | Sert principalement à faire tourner l'app Streamlit (`streamlit run streamlit_app/app.py`) et l'orchestrateur `run_pipeline.py` |
+| `dlc` (env-dlc) | DeepLabCut 3.x + PyTorch — inférence, entraînement, GUI de labellisation |
+| `vame` (env-vame) | VAME + scipy/matplotlib/UMAP — setup/train/segment VAME, analyses, visualisations |
 
 ---
 
-## Parcours A — utiliser un modèle DLC existant
+## Parcours pipeline
 
-**Contexte** : ton labo (ou toi précédemment) a déjà entraîné un modèle DLC pour ton setup imaging. Tu as un dossier de projet DLC quelque part (ex : `E:\LEO\dlc-projects\souris-bottomview-Leo-2026-06-05\`) qui contient un `config.yaml`. Tu veux traiter un nouveau batch d'acquisitions.
+Un seul parcours de bout en bout, avec **une seule bifurcation** au début : soit tu as déjà un modèle DLC utilisable, soit tu dois l'entraîner. Après cette bifurcation, la suite est identique.
 
-Ce parcours prend 30 min à 2h par session selon la longueur des vidéos.
+### Étape 0 — bifurcation modèle DLC
 
-### A.1 — Créer un nouveau projet EthoFlow
+**As-tu déjà un modèle DLC entraîné pour ton setup imaging ?**
+
+- **Oui** → tu as un dossier `E:\dlc-projects\<nom_projet>\` avec un `config.yaml` dedans, produit par ton labo ou une expérience précédente. Passe directement à l'**[Étape 1](#étape-1--créer-un-projet-ethoflow)**.
+- **Non** → suis d'abord le [Parcours B — entraîner un nouveau modèle DLC](#parcours-b--entraîner-un-nouveau-modèle-dlc) tout en bas, qui produit ce fameux `config.yaml`. Puis reviens à l'**Étape 1**.
+
+Le même modèle DLC entraîné une fois est réutilisé pour tous les projets EthoFlow futurs qui partagent le même setup imaging.
+
+---
+
+### Étape 1 — créer un projet EthoFlow
 
 ```cmd
 conda activate ethoflow
 python scripts\create_project.py ^
     --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 ^
     --kind bottomview ^
-    --dlc-config "E:\LEO\dlc-projects\souris-bottomview-Leo-2026-06-05\config.yaml"
+    --dlc-config "E:\dlc-projects\souris-bottomview-labo-2026-06-05\config.yaml"
 ```
 
 Options :
@@ -128,7 +129,7 @@ Options :
 
 Résultat : arborescence vide + `configs/pipeline_config.yaml` qui pointe vers ton config DLC.
 
-### A.2 — Préparer ton Excel de sessions
+### Étape 2 — préparer l'Excel de sessions
 
 Le pipeline lit un Excel maître qui décrit tes souris. Le schéma diffère topview / bottomview :
 
@@ -143,7 +144,7 @@ Le pipeline lit un Excel maître qui décrit tes souris. Le schéma diffère top
 
 **Topview** (feuilles `Trials_Videos` + `Subjects` + `Arena_Mapping`) — voir `configs/metadata_template.yaml` pour un exemple.
 
-### A.3 — Sync des sessions depuis l'Excel
+### Étape 3 — sync des sessions
 
 **Bottomview** :
 
@@ -167,22 +168,48 @@ python scripts\sync_from_excel.py ^
 
 Résultat dans les deux cas : un `metadata.yaml` par session dans `data/raw/<session_id>/`. Vérifie qu'au moins un fichier contient `source_video:` avec un chemin qui existe.
 
-### A.4 — Inférence DLC
+### Étape 4 — (topview seulement) crop optionnel des arènes
 
-Sur bottomview (modèle custom déjà pointé dans pipeline_config) :
+Sur topview, tu as deux options équivalentes pour arriver aux .h5 single-animal :
+
+- **Voie A — DLC multi-animal + split** : lance DLC directement sur la vidéo entière, puis split la sortie multi-animal en 4 par arène (via `assign_arenas.py`). Plus rapide au global.
+- **Voie B — crop puis DLC single-animal** : découpe d'abord la vidéo en 4 vidéos single-animal (via `crop_arenes.py`), puis lance DLC en mode single-animal sur chacune. Sortie plus propre, indispensable si tu veux **labelliser** des frames pour améliorer le modèle.
+
+Pour la voie B (crop) :
+
+```cmd
+:: (Une seule fois par setup) trace les 4 rectangles d'arène si pas déjà fait
+python scripts\calibrate_arenes.py --project-dir <...>
+
+:: Ensuite crop de toutes les sessions
+python scripts\crop_arenes.py --project-dir <...> --all
+```
+
+Sur bottomview, cette étape n'existe pas — passe directement à l'étape 5.
+
+### Étape 5 — inférence DLC
+
+**Bottomview** (modèle custom déjà pointé dans pipeline_config) :
 
 ```cmd
 conda activate dlc
 python scripts\run_dlc_inference.py --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 --all --mode custom
 ```
 
-Sur topview (modèle SuperAnimal multi-animal par défaut) :
+**Topview voie A** (DLC multi-animal SuperAnimal, défaut) :
 
 ```cmd
-python scripts\run_dlc_inference.py --project-dir D:\ethoflow\projects\openfield-M1-2025-10 --all
+python scripts\run_dlc_inference.py --project-dir <...> --all
 ```
 
-Options utiles :
+**Topview voie B** (single-animal sur vidéos croppées) :
+
+```cmd
+python scripts\run_dlc_inference.py --project-dir <...> --all --mode single-animal ^
+    --video-adapt --video-adapt-batch-size 2
+```
+
+Options utiles pour toutes les voies :
 - `--all` — traite toutes les sessions non encore traitées
 - `<session_id>` en argument positionnel — cible une session précise
 - `--video-adapt` sur des vidéos assez différentes du training set → adapte le modèle sur les statistiques de tes vidéos (lent mais améliore la précision)
@@ -190,29 +217,28 @@ Options utiles :
 
 Sortie : `data/dlc-output/<session>/<hash>.h5` + éventuellement `_labeled.mp4`.
 
-### A.5 — Préparer les fichiers pour VAME
+### Étape 6 — préparer les fichiers pour VAME
 
 VAME veut un h5 single-animal par session, sans NaN aggressifs, avec les mauvaises prédictions déjà masquées.
 
-**Bottomview** — pipeline complet en une commande :
+**Bottomview** :
 
 ```cmd
-python scripts\prepare_vame_input_custom.py ^
-    --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06
+python scripts\prepare_vame_input_custom.py --project-dir <...>
 ```
 
-Ça fait pour chaque session : `dlc.filterpredictions` (median filter temporel) + masking des prédictions à likelihood < 0.3 + interpolation linéaire des trous ≤ 25 frames. Écrit `<session>_clean.h5` à côté du .h5 brut.
+Fait pour chaque session : `dlc.filterpredictions` (median filter temporel) + masking des prédictions à likelihood < 0.3 + interpolation linéaire des trous ≤ 25 frames. Écrit `<session>_clean.h5` à côté du .h5 brut.
 
-**Topview** — étape supplémentaire de split par arène :
+**Topview voie A** — split par arène en amont :
 
 ```cmd
 conda activate ethoflow
 python scripts\assign_arenas.py --project-dir <...> --all
 ```
 
-Puis éventuellement `fill_nan_h5.py` pour remplir les trous résiduels si VAME râle.
+Puis éventuellement `fill_nan_h5.py --root <project>/data/dlc-output` pour remplir les trous résiduels si VAME râle.
 
-### A.6 — Setup + train + segment VAME
+### Étape 7 — setup + train + segment VAME
 
 VAME s'entraîne **une fois par projet** (le VAE apprend la structure des poses de tes souris). Compte 3-8h sur GPU pour l'entraînement.
 
@@ -221,9 +247,9 @@ conda activate vame
 cd D:\EthoFlow
 
 :: 1. Init du projet VAME dans <project>/data/vame/
-python scripts\run_vame.py --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 setup
+python scripts\run_vame.py --project-dir <...> setup
 
-:: 2. Alignement égocentrique des poses (rotation/translation pour recentrer la souris)
+:: 2. Alignement égocentrique des poses (rotation/translation pour recentrer)
 python scripts\run_vame.py --project-dir <...> align
 
 :: 3. Construction du trainset
@@ -241,11 +267,11 @@ python scripts\run_vame.py --project-dir <...> segment
 
 Sortie : `data/vame/results/<session>/<model>/hmm-15/15_hmm_label_<session>.npy` (1 label motif par frame).
 
-### A.7 — Labelliser les motifs à la main
+### Étape 8 — labelliser les motifs à la main
 
 VAME te donne 15 motifs numérotés 0-14. Il faut les nommer et les catégoriser. Deux options :
 
-- **Générer les vidéos par motif** — 30-60 clips de 10s pour chaque motif, tirés des sessions :
+- **Générer les vidéos par motif** — 30-60 clips de 10s pour chaque motif :
   ```cmd
   python scripts\run_vame.py --project-dir <...> motif-videos
   ```
@@ -261,12 +287,12 @@ VAME te donne 15 motifs numérotés 0-14. Il faut les nommer et les catégoriser
 
 Ce CSV est lu par toutes les analyses en aval. Sans lui, les figures affichent `motif_0`, `motif_1`, etc.
 
-### A.8 — Analyses statistiques
+### Étape 9 — analyses + visualisations
 
 ```cmd
-python scripts\analyze_vame.py --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06
+python scripts\analyze_vame.py --project-dir <...>
 
-:: Analyses étendues (transitions, bouts, spatial, temporal quarters)
+:: Analyses étendues (bouts, spatial, temporal quarters)
 python scripts\analyze_vame.py --project-dir <...> --extended --extended-by group4
 ```
 
@@ -278,7 +304,7 @@ Sortie dans `data/vame/analysis/` :
 
 Les stats utilisent Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3 groupes) avec correction Benjamini-Hochberg.
 
-### A.9 — Visualisations (optionnel mais parlant pour figures/posters)
+**Visualisations optionnelles** (parlant pour figures/posters) :
 
 ```cmd
 :: GIF avec bande de motif color-codée sous la vidéo
@@ -297,21 +323,34 @@ python scripts\community_dendrogram.py --project-dir <...> --group MCCiECKO
 
 ## Parcours B — entraîner un nouveau modèle DLC
 
-**Contexte** : tu changes de setup imaging (nouvel angle, nouvelle caméra, nouvelles souris visuellement différentes) et le modèle DLC actuel ne marche plus. Ou tu démarres depuis zéro.
+**À ne faire qu'une fois par setup imaging** (nouvel angle de caméra, nouvel éclairage, nouvelles souris visuellement différentes, ou tout simplement premier setup jamais monté). Compte 1-2 semaines de travail effectif étalé (labellisation manuelle + itérations).
 
-Compte 1-2 semaines de travail réparti : labellisation manuelle (~1 jour effectif), entraînement (~1 nuit), itérations d'amélioration (~3-5 rounds étalés sur plusieurs jours).
+Les scripts vivent dans `scripts/dlc_model-training/` et sont numérotés **01 → 06** dans l'ordre d'exécution. Ils utilisent un fichier de config centralisé (`_config.py`) que tu édites une fois pour toutes. Le workflow marche pour top-view comme pour bottom-view — le seul paramètre à ajuster est `SUPERANIMAL_NAME` (`superanimal_quadruped` pour bottom-view, `superanimal_topviewmouse` pour top-view classique).
 
-Les scripts de ce parcours vivent dans `scripts/dlc_bottomview/` et sont **numérotés 01 → 06** dans l'ordre d'exécution. Ils utilisent un fichier de config centralisé (`_config.py`) que tu édites une fois pour toutes.
+### B.0 — Recommandations qualité vidéo (avant de labelliser quoi que ce soit)
+
+Ces recommandations viennent de l'équipe VAME/LIN (Tony) suite à un review d'une acquisition problématique. À vérifier **avant** l'acquisition finale du dataset qui servira au training.
+
+**Exposure time** — viser ~10 ms, idéalement 5 ms ou moins. Dépendant du couple caméra + éclairage IR. À adjuster indépendamment du framerate (rester à 30 fps est OK, l'exposition contrôle le flou de mouvement).
+
+**Netteté** — vérifier que l'image est bien focus. Un léger défocus (fréquent avec les lentilles bas prix) dégrade beaucoup les prédictions DLC, plus qu'on ne le pense en regardant l'image à l'œil nu.
+
+**Éclairage homogène** — utiliser **plusieurs sources IR** disposées autour de l'arène, pas une seule LED en haut. Le but est que les pattes soient éclairées en permanence, y compris quand le corps de la souris bloquerait une source unique.
+
+Un exemple de vidéo qui « fait le job » côté qualité est celui de la publication [LIN Peters et al. 2023, Neuron](https://www.sciencedirect.com/science/article/pii/S0896627323009753) — c'est la cible.
+
+Message important : même avec une qualité vidéo moyenne, DLC peut absorber un peu de flou de mouvement **si le training dataset est bon**. Le training dataset est le levier principal, la qualité vidéo est le levier secondaire.
 
 ### B.1 — Configurer `_config.py`
 
-Édite `scripts/dlc_bottomview/_config.py` :
+Édite `scripts/dlc_model-training/_config.py` :
 
 ```python
 PROJECT_NAME = "souris-bottomview"        # nom du projet DLC (arbitraire)
-EXPERIMENTER = "Leo"                       # ton prénom
-WORKDIR = Path(r"E:\LEO\dlc-projects")     # où créer le projet
+EXPERIMENTER = "labo"                     # ton identifiant (utilisé par DLC dans les noms de fichiers)
+WORKDIR = Path(r"E:\dlc-projects")        # où créer le projet
 PILOT_VIDEO = Path(r"D:\path\to\une_video_representative.mp4")
+SUPERANIMAL_NAME = "superanimal_quadruped"    # ou "superanimal_topviewmouse" pour top-view
 ```
 
 `PROJECT_DIR` sera calculé automatiquement à partir de `WORKDIR + PROJECT_NAME + EXPERIMENTER + date`. Tu devras mettre à jour cette variable après le setup (l'étape 01 imprime la vraie valeur).
@@ -320,85 +359,110 @@ PILOT_VIDEO = Path(r"D:\path\to\une_video_representative.mp4")
 
 ```cmd
 conda activate dlc
-python scripts\dlc_bottomview\01_setup_project.py
+python scripts\dlc_model-training\01_setup_project.py
 ```
 
-Crée un projet DLC vierge + extrait 60 frames de la vidéo pilote via k-means (frames visuellement diverses). Sortie : `<WORKDIR>\<PROJECT_NAME>-<EXPERIMENTER>-<date>\labeled-data\<video_stem>\img*.png`.
+Crée un projet DLC vierge + extrait **120 frames par k-means** de la vidéo pilote (paramètre `N_AUTO_FRAMES` dans `_config.py`). K-means garantit une couverture visuelle diversifiée — c'est le premier tiers du training set.
 
-**Mets à jour `PROJECT_DIR`** dans `_config.py` avec le vrai nom (avec la date).
+Sortie : `<WORKDIR>\<PROJECT_NAME>-<EXPERIMENTER>-<date>\labeled-data\<video_stem>\img*.png`.
 
-### B.3 — Labellisation manuelle (GUI)
+**Mets à jour `PROJECT_DIR`** dans `_config.py` avec le vrai nom (avec la date figée par DLC).
+
+### B.3 — Labellisation manuelle : la stratégie qui compte vraiment
+
+C'est **la** phase qui détermine la qualité finale du modèle. Recommandations Tony/LIN pour un premier entraînement propre :
+
+**Cible : 200-300 frames labellisées au total** pour la première passe complète. Répartition :
+
+- **100-150 frames par k-means** (déjà extraites par 01) — couverture visuelle générale
+- **50-150 frames sélectionnées manuellement** dans les vidéos disponibles, avec la stratégie ci-dessous
+
+**Répartition des frames manuelles** :
+
+- **15-20 %** sur des situations « faciles » : locomotion normale, pattes visibles, pas de rearing, difficulté faible à moyenne. Ces frames incluent typiquement des pattes floues — c'est normal et attendu.
+- **80-85 %** sur les situations **les plus difficiles** : celles où toi-même hésites sur la position exacte du keypoint. Rearing, occlusions partielles, pattes qui sortent/rentrent sous le corps, ambiguïtés gauche/droite. **C'est là que le modèle a besoin d'exemples**, pas dans les cas triviaux qu'il apprend immédiatement.
+
+**Stratégie de labellisation cohérente** :
+
+- Fixe-toi une règle claire pour les cas ambigus et applique-la partout. Ex : « pour une patte floue en mouvement, je marque toujours le centre du flou » ou « pour une patte partiellement cachée, je marque la position estimée du carpe même si non visible ».
+- **Capture la directionalité** : si tu labellises un rearing vers la gauche avec la patte gauche visible, prends aussi un rearing vers la droite avec la patte droite visible. Sinon le modèle apprend un biais latéral.
+- Attention : une **situation difficile en temps réel se décompose en plusieurs frames difficiles distinctes** frame-par-frame. Un rearing de 2 secondes = 60 frames, dont peut-être 15 vraiment ambiguës à labelliser une par une avec la même règle.
+
+**Lancer la GUI DLC** :
 
 ```cmd
 python -c "import deeplabcut; deeplabcut.launch_dlc()"
 ```
 
-Ouvre la GUI DLC → charge ton `config.yaml` → onglet "Label Frames". Pour chaque frame extraite, place les 12 keypoints définis dans `_config.py` (nose, ears, front paws L/R, hind paws L/R, tail base/mid/tip, center, left flank). Compte ~1 min par frame → **~1h pour 60 frames**.
+Ouvre ton `config.yaml` → onglet « Label Frames ». Compte ~1 min par frame → **3-5h pour 200-300 frames** en labellisation soigneuse.
 
-Points d'attention :
-- Sois cohérent avec toi-même sur la définition (« left front paw » = celle qui touche le sol si visible)
-- Marque les points **non visibles** en cliquant droit → « invisible »
-- Sauve régulièrement
-
-### B.4 — Entraînement
+### B.4 — Premier entraînement
 
 ```cmd
-python scripts\dlc_bottomview\02_train.py
+python scripts\dlc_model-training\02_train.py
 ```
 
-Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 50 epochs. Compte **~2-6h sur GPU 16GB**.
+Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 50 epochs. Compte **~2-6h sur GPU 16 GB**.
 
-Détail important : `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w32"` sinon size mismatch au chargement des poids pré-entraînés.
+Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
+
+Détail technique : `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w32"` sinon size mismatch au chargement des poids pré-entraînés.
 
 ### B.5 — Appliquer et QC visuel
 
 ```cmd
-python scripts\dlc_bottomview\03_apply.py
+python scripts\dlc_model-training\03_apply.py
 ```
 
-Lance l'inférence sur la vidéo pilote + produit une vidéo annotée à `pcutoff=0.6`. Regarde `<PROJECT_DIR>\result-videos\<stem>\<stem>DLC*_labeled.mp4` — tu dois voir les 12 points suivre la souris correctement.
+Lance l'inférence sur la vidéo pilote + produit une vidéo annotée à `pcutoff=0.6`. Regarde `<PROJECT_DIR>\result-videos\<stem>\<stem>DLC*_labeled.mp4` — tu dois voir les 12 points suivre la souris correctement dans les cas normaux.
 
 Pour voir toutes les prédictions même de basse confiance (utile pour diagnostiquer où le modèle échoue) :
 
 ```cmd
-python scripts\dlc_bottomview\create_labeled_video.py --pcutoff 0.3
+python scripts\dlc_model-training\create_labeled_video.py --pcutoff 0.3
 ```
 
-### B.6 — Itérations pour améliorer la précision
+Lecture clé — recommandation Tony : à `pcutoff=0.3`, un keypoint peut être **au bon endroit** même à basse confiance. La « confiance » exprime la ressemblance avec le training set : sur un modèle bien entraîné, une confiance à 30 % peut simplement signifier « la patte est floue mais c'est bien la patte, y'a rien d'autre qui lui ressemble dans l'image ». Le vrai problème apparaît quand **plusieurs zones de l'image ont une ressemblance similaire** : le modèle switche entre elles → jitter, télé-portations gauche/droite. C'est ce switch qui trahit un training set incomplet.
 
-Trois scripts d'itération à lancer dans l'ordre selon les besoins :
+### B.6 — Itérations d'amélioration (extraction d'outliers manuelle)
 
-**B.6.a — Ajouter des vidéos d'autres souris** (couvre la variance inter-individu) :
+Après avoir regardé la vidéo annotée à `pcutoff=0.3` :
+
+Recommandation Tony : **extraire les frames à re-labelliser MANUELLEMENT**, pas via l'auto-detect de DLC. Le vrai gain vient du fait que tu vois exactement où le modèle échoue et que tu choisis les 50-100 frames les plus informatives par situation problématique.
+
+Workflow d'itération :
+
+1. **Regarde toutes tes vidéos analysées** en priorité (pas seulement la pilote). Identifie les patterns d'échec : « les pattes ratent quand elle grimpe le long du mur », « L/R switch pendant les demi-tours rapides », « rearing avec deux pattes cachées mal résolu ».
+2. **Pour chaque pattern d'échec**, décide de combien de frames tu vas dédier. Tony suggère **50-100 nouvelles frames par situation problématique** (au-delà, rendement décroissant).
+3. **Sélectionne les frames à la main** dans les vidéos, extrais-les via DLC GUI (« Extract Frames » → « Manual »).
+4. **Labellise-les** avec la même règle cohérente qu'à B.3.
+5. **Relance l'entraînement** (`02_train.py`) — **important : depuis le snapshot précédent, pas from scratch**. DLC le fait par défaut si tu ne changes pas d'`iteration` dans la config.
+
+Le script `05_refine_outliers.py` reste dispo comme béquille pour attraper les cas évidents (frames à basse likelihood avec `OUTLIER_ALGORITHM = "uncertain"`), mais **le vrai levier c'est la passe manuelle**. Utilise-le comme premier passage rapide, puis fais ta propre sélection en complément.
+
+### B.7 — Étendre à plusieurs souris (couverture inter-individu)
+
+Recommandation Tony : « prendre autant d'animaux différents que possible » dans le training set. L'objectif est de présenter au réseau la plus large variété de situations possibles.
 
 Édite `ADDITIONAL_VIDEOS` dans `_config.py`, puis :
 
 ```cmd
-python scripts\dlc_bottomview\04_add_videos.py
+python scripts\dlc_model-training\04_add_videos.py
 ```
 
-Extrait 20 frames de chacune, tu les labellises dans la GUI, tu relances `02_train.py`.
+Extrait 20 frames par nouvelle vidéo (k-means). Labellise dans la GUI, relance `02_train.py`. En viser 6-10 souris différentes dans le training set final si tu as ~40 animaux à analyser.
 
-**B.6.b — Extraire les outliers du modèle** (frames où le modèle échoue) :
-
-Édite `TRAINING_VIDEOS_FOR_REFINE` dans `_config.py`, puis :
+### B.8 — Vérifier les inversions gauche/droite
 
 ```cmd
-python scripts\dlc_bottomview\05_refine_outliers.py
+python scripts\dlc_model-training\06_check_labels.py
 ```
 
-Utilise `OUTLIER_ALGORITHM = "jump"` (attrape les frames avec sauts inter-frame anormaux) ou `"uncertain"` (frames à low likelihood, idéal pour cibler les pattes occultées à leur émergence). Extrait 30 frames par vidéo. Re-labellise dans la GUI, relance `02_train.py`.
+Audit géométrique qui détecte les frames où left/right paws ont probablement été inversées par erreur pendant la labellisation manuelle. Utile après plusieurs rounds.
 
-**B.6.c — Vérifier les inversions gauche/droite** :
+### B.9 — Enregistrer le modèle final
 
-```cmd
-python scripts\dlc_bottomview\06_check_labels.py
-```
-
-Audit géométrique qui détecte les frames où left/right paws ont probablement été inversées par erreur. Utile après plusieurs rounds de labellisation manuelle.
-
-### B.7 — Enregistrer le modèle final dans un projet EthoFlow
-
-Une fois satisfait de la précision, ton modèle DLC est à `<PROJECT_DIR>\config.yaml`. Depuis là, **tu es en Parcours A** : crée un projet EthoFlow avec `create_project.py --dlc-config <ce chemin>` et enchaîne les étapes A.2 à A.9.
+Une fois satisfait de la précision, ton modèle DLC est à `<PROJECT_DIR>\config.yaml`. Depuis là, **tu es à l'Étape 1 du parcours principal** : crée un projet EthoFlow avec `create_project.py --dlc-config <ce chemin>` et enchaîne les étapes 2 à 9.
 
 Le même modèle DLC peut être pointé par plusieurs projets EthoFlow (batches différents, mois différents, etc.).
 
@@ -444,7 +508,7 @@ D:\ethoflow\projects\<nom_projet>\
 
 ```yaml
 # Bottomview
-dlc_project_config: E:\LEO\dlc-projects\souris-bottomview-Leo-2026-06-05\config.yaml
+dlc_project_config: E:\dlc-projects\souris-bottomview-labo-2026-06-05\config.yaml
 
 # Topview (en plus)
 default_arenes_coords:
@@ -470,8 +534,8 @@ default_arenes_coords:
 - `crop_arenes.py` — Split vidéo brute en 4 vidéos single-animal
 - `assign_arenas.py` — Split .h5 DLC multi-animal en 4 .h5 single-animal par frame
 
-**DLC training bottomview** (`scripts/dlc_bottomview/`)
-- `_config.py` — Config centralisée (à éditer une fois)
+**DLC training** (`scripts/dlc_model-training/`) — top-view ou bottom-view, contrôlé via `_config.py`
+- `_config.py` — Config centralisée (à éditer une fois par projet DLC)
 - `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
 - `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent
 
@@ -549,15 +613,15 @@ python scripts\behavior_structure_gif.py ... --source-video "D:\autre\chemin\970
 
 ### Rendu `behavior_structure_gif` bloqué en mode `--pool-all-sessions`
 
-Sur 1M+ points UMAP fitté seul-threadé prend >30 min. Solution : le script cape à `--pool-max-frames 300000` par défaut et UMAP tourne en parallèle. Si tu vois toujours des ralentissements, réduis `--background-max-points 30000` pour un rendu final plus rapide.
+Sur 1M+ points UMAP fitté seul-threadé prend >30 min. Le script cape à `--pool-max-frames 300000` par défaut et UMAP tourne en parallèle. Si tu vois toujours des ralentissements, réduis `--background-max-points 30000` pour un rendu final plus rapide.
 
 ### VAME plante avec "no such file: cropped/<session>/<session>_A1.mp4"
 
-Sur topview, VAME veut des vidéos croppées. Lance `crop_arenes.py --all` avant `run_vame.py setup`. Sur bottomview, VAME attend `<session>_clean.h5` dans `dlc-output/<session>/` — vérifie que `prepare_vame_input_custom.py` a bien tourné.
+Sur topview voie B, VAME veut des vidéos croppées. Lance `crop_arenes.py --all` avant `run_vame.py setup`. Sur bottomview, VAME attend `<session>_clean.h5` dans `dlc-output/<session>/` — vérifie que `prepare_vame_input_custom.py` a bien tourné.
 
 ### Metadata avec chemins Windows sur machine Linux (ou inversement)
 
-Les `source_video:` dans metadata.yaml sont des chemins absolus. Si tu migres un projet entre machines, patchse-les avec un `find + replace` :
+Les `source_video:` dans metadata.yaml sont des chemins absolus. Si tu migres un projet entre machines, patch-les avec un `find + replace` :
 
 ```powershell
 Get-ChildItem -Recurse -Filter metadata.yaml | ForEach-Object {
@@ -571,7 +635,8 @@ Get-ChildItem -Recurse -Filter metadata.yaml | ForEach-Object {
 
 - DeepLabCut : https://deeplabcut.github.io/DeepLabCut/
 - VAME : https://github.com/LINCellularNeuroscience/VAME
-- SuperAnimal Quadruped (transfer learning base pour bottomview) : https://deeplabcut.github.io/DeepLabCut/docs/ModelZoo.html
+- SuperAnimal Quadruped (transfer learning base) : https://deeplabcut.github.io/DeepLabCut/docs/ModelZoo.html
+- Publication référence LIN (qualité vidéo cible) : https://www.sciencedirect.com/science/article/pii/S0896627323009753
 
 ---
 

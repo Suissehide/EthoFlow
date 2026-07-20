@@ -38,7 +38,7 @@ Pré-requis :
     - conda activate dlc
 
 Workflow :
-    1. python scripts/dlc_bottomview/06_check_labels.py
+    1. python scripts/dlc_model-training/06_check_labels.py
     2. Inspecte les top frames suspectes via les PNG dans
        labeled-data/<video>_labeled/.
     3. Re-labellise les erreurs via Project Manager.
@@ -114,9 +114,16 @@ def main() -> None:
     for vdir in sorted((PROJECT_DIR / "labeled-data").iterdir()):
         if not vdir.is_dir() or vdir.name.endswith("_labeled"):
             continue
-        h5 = vdir / "CollectedData_Leo.h5"
+        # DLC nomme le fichier de labels manuels CollectedData_<EXPERIMENTER>.h5
+        # → cherche celui qui matche notre config, sinon le premier disponible
+        # (utile si tu as repris un projet DLC créé par quelqu'un d'autre).
+        from _config import EXPERIMENTER
+        h5 = vdir / f"CollectedData_{EXPERIMENTER}.h5"
         if not h5.exists():
-            continue
+            fallback = sorted(vdir.glob("CollectedData_*.h5"))
+            if not fallback:
+                continue
+            h5 = fallback[0]
 
         df = pd.read_hdf(h5)
         scorer = df.columns.get_level_values("scorer")[0]
@@ -246,7 +253,7 @@ def main() -> None:
         "     Remove-Item -Recurse -Force\n"
         "       \"<PROJECT_DIR>\\dlc-models-pytorch\"\n"
         "\n"
-        "5. python scripts\\dlc_bottomview\\02_train.py\n"
+        "5. python scripts\\dlc_model-training\\02_train.py\n"
     )
 
 

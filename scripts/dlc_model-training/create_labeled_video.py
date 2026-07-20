@@ -16,12 +16,12 @@ pour pcutoff=0.1), donc les versions à plusieurs seuils cohabitent dans le
 même dossier sans s'écraser.
 
 Usage :
-    python scripts/dlc_bottomview/create_labeled_video.py --pcutoff 0.1
-    python scripts/dlc_bottomview/create_labeled_video.py --pcutoff 0.4
-    python scripts/dlc_bottomview/create_labeled_video.py --pcutoff 0.6
+    python scripts/dlc_model-training/create_labeled_video.py --pcutoff 0.1
+    python scripts/dlc_model-training/create_labeled_video.py --pcutoff 0.4
+    python scripts/dlc_model-training/create_labeled_video.py --pcutoff 0.6
 
     # Vidéo spécifique (sinon toutes les VIDEOS_TO_ANALYZE de _config.py) :
-    python scripts/dlc_bottomview/create_labeled_video.py \
+    python scripts/dlc_model-training/create_labeled_video.py \
         --pcutoff 0.1 --video "D:/chemin/autre_video.mp4"
 
 Pré-requis :
