@@ -140,6 +140,17 @@ Options :
 
 Choisis en fonction du nombre d'animaux par vidéo, pas de l'angle caméra. Pour un projet bottom-view avec 4 souris dans 4 arènes séparées, prends `--kind multi` puis ajuste les `default_arenes_coords` avec `calibrate_arenes.py`.
 
+**Ce que ça produit** :
+
+```
+D:\ethoflow\projects\bottomview-MCC-2026-06\
+├── configs\pipeline_config.yaml       ← pointeur DLC + éventuelles coords
+├── data\{raw,cropped,dlc-output,vame,results}\    ← dossiers vides prêts
+└── bottomview-MCC-2026-06_sessions.xlsx           ← starter Excel auto-généré
+```
+
+Le starter Excel contient un onglet **Instructions** avec le mode d'emploi + les onglets de données adaptés au kind (1 seule feuille `Sessions` pour `single`, 3 feuilles `Subjects` + `Trials_Videos` + `Arena_Mapping` pour `multi`). Ouvre-le, remplace les 2-3 lignes d'exemple grisées par tes vraies souris, sauvegarde.
+
 Ce que le script crée automatiquement dans le dossier du projet :
 
 - Une **arborescence vide** `data/{raw,cropped,dlc-output,vame,results}` + `configs/`
