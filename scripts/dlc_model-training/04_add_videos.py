@@ -1,35 +1,36 @@
-"""Ajoute des vidéos supplémentaires au projet DLC (phase 2 cross-mouse).
+"""Ajoute des vidéos supplémentaires au projet DLC (phase cross-mouse).
 
 But : enrichir le dataset d'entraînement avec d'autres souris pour que le
-modèle apprenne à généraliser. Sur un seul pilote de 60 frames, DLC tend
-à mémoriser des features parasites du décor (coins, reflets IR fixes…)
-parce que tout l'arrière-plan est identique d'une frame à l'autre. Avec
-4-6 souris différentes en plus, les éléments parasites changent ou
-disparaissent et le modèle est forcé d'apprendre la silhouette de la
-souris elle-même.
+modèle apprenne à généraliser. Sur un seul pilote, DLC tend à mémoriser
+des features parasites du décor (coins, reflets IR fixes…) parce que
+l'arrière-plan est identique d'une frame à l'autre. En ajoutant des
+souris différentes, les éléments parasites changent ou disparaissent et
+le modèle est forcé d'apprendre la silhouette de la souris elle-même.
 
-Workflow phase 2 :
+Recommandation Tony (VAME/LIN) : « prendre autant d'animaux différents
+que possible ». L'objectif est la plus large variété de situations
+possible. Sur un projet à ~40 souris, viser 6-10 animaux distincts dans
+le training set final. Sur un dataset plus petit, ratisse plus large.
 
-  1. Édite ADDITIONAL_VIDEOS dans _config.py avec les nouvelles vidéos.
-  2. (Optionnel) règle NEW_VIDEO_FRAMES dans _config.py (défaut 20).
+Workflow :
+
+  1. Édite ADDITIONAL_VIDEOS dans ton _config.py avec les nouvelles vidéos.
+  2. (Optionnel) règle NEW_VIDEO_FRAMES (défaut 20, k-means par vidéo).
   3. AVANT de labelliser : vérifie ta convention L/R sur la vidéo pilote
-     (dlc.check_labels(CONFIG) et inspection visuelle). Si tu as inversé
-     L/R sur certaines frames de la vidéo 1, corrige AVANT d'en accumuler
-     de nouvelles sur le même biais.
-  4. (env: dlc) python scripts/dlc_model-training/04_add_videos.py
-  5. Labellise les nouvelles frames :
-         import deeplabcut as dlc
-         from _config import CONFIG
-         dlc.label_frames(CONFIG)
-  6. Relance python scripts/dlc_model-training/02_train.py
+     (06_check_labels + inspection visuelle). Si tu as inversé L/R sur
+     certaines frames de la vidéo 1, corrige AVANT d'en accumuler de
+     nouvelles sur le même biais.
+  4. (env: dlc) python scripts/dlc_model-training/04_add_videos.py \\
+                    --config-dir <ton dossier de config>
+  5. Labellise les nouvelles frames dans la GUI DLC.
+  6. Relance 02_train.py --config-dir <...> (le training reprend depuis
+     le snapshot précédent, il ne repart pas de zéro).
 
 Ce script :
-  - met à jour `numframes2pick` dans le config.yaml DU PROJET DLC pour
-    que extract_frames sorte NEW_VIDEO_FRAMES frames par nouvelle vidéo
-    (sans ça, il piocherait N_AUTO_FRAMES = 60 sur chaque, ce qui est
-    surdimensionné en phase 2)
-  - appelle dlc.add_new_videos pour registrer les vidéos dans le projet
-  - appelle dlc.extract_frames en mode kmeans automatique
+  - met à jour `numframes2pick` dans le config.yaml du projet DLC pour
+    que extract_frames sorte NEW_VIDEO_FRAMES par vidéo ;
+  - appelle dlc.add_new_videos pour enregistrer les vidéos ;
+  - appelle dlc.extract_frames en mode k-means automatique.
 """
 from __future__ import annotations
 

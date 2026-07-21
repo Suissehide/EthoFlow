@@ -140,13 +140,21 @@ Options :
 
 Choisis en fonction du nombre d'animaux par vidéo, pas de l'angle caméra. Pour un projet bottom-view avec 4 souris dans 4 arènes séparées, prends `--kind multi` puis ajuste les `default_arenes_coords` avec `calibrate_arenes.py`.
 
+Ce que le script crée automatiquement dans le dossier du projet :
+
+- Une **arborescence vide** `data/{raw,cropped,dlc-output,vame,results}` + `configs/`
+- `configs/pipeline_config.yaml` — pointe vers le modèle DLC via `--dlc-config`
+- `<project>_sessions.xlsx` — **template Excel** à la racine, prêt à remplir. Ouvre-le : la feuille `Instructions` t'explique quoi mettre dans les autres feuilles (`Sessions` pour `single`, `Subjects` + `Trials_Videos` + `Arena_Mapping` pour `multi`). Deux lignes d'exemple grisées montrent le format attendu.
+
 Résultat : arborescence vide + `configs/pipeline_config.yaml` qui pointe vers ton config DLC.
 
-### Étape 2 — préparer l'Excel de sessions
+### Étape 2 — remplir l'Excel de sessions
 
-Le pipeline lit un Excel maître qui décrit tes souris. Deux schémas selon **le nombre d'animaux par vidéo** :
+Le pipeline lit un Excel maître qui décrit tes souris. **Le template a été généré à l'étape 1** à `<project>/<project>_sessions.xlsx` — ouvre-le directement, tu n'as rien d'autre à créer.
 
-**1 animal / vidéo** — schéma `Sessions` — 1 ligne par souris (=1 vidéo=1 session) :
+Deux schémas selon **le nombre d'animaux par vidéo** :
+
+**1 animal / vidéo** — feuille `Sessions` — 1 ligne par souris (=1 vidéo=1 session) :
 
 | mouse_id | sex | group | cage | tail_label | birth_date | animal_id | line | genotype_mcc | captopril |
 |---|---|---|---|---|---|---|---|---|---|
@@ -155,7 +163,13 @@ Le pipeline lit un Excel maître qui décrit tes souris. Deux schémas selon **l
 
 `mouse_id` = nom du fichier vidéo attendu (`970.mp4`, `971.mp4`). `group` = ta variable de comparaison principale.
 
-**N animaux / vidéo** — schéma `Trials_Videos` + `Subjects` + `Arena_Mapping` — 1 ligne par vidéo dans `Trials_Videos`, mapping arène↔souris dans `Arena_Mapping`. Voir `configs/metadata_template.yaml` pour un exemple complet.
+**N animaux / vidéo** — 3 feuilles :
+
+- `Subjects` — 1 ligne par MouseID avec attributs (groupe M1/M2, stress, notes)
+- `Trials_Videos` — 1 ligne par vidéo (TrialCode conventionnel `OF-<M1|M2>-YYYYMMDD-V<##>`, date, FPS, dimensions)
+- `Arena_Mapping` — 1 ligne par (vidéo × arène), reliant chaque arène de chaque vidéo à un MouseID
+
+Un exemple pré-rempli est présent dans chaque feuille (lignes grisées, à supprimer). Voir aussi `configs/metadata_template.yaml` pour la structure de la metadata YAML produite en aval.
 
 ### Étape 3 — sync des sessions
 

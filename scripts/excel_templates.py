@@ -1,0 +1,271 @@
+"""Générateurs de templates Excel starter pour un nouveau projet EthoFlow.
+
+Appelés par `create_project.py` pour déposer un `<project>/<name>_sessions.xlsx`
+à la racine du projet — l'utilisateur le remplit puis le passe à
+`sync_from_excel_single.py` ou `sync_from_excel_multi.py` selon le --kind.
+
+Deux schémas selon le nombre d'animaux par vidéo :
+
+- `single` : 1 souris par vidéo → 1 feuille Sessions à plat, colonnes
+  matchant META_FIELDS_OPTIONAL de sync_from_excel_single.py.
+- `multi`  : N souris dans N arènes par vidéo → 3 feuilles
+  (Subjects, Trials_Videos, Arena_Mapping), matchant l'attendu de
+  sync_from_excel_multi.py.
+
+Chaque template inclut une feuille `Instructions` qui explique quoi remplir
+et pointe vers le script de sync correspondant. Colonnes taillées large,
+en-têtes en gras, quelques exemples grisés commentés pour référence.
+
+Fonction publique unique :
+
+    write_starter_excel(path, kind, project_name)
+        → écrit path (xlsx), pas de retour, lève sur erreur d'écriture.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def _apply_common_style(ws, header_row: int = 1) -> None:
+    """Met en gras la ligne d'en-têtes + freeze au-dessous."""
+    from openpyxl.styles import Font, PatternFill, Alignment
+    hdr_font = Font(bold=True, color="FFFFFF")
+    hdr_fill = PatternFill("solid", fgColor="4472C4")
+    for cell in ws[header_row]:
+        cell.font = hdr_font
+        cell.fill = hdr_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+    # Freeze sous la ligne d'en-têtes
+    ws.freeze_panes = ws.cell(row=header_row + 1, column=1)
+
+
+def _autosize(ws, min_w: int = 12, max_w: int = 40) -> None:
+    """Ajuste la largeur des colonnes au contenu, avec clamp min/max."""
+    from openpyxl.utils import get_column_letter
+    for col_idx, col in enumerate(ws.columns, start=1):
+        max_len = 0
+        for cell in col:
+            if cell.value is None:
+                continue
+            length = len(str(cell.value).split("\n")[0])
+            if length > max_len:
+                max_len = length
+        w = max(min_w, min(max_len + 2, max_w))
+        ws.column_dimensions[get_column_letter(col_idx)].width = w
+
+
+def _write_instructions_single(ws, project_name: str) -> None:
+    from openpyxl.styles import Font, Alignment
+    ws.append(["Projet :", project_name])
+    ws.append(["Schéma :", "1 animal par vidéo (single)"])
+    ws.append([])
+    ws.append(["Feuille 'Sessions'"])
+    ws.append(["  - Une ligne par souris."])
+    ws.append(["  - 'mouse_id' doit correspondre EXACTEMENT au nom du fichier vidéo"])
+    ws.append(["    (ex. mouse_id=970 → 970.mp4 dans --videos-dir)"])
+    ws.append(["  - 'group' est la variable de comparaison principale (ex. génotype)."])
+    ws.append(["  - Toutes les autres colonnes sont optionnelles ; laisse vide si N/A."])
+    ws.append([])
+    ws.append(["Après remplissage, sync depuis un env conda 'ethoflow' :"])
+    ws.append(["  python scripts/sync_from_excel_single.py \\"])
+    ws.append(["      --project-dir <chemin de ce projet> \\"])
+    ws.append(["      --excel <chemin de ce fichier> \\"])
+    ws.append(["      --videos-dir <dossier contenant les .mp4> \\"])
+    ws.append(["      --date YYYY-MM-DD"])
+    ws.append([])
+    ws.append(["Répète pour chaque batch d'acquisition (--videos-dir change,"])
+    ws.append(["l'Excel reste le même). --overwrite pour re-générer sur une"])
+    ws.append(["metadata déjà existante."])
+    # Style : première colonne en gras
+    for r in range(1, ws.max_row + 1):
+        cell = ws.cell(row=r, column=1)
+        if cell.value and str(cell.value).endswith(":"):
+            cell.font = Font(bold=True)
+    ws.column_dimensions["A"].width = 70
+
+
+def _write_sessions_single(ws) -> None:
+    headers = [
+        "mouse_id", "sex", "group", "cage", "tail_label", "birth_date",
+        "animal_id", "line", "origin",
+        "genotype_mcc", "genotype_cdh5_cre", "genotype_col1_egfp",
+        "captopril", "notes",
+    ]
+    ws.append(headers)
+    # Deux lignes d'exemple grisées pour montrer le format attendu
+    example_rows = [
+        [970, "F", "MCCf/f",  "CD329", 1, "2024-10-15", 54310,
+         "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
+         "exemple à supprimer"],
+        [971, "F", "MCCiECKO","CD330", 2, "2024-10-15", 54311,
+         "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
+         "exemple à supprimer"],
+    ]
+    from openpyxl.styles import Font, PatternFill
+    grey_font = Font(color="888888", italic=True)
+    grey_fill = PatternFill("solid", fgColor="F2F2F2")
+    for row in example_rows:
+        ws.append(row)
+        for cell in ws[ws.max_row]:
+            cell.font = grey_font
+            cell.fill = grey_fill
+    _apply_common_style(ws)
+    _autosize(ws)
+
+
+def _write_instructions_multi(ws, project_name: str) -> None:
+    from openpyxl.styles import Font
+    ws.append(["Projet :", project_name])
+    ws.append(["Schéma :", "N animaux par vidéo (multi), typiquement 4 arènes"])
+    ws.append([])
+    ws.append(["Feuille 'Subjects'"])
+    ws.append(["  - Une ligne par souris (MouseID unique)."])
+    ws.append(["  - Renseigne le groupe expérimental par timepoint."])
+    ws.append([])
+    ws.append(["Feuille 'Trials_Videos'"])
+    ws.append(["  - Une ligne par vidéo enregistrée."])
+    ws.append(["  - TrialCode conventionnel : OF-<M1|M2>-<YYYYMMDD>-V<##>"])
+    ws.append(["  - Le fichier vidéo correspondant doit être dans --videos-dir"])
+    ws.append(["    (nommé selon 'Original file name' ou <TrialCode>.mp4)."])
+    ws.append([])
+    ws.append(["Feuille 'Arena_Mapping'"])
+    ws.append(["  - Une ligne par (vidéo × arène). N lignes = N vidéos × 4."])
+    ws.append(["  - ArenaCode conventionnel : <TrialCode>_A<1..4>"])
+    ws.append(["  - MouseID = souris présente dans cette arène pour cette vidéo."])
+    ws.append([])
+    ws.append(["Après remplissage, sync depuis l'env conda 'ethoflow' :"])
+    ws.append(["  python scripts/sync_from_excel_multi.py \\"])
+    ws.append(["      --project-dir <chemin de ce projet> \\"])
+    ws.append(["      --excel <chemin de ce fichier> \\"])
+    ws.append(["      --videos-dir <dossier contenant les .mp4>"])
+    for r in range(1, ws.max_row + 1):
+        cell = ws.cell(row=r, column=1)
+        if cell.value and (str(cell.value).endswith(":") or
+                            str(cell.value).startswith("Feuille")):
+            cell.font = Font(bold=True)
+    ws.column_dimensions["A"].width = 70
+
+
+def _write_subjects_multi(ws) -> None:
+    from openpyxl.styles import Font, PatternFill
+    ws.append([
+        "MouseID", "Baseline group (M1)", "ANGII group (M2)",
+        "Stress (CUS?)", "Notes",
+    ])
+    example_rows = [
+        [1, "CUS", "CUS+ANGII", "yes", "exemple à supprimer"],
+        [11, "SHAM", "SHAM+ANGII", "no", "exemple à supprimer"],
+    ]
+    grey_font = Font(color="888888", italic=True)
+    grey_fill = PatternFill("solid", fgColor="F2F2F2")
+    for row in example_rows:
+        ws.append(row)
+        for cell in ws[ws.max_row]:
+            cell.font = grey_font
+            cell.fill = grey_fill
+    _apply_common_style(ws)
+    _autosize(ws)
+
+
+def _write_trials_multi(ws) -> None:
+    from openpyxl.styles import Font, PatternFill
+    ws.append([
+        "TrialCode", "Timepoint", "Date (YYYY-MM-DD)", "VideoNo",
+        "Original file name", "FPS", "Width", "Height", "Notes",
+    ])
+    example = [
+        "OF-M1-20260210-V01", "M1", "2026-02-10", "01",
+        "V01.mp4", 25, 1280, 1024, "exemple à supprimer",
+    ]
+    ws.append(example)
+    grey_font = Font(color="888888", italic=True)
+    grey_fill = PatternFill("solid", fgColor="F2F2F2")
+    for cell in ws[ws.max_row]:
+        cell.font = grey_font
+        cell.fill = grey_fill
+    _apply_common_style(ws)
+    _autosize(ws)
+
+
+def _write_arena_mapping_multi(ws) -> None:
+    from openpyxl.styles import Font, PatternFill
+    ws.append([
+        "ArenaCode", "TrialCode", "Timepoint", "Arena", "MouseID",
+        "Notes",
+    ])
+    example_rows = [
+        ["OF-M1-20260210-V01_A1", "OF-M1-20260210-V01", "M1", 1, 15,
+         "exemple à supprimer"],
+        ["OF-M1-20260210-V01_A2", "OF-M1-20260210-V01", "M1", 2, 16,
+         "exemple à supprimer"],
+        ["OF-M1-20260210-V01_A3", "OF-M1-20260210-V01", "M1", 3, 17,
+         "exemple à supprimer"],
+        ["OF-M1-20260210-V01_A4", "OF-M1-20260210-V01", "M1", 4, 18,
+         "exemple à supprimer"],
+    ]
+    grey_font = Font(color="888888", italic=True)
+    grey_fill = PatternFill("solid", fgColor="F2F2F2")
+    for row in example_rows:
+        ws.append(row)
+        for cell in ws[ws.max_row]:
+            cell.font = grey_font
+            cell.fill = grey_fill
+    _apply_common_style(ws)
+    _autosize(ws)
+
+
+def write_starter_excel(path: Path, kind: str, project_name: str) -> None:
+    """Écrit un template Excel starter pour un nouveau projet EthoFlow.
+
+    Args:
+        path: où écrire (ex : <project>/<project>_sessions.xlsx)
+        kind: "single" (1 animal/vidéo) ou "multi" (N animaux/vidéo)
+        project_name: nom du projet, affiché en tête de la feuille
+            Instructions pour rappel visuel.
+
+    Nécessite `openpyxl` (livré avec l'env `ethoflow`).
+    """
+    if kind not in ("single", "multi"):
+        raise ValueError(f"kind doit être 'single' ou 'multi', reçu : {kind}")
+    try:
+        from openpyxl import Workbook
+    except ImportError:
+        raise RuntimeError(
+            "openpyxl requis pour générer le template Excel. "
+            "Active l'env ethoflow (`conda activate ethoflow`) puis relance."
+        )
+
+    wb = Workbook()
+    # Renomme la feuille par défaut en Instructions
+    inst = wb.active
+    inst.title = "Instructions"
+
+    if kind == "single":
+        _write_instructions_single(inst, project_name)
+        sessions = wb.create_sheet("Sessions")
+        _write_sessions_single(sessions)
+    else:  # multi
+        _write_instructions_multi(inst, project_name)
+        subjects = wb.create_sheet("Subjects")
+        _write_subjects_multi(subjects)
+        trials = wb.create_sheet("Trials_Videos")
+        _write_trials_multi(trials)
+        arenas = wb.create_sheet("Arena_Mapping")
+        _write_arena_mapping_multi(arenas)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(path)
+
+
+if __name__ == "__main__":
+    # Petit test rapide en ligne de commande
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Génère un template Excel starter pour un projet EthoFlow."
+    )
+    parser.add_argument("--path", required=True, type=Path)
+    parser.add_argument("--kind", required=True, choices=["single", "multi"])
+    parser.add_argument("--project-name", default="mon-projet")
+    args = parser.parse_args()
+    write_starter_excel(args.path, args.kind, args.project_name)
+    print(f"✅ {args.path}")

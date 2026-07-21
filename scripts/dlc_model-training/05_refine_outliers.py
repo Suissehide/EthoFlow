@@ -2,6 +2,15 @@
 de les corriger pour améliorer spécifiquement les keypoints à faible
 likelihood (en pratique : les pattes).
 
+⚠  Recommandation Tony (VAME/LIN) : **la sélection manuelle bat la
+sélection automatique** pour ce genre de refinement. L'auto-detect
+(cf. OUTLIER_ALGORITHM ci-dessous) attrape des cas évidents rapidement,
+mais le vrai levier c'est ta passe à toi : regarder les vidéos
+analysées, identifier les patterns d'échec (rearing, occlusion, jamb
+L/R), puis extraire à la main 50-100 frames par situation
+problématique. Utilise ce script comme premier passage rapide, puis
+enchaîne une passe manuelle dans la GUI DLC.
+
 Pourquoi ce workflow plutôt que +epochs ou +mice :
 
     +epochs    : à 100 epochs et transfer learning depuis Quadruped, le
@@ -13,11 +22,15 @@ Pourquoi ce workflow plutôt que +epochs ou +mice :
                  mêmes postures faciles. Les pattes étendues ou occultées
                  — celles qui plantent le modèle — restent sous-représentées.
 
-    refine     : DLC identifie EXACTEMENT les frames problématiques (jumps
+    refine     : cible EXACTEMENT les frames problématiques (jumps
                  inter-frame, likelihood basse) et te les sert. Tu
                  labellises 30-40 frames qui valent chacune autant que
                  100 frames aléatoires. C'est ce que la doc DLC appelle
                  "iterative refinement" et c'est le bon outil ici.
+
+    ⚠ **Continue le training depuis le snapshot précédent**, pas
+    from scratch. Le training reprend automatiquement depuis le
+    dernier snapshot enregistré si tu ne changes pas d'iteration.
 
 Pré-requis :
     - 03_apply.py a tourné sur les vidéos listées dans

@@ -56,6 +56,7 @@ from paths import (  # noqa: E402
     resolve_project,
     vame_dir,
 )
+from excel_templates import write_starter_excel  # noqa: E402
 
 
 # Coords par défaut des 4 arènes (setup labo actuel : vidéo 1024×1080, grille
@@ -144,26 +145,45 @@ def main() -> None:
                 f"      pour pointer vers ton config.yaml DLC entraîné."
             )
 
+    # 3) Crée le template Excel starter à la racine du projet
+    excel_path = project / f"{project.name}_sessions.xlsx"
+    if excel_path.exists() and not args.force:
+        print(f"  · {excel_path.name} existe déjà, skip (utilise --force pour écraser)")
+    else:
+        try:
+            write_starter_excel(excel_path, args.kind, project.name)
+            print(f"  ✓ {excel_path.name} généré (à la racine du projet)")
+        except RuntimeError as e:
+            print(f"  ⚠ Template Excel non généré : {e}")
+
     print(f"\n✅ Projet initialisé.\n")
 
-    next_step = (
-        "Étape suivante :\n"
-        "  - Sync des sessions depuis Excel :\n"
-        "      python scripts/sync_from_excel_single.py "
-        f"--project-dir {project} \\\n"
-        "          --excel <chemin> --videos-dir <chemin>\n"
-        "  - Puis lancer l'inférence DLC :\n"
-        f"      python scripts/run_dlc_inference.py --project-dir {project} "
-        "--all --mode custom\n"
-        if args.kind == "single" else
-        "Étape suivante :\n"
-        "  - Sync des sessions depuis Excel multi-animal :\n"
-        "      python scripts/sync_from_excel_multi.py "
-        f"--project-dir {project} --excel <chemin>\n"
-        "  - Puis le pipeline multi-animal complet (crop + DLC + assign + clean) :\n"
-        f"      python scripts/run_pipeline.py --project-dir {project} --all\n"
-    )
-    print(next_step)
+    print("Étapes suivantes :")
+    print(f"  1. Remplis le template Excel :")
+    print(f"       {excel_path}")
+    print(f"     (feuille 'Instructions' à l'ouverture pour le mode d'emploi)")
+    print()
+    if args.kind == "single":
+        print(f"  2. Sync des sessions depuis l'Excel :")
+        print(f"       python scripts/sync_from_excel_single.py \\")
+        print(f"           --project-dir {project} \\")
+        print(f"           --excel {excel_path} \\")
+        print(f"           --videos-dir <dossier des .mp4> \\")
+        print(f"           --date YYYY-MM-DD")
+        print()
+        print(f"  3. Puis lancer l'inférence DLC :")
+        print(f"       python scripts/run_dlc_inference.py --project-dir {project} "
+              f"--all --mode custom")
+    else:
+        print(f"  2. Sync des sessions depuis l'Excel multi-animal :")
+        print(f"       python scripts/sync_from_excel_multi.py \\")
+        print(f"           --project-dir {project} \\")
+        print(f"           --excel {excel_path} \\")
+        print(f"           --videos-dir <dossier des .mp4>")
+        print()
+        print(f"  3. Puis le pipeline multi-animal complet "
+              f"(crop + DLC + assign + clean) :")
+        print(f"       python scripts/run_pipeline.py --project-dir {project} --all")
 
 
 if __name__ == "__main__":
