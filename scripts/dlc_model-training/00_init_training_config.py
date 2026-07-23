@@ -200,15 +200,12 @@ def main() -> None:
     print()
     print("Le script 01 va :")
     print(f"  1. Créer le projet DLC dans {workdir}\\{project_name}-{experimenter}-<date>\\")
+    print(f"     (DLC ajoute la date du jour au nom du dossier)")
     print(f"  2. Écrire automatiquement les 12 bodyparts + skeleton dans config.yaml")
     print(f"  3. Régler numframes2pick = {n_auto_frames}")
     print(f"  4. Extraire les {n_auto_frames} frames k-means")
-    print()
-    print(f"Le _config.py est dans {config_dir}\\ ; le projet DLC sera son")
-    print(f"voisin dans {workdir}\\{project_name}-{experimenter}-<date>\\.")
-    print()
-    print("Après 01, il te faudra mettre à jour PROJECT_DIR dans le _config.py")
-    print("généré avec le nom exact du dossier créé (DLC ajoute la date).")
+    print(f"  5. Mettre à jour PROJECT_DIR dans ton _config.py pour pointer")
+    print(f"     vers le dossier créé (aucune édition manuelle nécessaire)")
 
 
 if __name__ == "__main__":

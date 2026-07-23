@@ -6,16 +6,16 @@ définis dans `_config.py`, puis lance l'extraction k-means.
 
 Workflow simplifié :
     1. python scripts/dlc_model-training/00_init_training_config.py
-       (wizard → écrit ton _config.py custom dans un dossier hors du repo)
+       (wizard → écrit ton _config.py custom)
     2. python scripts/dlc_model-training/01_setup_project.py \\
            --config-dir <dossier créé à l'étape 1>
-    3. Mets à jour PROJECT_DIR dans ton _config.py avec le nom exact
-       du dossier créé (DLC ajoute la date au nom du projet)
-    4. dlc.label_frames(CONFIG) dans une session Python pour labelliser
+       → ce script écrit lui-même PROJECT_DIR dans ton _config.py une
+         fois le projet DLC créé ; tu n'as rien à éditer à la main
+    3. dlc.label_frames(CONFIG) dans une session Python pour labelliser
        (ou GUI : python -c "import deeplabcut; deeplabcut.launch_dlc()")
 
 Sans `--config-dir`, le script utilise le _config.py template du repo
-(valeurs par défaut, à éditer manuellement avant de lancer).
+(valeurs par défaut, PROJECT_DIR à éditer manuellement à la fin).
 
 Pré-requis : conda activate dlc, DeepLabCut 3.x + PyTorch, vidéo pilote mp4.
 """
@@ -71,6 +71,33 @@ def patch_dlc_config(config_path: Path, bodyparts: list[str],
             yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
 
 
+def patch_project_dir_in_config_py(config_py_path: Path,
+                                     project_dir_name: str) -> bool:
+    """Écrit le vrai nom du dossier DLC dans PROJECT_DIR du _config.py.
+
+    Utilise un find + replace ligne par ligne pour ne toucher qu'à la
+    ligne qui commence par `PROJECT_DIR = `. Retourne True si patch
+    appliqué, False sinon (fichier absent ou pattern non trouvé).
+    """
+    if not config_py_path.exists():
+        return False
+    lines = config_py_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    new_lines = []
+    patched = False
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("PROJECT_DIR = ") and not patched:
+            new_lines.append(
+                f'PROJECT_DIR = WORKDIR / "{project_dir_name}"\n'
+            )
+            patched = True
+        else:
+            new_lines.append(line)
+    if patched:
+        config_py_path.write_text("".join(new_lines), encoding="utf-8")
+    return patched
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument(
@@ -124,9 +151,30 @@ def main() -> None:
                       N_AUTO_FRAMES)
     print(f"  → OK\n")
 
+    # ---- Auto-patch de PROJECT_DIR dans le _config.py du user ----
+    # DLC choisit lui-même le nom exact du dossier (ajout de la date au
+    # PROJECT_NAME) : on va donc lire ce nom réel et l'écrire dans le
+    # _config.py que le wizard a produit, pour que les scripts 02-06
+    # trouvent le projet sans que l'user n'ait rien à éditer à la main.
     project_dir_name = config_path.parent.name
-    print(f"⚠  Mets à jour PROJECT_DIR dans ton _config.py :")
-    print(f"     PROJECT_DIR = WORKDIR / \"{project_dir_name}\"\n")
+    if args.config_dir is not None:
+        user_config_py = args.config_dir.resolve() / "_config.py"
+        if patch_project_dir_in_config_py(user_config_py, project_dir_name):
+            print(f"✓ PROJECT_DIR écrit dans {user_config_py} :")
+            print(f"     PROJECT_DIR = WORKDIR / \"{project_dir_name}\"\n")
+        else:
+            print(f"⚠  PROJECT_DIR n'a pas pu être patché automatiquement "
+                  f"dans {user_config_py}.\n"
+                  f"   Édite-le à la main :\n"
+                  f"     PROJECT_DIR = WORKDIR / \"{project_dir_name}\"\n",
+                  file=sys.stderr)
+    else:
+        # Cas où on tourne sur le template du repo (pas de --config-dir)
+        print(f"⚠  Sans --config-dir, PROJECT_DIR n'est pas patché "
+              f"automatiquement.\n"
+              f"   Édite scripts/dlc_model-training/_config.py :\n"
+              f"     PROJECT_DIR = WORKDIR / \"{project_dir_name}\"\n",
+              file=sys.stderr)
 
     # ---- Extraction k-means ----
     if args.skip_extract:
