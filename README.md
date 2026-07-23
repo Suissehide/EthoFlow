@@ -604,21 +604,73 @@ python scripts\dlc_model-training\create_labeled_video.py ^
 
 Lecture clé — recommandation Tony : à `pcutoff=0.3`, un keypoint peut être **au bon endroit** même à basse confiance. La « confiance » exprime la ressemblance avec le training set : sur un modèle bien entraîné, une confiance à 30 % peut simplement signifier « la patte est floue mais c'est bien la patte, y'a rien d'autre qui lui ressemble dans l'image ». Le vrai problème apparaît quand **plusieurs zones de l'image ont une ressemblance similaire** : le modèle switche entre elles → jitter, télé-portations gauche/droite. C'est ce switch qui trahit un training set incomplet.
 
-### B.6 — Itérations d'amélioration (extraction d'outliers manuelle)
+### B.6 — Itérations d'amélioration (extraction d'outliers)
 
-Après avoir regardé la vidéo annotée à `pcutoff=0.3` :
+Après avoir regardé la vidéo annotée à `pcutoff=0.3`, tu as identifié des situations où le modèle échoue. Il faut extraire de nouvelles frames dans ces situations pour les ajouter au training set.
 
-Recommandation Tony : **extraire les frames à re-labelliser MANUELLEMENT**, pas via l'auto-detect de DLC. Le vrai gain vient du fait que tu vois exactement où le modèle échoue et que tu choisis les 50-100 frames les plus informatives par situation problématique.
+Deux options — Tony recommande fortement l'**option A (manuelle)** comme levier principal, l'option B (auto DLC) est utile en complément rapide.
 
-Workflow d'itération :
+#### Option A — Extraction manuelle (recommandé)
+
+Recommandation Tony : « le vrai gain vient du fait que tu vois exactement où le modèle échoue et que tu choisis les 50-100 frames les plus informatives par situation problématique ».
+
+Workflow :
 
 1. **Regarde toutes tes vidéos analysées** en priorité (pas seulement la pilote). Identifie les patterns d'échec : « les pattes ratent quand elle grimpe le long du mur », « L/R switch pendant les demi-tours rapides », « rearing avec deux pattes cachées mal résolu ».
 2. **Pour chaque pattern d'échec**, décide de combien de frames tu vas dédier. Tony suggère **50-100 nouvelles frames par situation problématique** (au-delà, rendement décroissant).
-3. **Sélectionne les frames à la main** dans les vidéos, extrais-les via DLC GUI (« Extract Frames » → « Manual »).
-4. **Labellise-les** avec la même règle cohérente qu'à B.3.
-5. **Relance l'entraînement** (`02_train.py`) — **important : depuis le snapshot précédent, pas from scratch**. DLC le fait par défaut si tu ne changes pas d'`iteration` dans la config.
+3. **Extrait les frames à la main** dans les vidéos. Depuis Python (env `dlc` actif) :
 
-Le script `05_refine_outliers.py` reste dispo comme béquille pour attraper les cas évidents (frames à basse likelihood avec `OUTLIER_ALGORITHM = "uncertain"`), mais **le vrai levier c'est la passe manuelle**. Utilise-le comme premier passage rapide, puis fais ta propre sélection en complément.
+   ```python
+   import deeplabcut
+   deeplabcut.extract_frames(
+       r"D:\EthoFlow\models\souris-bottomview\config.yaml",
+       mode="manual",
+       crop=False,
+       userfeedback=False,
+   )
+   ```
+
+   Une fenêtre s'ouvre par vidéo — utilise le slider + flèches gauche/droite pour le frame-par-frame, clic « Grab frames » sur chaque moment problématique. Même workflow qu'à B.3.2.
+
+4. **Labellise-les** avec la même règle cohérente qu'à B.3.3.
+5. **Ré-audit L/R** :
+   ```cmd
+   python scripts\dlc_model-training\06_check_labels.py ^
+       --config-dir D:\EthoFlow\models\souris-bottomview
+   ```
+6. **Relance l'entraînement** — important : depuis le snapshot précédent, pas from scratch. DLC le fait par défaut si tu ne changes pas d'`iteration` dans la config. Pour un fine-tuning, baisse `EPOCHS` à 20-30 dans `_config.py` :
+   ```cmd
+   python scripts\dlc_model-training\02_train.py ^
+       --config-dir D:\EthoFlow\models\souris-bottomview
+   ```
+
+#### Option B — Auto-detect via DLC (complément)
+
+Utile en **premier passage rapide** pour attraper les cas évidents avant ta passe manuelle. Le script `05_refine_outliers.py` fait tourner `dlc.extract_outlier_frames()` sur toutes les vidéos analysées.
+
+```cmd
+python scripts\dlc_model-training\05_refine_outliers.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
+```
+
+**Configuration dans ton `_config.py`** — trois paramètres à comprendre :
+
+- `TRAINING_VIDEOS_FOR_REFINE` : liste des vidéos sur lesquelles chercher des outliers (typiquement toutes celles de `ADDITIONAL_VIDEOS` + la pilote — celles déjà analysées par `03_apply.py`).
+- `OUTLIER_ALGORITHM` :
+  - `"uncertain"` (défaut) — extrait les frames à basse likelihood. Idéal pour cibler les pattes occultées à leur réémergence, les rearing, les moments où le modèle « perd » un keypoint.
+  - `"jump"` — extrait les frames avec sauts inter-frame anormaux d'un keypoint. Cible les téléportations L/R et les jitter brutaux.
+  - `"fitting"` — modèle ARIMA (plus coûteux, moins ciblé — utilise rarement).
+- `OUTLIER_NUMFRAMES` : nombre max de frames extraites **par vidéo** (défaut 30, garde-fou pour éviter d'en extraire des centaines).
+
+Le script :
+1. Vérifie que chaque vidéo a bien été analysée par `03_apply.py` (`.h5` doit exister)
+2. Met à jour `numframes2pick` dans le `config.yaml` DLC pour matcher `OUTLIER_NUMFRAMES`
+3. Lance `dlc.extract_outlier_frames()` sur chaque vidéo, écrit les frames extraites dans `labeled-data\<video>\`
+4. Ces frames apparaissent ensuite dans la GUI DLC pour labellisation, comme n'importe quelle autre
+
+**Utilisation type combinée** : lance d'abord Option B pour attraper les 20-30 outliers évidents par vidéo, puis fais un passage manuel (Option A) sur les situations que l'auto-detect n'a pas attrapées mais que tu vois clairement dans les labeled videos.
+
+**Après ta round de labellisation, dans les deux cas, relance 06_check_labels + 02_train** (étapes 5 et 6 de l'Option A).
 
 ### B.7 — Enregistrer le modèle final
 
