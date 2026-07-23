@@ -444,37 +444,116 @@ python scripts\dlc_model-training\03_apply.py --config-dir D:\EthoFlow\models\so
 
 Sans `--config-dir`, les scripts retombent sur le template `_config.py` du repo (utile pour tester, pas pour un vrai projet).
 
-### B.3 — Labellisation manuelle : la stratégie qui compte vraiment
+### B.3 — Préparer le training set complet
 
-C'est **la** phase qui détermine la qualité finale du modèle. Recommandations Tony/LIN pour un premier entraînement propre :
+C'est **la** phase qui détermine la qualité finale du modèle. Fais tout ce qui est ci-dessous **avant** le premier entraînement.
 
-**Cible : 200-300 frames labellisées au total** pour la première passe complète. Répartition :
+**Cible finale : 200-300 frames labellisées** pour la première passe complète (recommandation Tony/LIN), réparties sur **6-10 souris différentes**. Répartition :
 
-- **100-150 frames par k-means** (déjà extraites par 01) — couverture visuelle générale
-- **50-150 frames sélectionnées manuellement** dans les vidéos disponibles, avec la stratégie ci-dessous
+- **100-150 frames par k-means** (extraites automatiquement par 01 + 04) — couverture visuelle générale
+- **50-150 frames sélectionnées manuellement** dans les vidéos (situations difficiles)
 
-**Répartition des frames manuelles** :
+Détail des étapes B.3.1 → B.3.4 ci-dessous.
 
-- **15-20 %** sur des situations « faciles » : locomotion normale, pattes visibles, pas de rearing, difficulté faible à moyenne. Ces frames incluent typiquement des pattes floues — c'est normal et attendu.
-- **80-85 %** sur les situations **les plus difficiles** : celles où toi-même hésites sur la position exacte du keypoint. Rearing, occlusions partielles, pattes qui sortent/rentrent sous le corps, ambiguïtés gauche/droite. **C'est là que le modèle a besoin d'exemples**, pas dans les cas triviaux qu'il apprend immédiatement.
+#### B.3.1 — Étendre à plusieurs souris avant le premier train
 
-**Stratégie de labellisation cohérente** :
+Recommandation Tony : « prendre autant d'animaux différents que possible » **dès le premier entraînement**. C'est ce qui empêche le modèle d'apprendre des raccourcis liés à une souris ou un décor unique.
 
-- Fixe-toi une règle claire pour les cas ambigus et applique-la partout. Ex : « pour une patte floue en mouvement, je marque toujours le centre du flou » ou « pour une patte partiellement cachée, je marque la position estimée du carpe même si non visible ».
-- **Capture la directionalité** : si tu labellises un rearing vers la gauche avec la patte gauche visible, prends aussi un rearing vers la droite avec la patte droite visible. Sinon le modèle apprend un biais latéral.
-- Attention : une **situation difficile en temps réel se décompose en plusieurs frames difficiles distinctes** frame-par-frame. Un rearing de 2 secondes = 60 frames, dont peut-être 15 vraiment ambiguës à labelliser une par une avec la même règle.
+Édite `ADDITIONAL_VIDEOS` dans ton `_config.py` (`D:\EthoFlow\models\souris-bottomview\_config.py`) avec 4-6 autres vidéos (souris différentes du pilote), puis :
 
-**Lancer la GUI DLC** :
+```cmd
+python scripts\dlc_model-training\04_add_videos.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
+```
+
+Extrait `NEW_VIDEO_FRAMES` (défaut 20) frames k-means par nouvelle vidéo.
+
+**Ajuste les quotas k-means selon le nombre de vidéos** pour rester dans le range 100-150 kmeans total recommandé par Tony :
+
+| Vidéos totales | `N_AUTO_FRAMES` (pilote) | `NEW_VIDEO_FRAMES` (par vidéo) | Total kmeans |
+|---|---|---|---|
+| 5 (pilote + 4) | 60 | 20 | 60 + 80 = 140 |
+| 6 (pilote + 5) | 50 | 15 | 50 + 75 = 125 |
+| 8 (pilote + 7) | 30 | 15 | 30 + 105 = 135 |
+
+Si tu as déjà lancé 01 avec 120 frames sur le pilote, tu peux compenser en baissant `NEW_VIDEO_FRAMES` à 5-10 avant de lancer 04.
+
+#### B.3.2 — Extraction manuelle des frames difficiles
+
+Sur les 200-300 frames cibles, il t'en manque 50-150 à sélectionner à la main. Lance l'extraction manuelle depuis Python :
+
+```cmd
+conda activate dlc
+python
+```
+
+Puis :
+
+```python
+import deeplabcut
+deeplabcut.extract_frames(
+    r"D:\EthoFlow\models\souris-bottomview\config.yaml",
+    mode="manual",   # ← clé : passe le mode automatique kmeans
+    crop=False,
+    userfeedback=False,
+)
+```
+
+Une fenêtre s'ouvre par vidéo présente dans le projet, avec un lecteur + slider. Utilise les flèches gauche/droite pour du frame-par-frame, et le bouton **« Grab frames »** pour sauvegarder la frame courante.
+
+**Comment répartir ton budget manuel** :
+
+- **Divise par vidéo** : si tu vises 100 frames manuelles au total sur 5 vidéos, c'est 20/vidéo.
+- **15-20 % faciles** : locomotion normale, pattes visibles. Frames floues attendues et OK.
+- **80-85 % difficiles** : celles où toi-même hésites sur la position du keypoint. Rearing, occlusions, pattes qui sortent/rentrent sous le corps, ambiguïtés L/R.
+
+**Workflow sur une vidéo, en pratique** :
+
+1. **Passe une fois à vitesse normale** (10-15 min), note mentalement ou sur papier les timestamps qui te poseront problème :
+   - Rearing (surtout côté gauche ET côté droit → capture la directionalité)
+   - Demi-tours rapides avec L/R ambigu
+   - Grooming où les pattes se superposent
+   - Moments où la souris grimpe le long du mur
+   - Blur de pattes en full-run
+
+2. **Revient sur chaque timestamp** en frame-par-frame. Une action difficile de 2s fait 60 frames — tu peux en extraire 3-8 pour bien couvrir la transition.
+
+3. **Frames faciles (15-20 %) en bonus** : quelques moments de locomotion normale avec les 12 keypoints bien visibles. Sert d'ancre pour le modèle.
+
+#### B.3.3 — Stratégie de labellisation cohérente
+
+Maintenant que tu as tes ~250 frames extraites (kmeans + manuelles), il faut les labelliser dans la GUI DLC. Compte ~1 min par frame → **3-5h pour 200-300 frames** en labellisation soigneuse.
 
 ```cmd
 python -c "import deeplabcut; deeplabcut.launch_dlc()"
 ```
 
-Ouvre ton `config.yaml` → onglet « Label Frames ». Compte ~1 min par frame → **3-5h pour 200-300 frames** en labellisation soigneuse.
+Charge ton `config.yaml` → onglet « Label Frames ».
+
+**La règle absolue : cohérence**. Fixe-toi une règle claire pour les cas ambigus et applique-la partout, jusqu'au bout :
+
+- « Patte floue en mouvement → je marque toujours le **centre du flou** »
+- « Patte à moitié cachée sous le corps → je marque la **position estimée du carpe**, pas le contour visible »
+- « Rearing avec 2 pattes invisibles → je pointe uniquement les visibles, clic droit → « invisible » sur les autres »
+
+**Capture la directionalité** : si tu labellises un rearing vers la gauche avec la patte gauche visible, prends aussi un rearing vers la droite avec la patte droite visible. Sinon le modèle apprend un biais latéral.
+
+**Attention** : une action difficile en temps réel se décompose en **plusieurs frames difficiles distinctes**. Un rearing de 2s = 60 frames, dont peut-être 15 vraiment ambiguës. Traite chacune indépendamment mais avec la même règle.
+
+Note ta règle sur papier au début. **Change pas de règle à mi-parcours** — tu injecterais du bruit dans le training set.
+
+#### B.3.4 — Audit gauche/droite avant le premier entraînement
+
+```cmd
+python scripts\dlc_model-training\06_check_labels.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
+```
+
+Audit géométrique qui détecte les frames où left/right paws ont probablement été inversées par erreur. Utile **avant** le premier entraînement (et à re-lancer après chaque round de labellisation). Corrige les inversions détectées dans la GUI DLC avant de passer à B.4.
 
 ### B.4 — Premier entraînement
 
-> **N'oublie pas `--config-dir`** sur cette commande et toutes celles de B.5 à B.8. Sans ce flag, les scripts retombent sur le template `_config.py` du repo et vont chercher un projet DLC qui n'existe pas.
+> **N'oublie pas `--config-dir`** sur cette commande et toutes celles de B.5 à B.6. Sans ce flag, les scripts retombent sur le template `_config.py` du repo et vont chercher un projet DLC qui n'existe pas.
 
 ```cmd
 python scripts\dlc_model-training\02_train.py ^
@@ -483,21 +562,18 @@ python scripts\dlc_model-training\02_train.py ^
 
 Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 50 epochs. Compte **~2-6h sur GPU 16 GB**.
 
-Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
+**Objectif à valider après B.4** — regarde la RMSE de test que DLC imprime :
 
-**Sur le choix de 50 epochs** : c'est suffisant pour un premier passage. DLC démarre avec les poids pré-entraînés SuperAnimal-Quadruped — le backbone est déjà bon, seule la tête décodeur pour les 12 keypoints custom apprend vraiment. Sur 200-300 frames, 50 epochs suffit pour converger.
+- **RMSE_pcutoff < 8 px** sur 1024×1080 (~0.8 % de la largeur) : c'est bon, passe à B.5
+- **RMSE_pcutoff 8-15 px** : marge d'amélioration, mais le modèle est déjà utilisable pour un premier QC
+- **RMSE_pcutoff > 15 px** : problème. Soit tu manques de frames sur des situations spécifiques (cf. B.6 outliers), soit tes labels sont incohérents (relance B.3.4 audit L/R)
 
-Après B.4, regarde la RMSE de test que DLC imprime :
+**Notes techniques** :
 
-- **RMSE_pcutoff < 8 px** sur 1024×1080 (~0.8 %) : c'est bon, passe à B.5
-- **8-15 px** : marge d'amélioration, le modèle est déjà utilisable pour un premier QC
-- **> 15 px** : problème. Soit tu manques de couverture sur des situations spécifiques (cf. B.6), soit tes labels sont incohérents (cf. B.8)
-
-**Quand bumper les epochs** :
-- Si la loss train **est encore clairement en décroissance** à 50 epochs (regarde les courbes) → passe à 100 dans `_config.py` (variable `EPOCHS`)
-- Pour les **passes de refinement** après B.6 (fine-tuning avec les nouvelles frames outlier), garde 20-30 epochs — c'est du fine-tuning, pas un entraînement complet
-
-Détail technique : `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w32"` sinon size mismatch au chargement des poids pré-entraînés.
+- Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
+- **50 epochs suffit** pour un premier passage : DLC démarre avec les poids pré-entraînés SuperAnimal-Quadruped, seule la tête décodeur pour tes 12 keypoints custom apprend vraiment.
+- **Quand bumper** : si la loss train est encore clairement en décroissance à 50 epochs, passe à 100 dans `_config.py` (variable `EPOCHS`). Pour les passes de refinement après B.6, garde 20-30 epochs — c'est du fine-tuning.
+- `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w32"` sinon size mismatch au chargement des poids pré-entraînés.
 
 ### B.5 — Appliquer et QC visuel
 
@@ -533,29 +609,7 @@ Workflow d'itération :
 
 Le script `05_refine_outliers.py` reste dispo comme béquille pour attraper les cas évidents (frames à basse likelihood avec `OUTLIER_ALGORITHM = "uncertain"`), mais **le vrai levier c'est la passe manuelle**. Utilise-le comme premier passage rapide, puis fais ta propre sélection en complément.
 
-### B.7 — Étendre à plusieurs souris (couverture inter-individu)
-
-Recommandation Tony : « prendre autant d'animaux différents que possible » dans le training set. L'objectif est de présenter au réseau la plus large variété de situations possibles.
-
-Édite `ADDITIONAL_VIDEOS` dans ton `_config.py` (`D:\EthoFlow\models\souris-bottomview\_config.py`), puis :
-
-```cmd
-python scripts\dlc_model-training\04_add_videos.py ^
-    --config-dir D:\EthoFlow\models\souris-bottomview
-```
-
-Extrait 20 frames par nouvelle vidéo (k-means). Labellise dans la GUI, relance `02_train.py`. En viser 6-10 souris différentes dans le training set final si tu as ~40 animaux à analyser.
-
-### B.8 — Vérifier les inversions gauche/droite
-
-```cmd
-python scripts\dlc_model-training\06_check_labels.py ^
-    --config-dir D:\EthoFlow\models\souris-bottomview
-```
-
-Audit géométrique qui détecte les frames où left/right paws ont probablement été inversées par erreur pendant la labellisation manuelle. Utile après plusieurs rounds.
-
-### B.9 — Enregistrer le modèle final
+### B.7 — Enregistrer le modèle final
 
 Une fois satisfait de la précision, ton modèle DLC est à `D:\EthoFlow\models\souris-bottomview\config.yaml`. Depuis là, **tu es à l'Étape 1 du parcours principal** : crée un projet EthoFlow avec `create_project.py --dlc-config D:\EthoFlow\models\souris-bottomview\config.yaml` et enchaîne les étapes 2 à 9.
 
