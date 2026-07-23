@@ -45,7 +45,7 @@ Le pipeline part d'une acquisition brute (vidéo + Excel des souris) et produit 
 
 Cette distinction est indépendante de l'angle de la caméra : tu peux avoir du bottom-view mono-animal, du bottom-view multi-animal, du top-view mono-animal, du top-view multi-animal.
 
-**Un modèle DLC** = un réseau pré-entraîné qui détecte les points anatomiques (nez, oreilles, pattes, queue, etc.). Un modèle DLC vit **hors** du projet EthoFlow (dans `E:\dlc-projects\...` par exemple) et est **réutilisé** entre projets. C'est la partie coûteuse à produire (labellisation manuelle + jour de calcul GPU) et la partie qu'on partage entre expérimentateurs.
+**Un modèle DLC** = un réseau pré-entraîné qui détecte les points anatomiques (nez, oreilles, pattes, queue, etc.). Un modèle DLC vit **hors** du projet EthoFlow (dans `D:\EthoFlow\models\...` par exemple) et est **réutilisé** entre projets. C'est la partie coûteuse à produire (labellisation manuelle + jour de calcul GPU) et la partie qu'on partage entre expérimentateurs.
 
 **Un modèle VAME** = un VAE entraîné à segmenter les séquences de pose en motifs comportementaux. Contrairement à DLC, VAME s'entraîne **une fois par projet** — sa segmentation dépend des animaux qui sont dedans.
 
@@ -117,7 +117,7 @@ Un seul parcours de bout en bout, avec **une seule bifurcation** au début : soi
 
 **As-tu déjà un modèle DLC entraîné pour ton setup imaging ?**
 
-- **Oui** → tu as un dossier `E:\dlc-projects\<nom_projet>\` avec un `config.yaml` dedans, produit par ton labo ou une expérience précédente. Passe directement à l'**[Étape 1](#étape-1--créer-un-projet-ethoflow)**.
+- **Oui** → tu as un dossier `D:\EthoFlow\models\<nom_projet>\` avec un `config.yaml` dedans, produit par ton labo ou une expérience précédente. Passe directement à l'**[Étape 1](#étape-1--créer-un-projet-ethoflow)**.
 - **Non** → suis d'abord le [Parcours B — entraîner un nouveau modèle DLC](#parcours-b--entraîner-un-nouveau-modèle-dlc) tout en bas, qui produit ce fameux `config.yaml`. Puis reviens à l'**Étape 1**.
 
 Le même modèle DLC entraîné une fois est réutilisé pour tous les projets EthoFlow futurs qui partagent le même setup imaging.
@@ -131,7 +131,7 @@ conda activate ethoflow
 python scripts\create_project.py ^
     --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 ^
     --kind single ^
-    --dlc-config "E:\dlc-projects\souris-bottomview-labo-2026-06-05\config.yaml"
+    --dlc-config "D:\EthoFlow\models\souris-bottomview\config.yaml"
 ```
 
 Options :
@@ -385,39 +385,60 @@ Message important : même avec une qualité vidéo moyenne, DLC peut absorber un
 
 ### B.1 — Générer un dossier de config avec le wizard
 
-Plutôt que d'éditer le `_config.py` versionné du repo, le wizard te crée un fichier custom dans un dossier hors du repo. Chaque projet DLC = son propre dossier de config.
+Plutôt que d'éditer le `_config.py` versionné du repo, le wizard te crée un fichier custom dans un dossier dédié à ton projet DLC. Chaque projet DLC = son propre dossier autonome.
 
 ```cmd
 conda activate dlc
 python scripts\dlc_model-training\00_init_training_config.py
 ```
 
-Le wizard te demande à l'invite : où créer le dossier de config, nom du projet DLC, identifiant expérimentateur, WORKDIR (où DLC créera le projet), chemin de la vidéo pilote, choix SuperAnimal (`quadruped` ou `topviewmouse`), et nombre de frames k-means (défaut 120).
+Le wizard te demande à l'invite, dans l'ordre :
 
-Résultat : un `_config.py` rempli avec tes valeurs dans le dossier de ton choix (ex : `E:\dlc-training-configs\mon-projet\_config.py`).
+1. **Dossier de travail** (défaut `D:\EthoFlow\models`) — la racine où tes projets DLC vont vivre
+2. **Nom du projet DLC** (ex : `souris-bottomview`) — le dossier `<workdir>\<nom>\` sera créé automatiquement
+3. **Identifiant expérimentateur** (défaut `labo`)
+4. **Chemin de la vidéo pilote** (.mp4)
+5. **SuperAnimal** : `quadruped` (bottom-view, voit les pattes) ou `topviewmouse` (top-view, pattes non visibles)
+6. **Nombre de frames k-means** (défaut 120)
+
+Résultat : un `_config.py` écrit dans `D:\EthoFlow\models\souris-bottomview\_config.py`.
 
 ### B.2 — Setup du projet DLC + auto-extraction de frames
 
 ```cmd
 python scripts\dlc_model-training\01_setup_project.py ^
-    --config-dir E:\dlc-training-configs\mon-projet
+    --config-dir D:\EthoFlow\models\souris-bottomview
 ```
 
 Cette commande fait **tout en une passe** :
-1. Crée le projet DLC dans `WORKDIR\<PROJECT_NAME>-<EXPERIMENTER>-<date>\`
-2. **Auto-patche** le `config.yaml` DLC :
+
+1. Crée le projet DLC (DLC crée temporairement `<WORKDIR>\<name>-<exp>-<date>\`)
+2. **Merge le contenu du projet DLC dans le dossier de config** — le dossier daté est supprimé, tout vit maintenant côte à côte dans `D:\EthoFlow\models\souris-bottomview\`
+3. **Auto-patche** le `config.yaml` DLC :
    - Écrit les 12 bodyparts (`nose`, `left_ear`, `right_ear`, `front_paw_left/right`, `hind_paw_left/right`, `tail_base/mid/tip`, `center`, `left_flank`) — modifiable via `DEFAULT_BODYPARTS` dans `_config.py`
    - Écrit le skeleton anatomique (12 liaisons) — modifiable via `DEFAULT_SKELETON`
    - Règle `numframes2pick = 120` (ou la valeur `N_AUTO_FRAMES` de ton config)
-3. Lance `dlc.extract_frames` en mode k-means automatique
+4. Lance `dlc.extract_frames` en mode k-means automatique
 
-**Étape manuelle** après 01 : le nom du projet créé contient la date, il faut mettre à jour `PROJECT_DIR` dans ton `_config.py` avec le vrai nom (le script te l'imprime).
+**Aucune édition manuelle** de `_config.py` n'est nécessaire — `PROJECT_DIR = WORKDIR / PROJECT_NAME` est déterministe, ce que tu as tapé dans le wizard est exactement le chemin utilisé.
+
+**Layout final** :
+
+```
+D:\EthoFlow\models\souris-bottomview\
+├── _config.py              ← écrit par le wizard
+├── config.yaml             ← DLC (auto-patché)
+├── videos\
+├── labeled-data\
+├── training-datasets\
+└── dlc-models\
+```
 
 Tous les scripts numérotés 02-06 acceptent le même `--config-dir` :
 
 ```cmd
-python scripts\dlc_model-training\02_train.py --config-dir E:\dlc-training-configs\mon-projet
-python scripts\dlc_model-training\03_apply.py --config-dir E:\dlc-training-configs\mon-projet
+python scripts\dlc_model-training\02_train.py --config-dir D:\EthoFlow\models\souris-bottomview
+python scripts\dlc_model-training\03_apply.py --config-dir D:\EthoFlow\models\souris-bottomview
 :: etc.
 ```
 
@@ -454,7 +475,8 @@ Ouvre ton `config.yaml` → onglet « Label Frames ». Compte ~1 min par frame �
 ### B.4 — Premier entraînement
 
 ```cmd
-python scripts\dlc_model-training\02_train.py
+python scripts\dlc_model-training\02_train.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
 ```
 
 Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 50 epochs. Compte **~2-6h sur GPU 16 GB**.
@@ -466,15 +488,17 @@ Détail technique : `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w
 ### B.5 — Appliquer et QC visuel
 
 ```cmd
-python scripts\dlc_model-training\03_apply.py
+python scripts\dlc_model-training\03_apply.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
 ```
 
-Lance l'inférence sur la vidéo pilote + produit une vidéo annotée à `pcutoff=0.6`. Regarde `<PROJECT_DIR>\result-videos\<stem>\<stem>DLC*_labeled.mp4` — tu dois voir les 12 points suivre la souris correctement dans les cas normaux.
+Lance l'inférence sur la vidéo pilote + produit une vidéo annotée à `pcutoff=0.6`. Regarde `D:\EthoFlow\models\souris-bottomview\result-videos\<stem>\<stem>DLC*_labeled.mp4` — tu dois voir les 12 points suivre la souris correctement dans les cas normaux.
 
 Pour voir toutes les prédictions même de basse confiance (utile pour diagnostiquer où le modèle échoue) :
 
 ```cmd
-python scripts\dlc_model-training\create_labeled_video.py --pcutoff 0.3
+python scripts\dlc_model-training\create_labeled_video.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview --pcutoff 0.3
 ```
 
 Lecture clé — recommandation Tony : à `pcutoff=0.3`, un keypoint peut être **au bon endroit** même à basse confiance. La « confiance » exprime la ressemblance avec le training set : sur un modèle bien entraîné, une confiance à 30 % peut simplement signifier « la patte est floue mais c'est bien la patte, y'a rien d'autre qui lui ressemble dans l'image ». Le vrai problème apparaît quand **plusieurs zones de l'image ont une ressemblance similaire** : le modèle switche entre elles → jitter, télé-portations gauche/droite. C'est ce switch qui trahit un training set incomplet.
@@ -499,10 +523,11 @@ Le script `05_refine_outliers.py` reste dispo comme béquille pour attraper les 
 
 Recommandation Tony : « prendre autant d'animaux différents que possible » dans le training set. L'objectif est de présenter au réseau la plus large variété de situations possibles.
 
-Édite `ADDITIONAL_VIDEOS` dans `_config.py`, puis :
+Édite `ADDITIONAL_VIDEOS` dans ton `_config.py` (`D:\EthoFlow\models\souris-bottomview\_config.py`), puis :
 
 ```cmd
-python scripts\dlc_model-training\04_add_videos.py
+python scripts\dlc_model-training\04_add_videos.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
 ```
 
 Extrait 20 frames par nouvelle vidéo (k-means). Labellise dans la GUI, relance `02_train.py`. En viser 6-10 souris différentes dans le training set final si tu as ~40 animaux à analyser.
@@ -510,14 +535,15 @@ Extrait 20 frames par nouvelle vidéo (k-means). Labellise dans la GUI, relance 
 ### B.8 — Vérifier les inversions gauche/droite
 
 ```cmd
-python scripts\dlc_model-training\06_check_labels.py
+python scripts\dlc_model-training\06_check_labels.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
 ```
 
 Audit géométrique qui détecte les frames où left/right paws ont probablement été inversées par erreur pendant la labellisation manuelle. Utile après plusieurs rounds.
 
 ### B.9 — Enregistrer le modèle final
 
-Une fois satisfait de la précision, ton modèle DLC est à `<PROJECT_DIR>\config.yaml`. Depuis là, **tu es à l'Étape 1 du parcours principal** : crée un projet EthoFlow avec `create_project.py --dlc-config <ce chemin>` et enchaîne les étapes 2 à 9.
+Une fois satisfait de la précision, ton modèle DLC est à `D:\EthoFlow\models\souris-bottomview\config.yaml`. Depuis là, **tu es à l'Étape 1 du parcours principal** : crée un projet EthoFlow avec `create_project.py --dlc-config D:\EthoFlow\models\souris-bottomview\config.yaml` et enchaîne les étapes 2 à 9.
 
 Le même modèle DLC peut être pointé par plusieurs projets EthoFlow (batches différents, mois différents, etc.).
 
@@ -563,7 +589,7 @@ D:\ethoflow\projects\<nom_projet>\
 
 ```yaml
 # Bottomview
-dlc_project_config: E:\dlc-projects\souris-bottomview-labo-2026-06-05\config.yaml
+dlc_project_config: D:\EthoFlow\models\souris-bottomview\config.yaml
 
 # Topview (en plus)
 default_arenes_coords:
