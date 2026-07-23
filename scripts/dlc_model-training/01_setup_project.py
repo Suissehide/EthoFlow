@@ -110,23 +110,22 @@ def strip_date_from_dlc_project(dlc_config_path: Path) -> Path:
     old_project_dir.rename(new_project_dir)
     new_config = new_project_dir / "config.yaml"
 
-    # Update project_path dans le config.yaml pour matcher le nouveau chemin
-    try:
-        from ruamel.yaml import YAML
-        yaml = YAML()
-        yaml.preserve_quotes = True
-        with open(new_config, encoding="utf-8") as f:
-            cfg = yaml.load(f)
-        cfg["project_path"] = str(new_project_dir)
-        with open(new_config, "w", encoding="utf-8") as f:
-            yaml.dump(cfg, f)
-    except ImportError:
-        import yaml
-        with open(new_config, encoding="utf-8") as f:
-            cfg = yaml.safe_load(f)
-        cfg["project_path"] = str(new_project_dir)
-        with open(new_config, "w", encoding="utf-8") as f:
-            yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+    # Substitution texte globale sur config.yaml : remplace TOUTES les
+    # occurrences de l'ancien chemin par le nouveau. Couvre `project_path`
+    # ET les clés de `video_sets` (chemins absolus vers les vidéos), sans
+    # avoir à connaître la structure exacte du config DLC. Utile aussi si
+    # DLC ajoute d'autres champs contenant des chemins dans le futur.
+    old_str = str(old_project_dir)
+    new_str = str(new_project_dir)
+    text = new_config.read_text(encoding="utf-8")
+    text = text.replace(old_str, new_str)
+    # Sur Windows, DLC peut aussi stocker le chemin avec forward slashes
+    # dans certains champs — on remplace aussi cette variante.
+    old_fwd = old_str.replace("\\", "/")
+    new_fwd = new_str.replace("\\", "/")
+    if old_fwd != old_str:
+        text = text.replace(old_fwd, new_fwd)
+    new_config.write_text(text, encoding="utf-8")
 
     return new_config
 
