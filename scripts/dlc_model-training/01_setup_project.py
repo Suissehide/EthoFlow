@@ -76,47 +76,65 @@ def patch_dlc_config(config_path: Path, bodyparts: list[str],
             yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
 
 
-def strip_date_from_dlc_project(dlc_config_path: Path) -> Path:
-    """Renomme le dossier DLC pour supprimer le suffixe date de DLC.
+def merge_dlc_project_into_config_dir(dlc_config_path: Path,
+                                        config_dir: Path,
+                                        project_name: str,
+                                        experimenter: str) -> Path:
+    """Merge le contenu du dossier daté créé par DLC dans le dossier de config.
 
-    DLC crée un dossier nommé `<project>-<exp>-<YYYY-MM-DD>/`. Comme
-    la date rend le chemin non-déterministe (obligerait à re-configurer
-    PROJECT_DIR après chaque run), on renomme en `<project>-<exp>/`
-    juste après création et on ajuste `project_path` dans le config.yaml
-    interne de DLC.
+    DLC vient de créer un dossier `<WORKDIR>/<project_name>-<exp>-<date>/`.
+    On ne veut pas de ce dossier daté : le _config.py écrit par le wizard
+    vit dans `<WORKDIR>/<project_name>/` (== config_dir), et on souhaite
+    que le projet DLC vive dans le MÊME dossier — donc un seul dossier
+    propre par projet.
 
-    Retourne le nouveau chemin du config.yaml.
+    Ce helper :
+      1. déplace chaque fichier/sous-dossier du dossier daté vers config_dir
+      2. supprime le dossier daté (maintenant vide)
+      3. met à jour toutes les occurrences de l'ancien chemin dans
+         `config.yaml` (couvre `project_path` + les clés de `video_sets`)
+
+    Refuse et lève RuntimeError si config_dir contient déjà un item
+    homonyme (autre que _config.py) — signale un conflit avec un run
+    précédent que l'user doit nettoyer.
     """
-    import re
+    import shutil
 
-    old_project_dir = dlc_config_path.parent
-    workdir = old_project_dir.parent
-
-    # Match "-YYYY-MM-DD" à la fin du nom
-    m = re.match(r"^(.+)-(\d{4}-\d{2}-\d{2})$", old_project_dir.name)
-    if not m:
-        # Pas de suffixe date reconnu — rien à faire
+    dated_dir = dlc_config_path.parent
+    if dated_dir == config_dir:
+        # Rien à merger — déjà au bon endroit (ex : re-run après nettoyage)
         return dlc_config_path
-    new_name = m.group(1)
-    new_project_dir = workdir / new_name
 
-    if new_project_dir.exists():
-        raise RuntimeError(
-            f"Impossible de renommer {old_project_dir.name} → {new_name} : "
-            f"{new_project_dir} existe déjà.\n"
-            f"Renomme ou supprime l'ancien projet avant de relancer 01."
-        )
+    # Vérification stricte du nom attendu, pour ne pas merger un dossier
+    # créé par autre chose que ce script.
+    expected_prefix = f"{project_name}-{experimenter}-"
+    if not dated_dir.name.startswith(expected_prefix):
+        print(f"⚠  Dossier DLC inattendu ({dated_dir.name}), merge annulé.\n"
+              f"   Le _config.py devra être ajusté à la main.", file=sys.stderr)
+        return dlc_config_path
 
-    old_project_dir.rename(new_project_dir)
-    new_config = new_project_dir / "config.yaml"
+    # Move chaque item dans config_dir. shutil.move gère cross-device
+    # (rename plante si dated_dir et config_dir sont sur des volumes
+    # différents ; en pratique impossible ici mais safe).
+    for item in dated_dir.iterdir():
+        dst = config_dir / item.name
+        if dst.exists():
+            raise RuntimeError(
+                f"Conflit : {dst} existe déjà dans le dossier de config.\n"
+                f"Nettoie {config_dir} (garde uniquement _config.py) puis "
+                f"supprime aussi {dated_dir} avant de relancer 01."
+            )
+        shutil.move(str(item), str(dst))
+    dated_dir.rmdir()
+
+    new_config = config_dir / "config.yaml"
 
     # Substitution texte globale sur config.yaml : remplace TOUTES les
     # occurrences de l'ancien chemin par le nouveau. Couvre `project_path`
     # ET les clés de `video_sets` (chemins absolus vers les vidéos), sans
-    # avoir à connaître la structure exacte du config DLC. Utile aussi si
-    # DLC ajoute d'autres champs contenant des chemins dans le futur.
-    old_str = str(old_project_dir)
-    new_str = str(new_project_dir)
+    # avoir à connaître la structure exacte du config DLC.
+    old_str = str(dated_dir)
+    new_str = str(config_dir)
     text = new_config.read_text(encoding="utf-8")
     text = text.replace(old_str, new_str)
     # Sur Windows, DLC peut aussi stocker le chemin avec forward slashes
@@ -173,12 +191,22 @@ def main() -> None:
     )
     config_path = Path(config_path)
 
-    # ---- Strip du suffixe date que DLC ajoute au nom du dossier ----
-    # DLC crée <name>-<exp>-YYYY-MM-DD/. On renomme en <name>-<exp>/
-    # pour que le chemin matche PROJECT_DIR qui est déterministe dans
-    # _config.py — plus rien à éditer après ce script.
-    config_path = strip_date_from_dlc_project(config_path)
-    print(f"✅ Projet créé : {config_path.parent}\n")
+    # ---- Merge du dossier daté que DLC vient de créer dans le dossier
+    # de config existant (où vit _config.py écrit par le wizard) ----
+    # DLC crée <WORKDIR>/<name>-<exp>-YYYY-MM-DD/. On déplace tout son
+    # contenu dans <WORKDIR>/<name>/ (le dossier de config), et on
+    # supprime le dossier daté vide. Résultat : un SEUL dossier par
+    # projet, contenant à la fois _config.py et le projet DLC.
+    if args.config_dir is not None:
+        target_dir = args.config_dir.resolve()
+    else:
+        # Cas legacy sans --config-dir : on merge dans WORKDIR/PROJECT_NAME
+        target_dir = WORKDIR / PROJECT_NAME
+        target_dir.mkdir(parents=True, exist_ok=True)
+    config_path = merge_dlc_project_into_config_dir(
+        config_path, target_dir, PROJECT_NAME, EXPERIMENTER,
+    )
+    print(f"✅ Projet DLC prêt dans : {config_path.parent}\n")
 
     # ---- Auto-patch du config.yaml DLC ----
     print(f"Patch du config.yaml :")

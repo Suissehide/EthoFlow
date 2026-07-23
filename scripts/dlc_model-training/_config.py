@@ -29,12 +29,13 @@ PROJECT_NAME = "souris-bottomview"
 EXPERIMENTER = "labo"
 WORKDIR = Path(r"D:\EthoFlow\models")
 
-# Le dossier DLC est nommé <PROJECT_NAME>-<EXPERIMENTER>/ (sans suffixe
-# date). DLC ajoute une date au nom du dossier qu'il crée par défaut,
-# mais 01_setup_project.py la strip juste après la création pour que
-# ce chemin soit déterministe et matche exactement ce qui est demandé
-# ici — pas d'édition manuelle nécessaire après coup.
-PROJECT_DIR = WORKDIR / f"{PROJECT_NAME}-{EXPERIMENTER}"
+# Le projet DLC vit à `<WORKDIR>/<PROJECT_NAME>/` — même dossier que
+# ce _config.py. DLC ajoute par défaut un suffixe `-<EXPERIMENTER>-<date>`
+# au nom du dossier qu'il crée, mais 01_setup_project.py merge tout de
+# suite ce contenu dans <WORKDIR>/<PROJECT_NAME>/ (où vit déjà ton
+# _config.py écrit par le wizard) et supprime le dossier daté vide.
+# Résultat : un seul dossier propre par projet, pas d'édition manuelle.
+PROJECT_DIR = WORKDIR / PROJECT_NAME
 CONFIG = str(PROJECT_DIR / "config.yaml")
 
 
