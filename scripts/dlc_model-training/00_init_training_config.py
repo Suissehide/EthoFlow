@@ -16,17 +16,22 @@ Usage :
     python scripts/dlc_model-training/00_init_training_config.py
 
 Exemple de session interactive :
-    Où créer le dossier de config ? [E:/dlc-training-configs/mon-projet]
+    Dossier de travail : [D:/EthoFlow/models]
     Nom du projet DLC : souris-bottomview
+      → dossier de config : D:/EthoFlow/models/souris-bottomview
     Identifiant expérimentateur : labo
-    Dossier de travail DLC (WORKDIR) : E:/dlc-projects
     Chemin de la vidéo pilote : D:/data/bottom_view/970.mp4
-    Type de setup [single/multi] : single
-    → Écrit : E:/dlc-training-configs/mon-projet/_config.py
+    SuperAnimal [quadruped/topviewmouse] : quadruped
+    → Écrit : D:/EthoFlow/models/souris-bottomview/_config.py
 
     Étape suivante :
       python scripts/dlc_model-training/01_setup_project.py \\
-          --config-dir E:/dlc-training-configs/mon-projet
+          --config-dir D:/EthoFlow/models/souris-bottomview
+
+Le _config.py et le projet DLC lui-même vivent côte à côte sous le
+dossier de travail :
+    D:/EthoFlow/models/souris-bottomview/         ← _config.py
+    D:/EthoFlow/models/souris-bottomview-labo-2026-YY-MM/   ← projet DLC créé par 01
 """
 from __future__ import annotations
 
@@ -82,7 +87,7 @@ def render_config(
          f'PROJECT_NAME = "{project_name}"'),
         (r'EXPERIMENTER = "labo"',
          f'EXPERIMENTER = "{experimenter}"'),
-        (r'WORKDIR = Path(r"E:\dlc-projects")',
+        (r'WORKDIR = Path(r"D:\EthoFlow\models")',
          f'WORKDIR = Path(r"{workdir}")'),
         (r'PILOT_VIDEO = Path(r"D:\path\to\pilot_video.mp4")',
          f'PILOT_VIDEO = Path(r"{pilot_video}")'),
@@ -111,12 +116,20 @@ def main() -> None:
     print("=" * 60)
     print()
 
-    # ---- Où créer le dossier de config ----
-    config_dir_str = prompt(
-        "Où créer le dossier de config",
-        default=r"E:\dlc-training-configs\mon-projet",
+    # ---- Dossier de travail (racine commune config + projet DLC) ----
+    workdir_str = prompt(
+        "Dossier de travail (où config + projet DLC seront créés)",
+        default=r"D:\EthoFlow\models",
     )
-    config_dir = Path(config_dir_str)
+    workdir = workdir_str
+
+    # ---- Nom du projet ----
+    project_name = prompt("Nom du projet DLC (arbitraire)",
+                          default="souris-bottomview")
+
+    # ---- Dossier de config = <workdir>/<project_name> (computed) ----
+    config_dir = Path(workdir) / project_name
+    print(f"  → dossier de config : {config_dir}")
     target = config_dir / "_config.py"
     if target.exists():
         overwrite = prompt(
@@ -127,14 +140,10 @@ def main() -> None:
             print("Annulé.")
             sys.exit(0)
 
-    # ---- Valeurs projet ----
-    project_name = prompt("Nom du projet DLC (arbitraire)",
-                          default="souris-bottomview")
+    # ---- Identifiant expérimentateur ----
     experimenter = prompt("Identifiant expérimentateur (utilisé par DLC "
                           "dans les noms de fichiers)",
                           default="labo")
-    workdir = prompt("Dossier de travail DLC (où le projet sera créé)",
-                     default=r"E:\dlc-projects")
 
     # ---- Vidéo pilote ----
     while True:
@@ -190,10 +199,13 @@ def main() -> None:
     print(f"      --config-dir {config_dir}")
     print()
     print("Le script 01 va :")
-    print(f"  1. Créer le projet DLC dans {workdir}\\<PROJECT_NAME>-<experimenter>-<date>\\")
+    print(f"  1. Créer le projet DLC dans {workdir}\\{project_name}-{experimenter}-<date>\\")
     print(f"  2. Écrire automatiquement les 12 bodyparts + skeleton dans config.yaml")
     print(f"  3. Régler numframes2pick = {n_auto_frames}")
     print(f"  4. Extraire les {n_auto_frames} frames k-means")
+    print()
+    print(f"Le _config.py est dans {config_dir}\\ ; le projet DLC sera son")
+    print(f"voisin dans {workdir}\\{project_name}-{experimenter}-<date>\\.")
     print()
     print("Après 01, il te faudra mettre à jour PROJECT_DIR dans le _config.py")
     print("généré avec le nom exact du dossier créé (DLC ajoute la date).")

@@ -27,7 +27,7 @@ from pathlib import Path
 # Le dossier est créé par `01_setup_project.py` avec la date du jour.
 PROJECT_NAME = "souris-bottomview"
 EXPERIMENTER = "labo"
-WORKDIR = Path(r"E:\dlc-projects")
+WORKDIR = Path(r"D:\EthoFlow\models")
 
 # À METTRE À JOUR après le premier run de 01_setup_project.py avec la
 # vraie date figée par DLC. Ex : "souris-bottomview-labo-2026-06-05".
