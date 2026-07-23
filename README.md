@@ -474,6 +474,8 @@ Ouvre ton `config.yaml` → onglet « Label Frames ». Compte ~1 min par frame �
 
 ### B.4 — Premier entraînement
 
+> **N'oublie pas `--config-dir`** sur cette commande et toutes celles de B.5 à B.8. Sans ce flag, les scripts retombent sur le template `_config.py` du repo et vont chercher un projet DLC qui n'existe pas.
+
 ```cmd
 python scripts\dlc_model-training\02_train.py ^
     --config-dir D:\EthoFlow\models\souris-bottomview
@@ -482,6 +484,18 @@ python scripts\dlc_model-training\02_train.py ^
 Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 50 epochs. Compte **~2-6h sur GPU 16 GB**.
 
 Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
+
+**Sur le choix de 50 epochs** : c'est suffisant pour un premier passage. DLC démarre avec les poids pré-entraînés SuperAnimal-Quadruped — le backbone est déjà bon, seule la tête décodeur pour les 12 keypoints custom apprend vraiment. Sur 200-300 frames, 50 epochs suffit pour converger.
+
+Après B.4, regarde la RMSE de test que DLC imprime :
+
+- **RMSE_pcutoff < 8 px** sur 1024×1080 (~0.8 %) : c'est bon, passe à B.5
+- **8-15 px** : marge d'amélioration, le modèle est déjà utilisable pour un premier QC
+- **> 15 px** : problème. Soit tu manques de couverture sur des situations spécifiques (cf. B.6), soit tes labels sont incohérents (cf. B.8)
+
+**Quand bumper les epochs** :
+- Si la loss train **est encore clairement en décroissance** à 50 epochs (regarde les courbes) → passe à 100 dans `_config.py` (variable `EPOCHS`)
+- Pour les **passes de refinement** après B.6 (fine-tuning avec les nouvelles frames outlier), garde 20-30 epochs — c'est du fine-tuning, pas un entraînement complet
 
 Détail technique : `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w32"` sinon size mismatch au chargement des poids pré-entraînés.
 
