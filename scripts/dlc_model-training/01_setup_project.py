@@ -9,13 +9,18 @@ Workflow simplifié :
        (wizard → écrit ton _config.py custom)
     2. python scripts/dlc_model-training/01_setup_project.py \\
            --config-dir <dossier créé à l'étape 1>
-       → ce script écrit lui-même PROJECT_DIR dans ton _config.py une
-         fois le projet DLC créé ; tu n'as rien à éditer à la main
     3. dlc.label_frames(CONFIG) dans une session Python pour labelliser
        (ou GUI : python -c "import deeplabcut; deeplabcut.launch_dlc()")
 
-Sans `--config-dir`, le script utilise le _config.py template du repo
-(valeurs par défaut, PROJECT_DIR à éditer manuellement à la fin).
+À l'étape 2, ce script :
+    - crée le projet DLC dans WORKDIR
+    - strip le suffixe date que DLC ajoute au nom du dossier (le résultat
+      matche exactement <PROJECT_NAME>-<EXPERIMENTER>/, déterministe)
+    - patche le config.yaml de DLC avec DEFAULT_BODYPARTS +
+      DEFAULT_SKELETON + numframes2pick
+    - extrait N_AUTO_FRAMES frames en k-means automatique
+
+Rien à éditer manuellement dans _config.py à la fin.
 
 Pré-requis : conda activate dlc, DeepLabCut 3.x + PyTorch, vidéo pilote mp4.
 """
@@ -71,31 +76,59 @@ def patch_dlc_config(config_path: Path, bodyparts: list[str],
             yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
 
 
-def patch_project_dir_in_config_py(config_py_path: Path,
-                                     project_dir_name: str) -> bool:
-    """Écrit le vrai nom du dossier DLC dans PROJECT_DIR du _config.py.
+def strip_date_from_dlc_project(dlc_config_path: Path) -> Path:
+    """Renomme le dossier DLC pour supprimer le suffixe date de DLC.
 
-    Utilise un find + replace ligne par ligne pour ne toucher qu'à la
-    ligne qui commence par `PROJECT_DIR = `. Retourne True si patch
-    appliqué, False sinon (fichier absent ou pattern non trouvé).
+    DLC crée un dossier nommé `<project>-<exp>-<YYYY-MM-DD>/`. Comme
+    la date rend le chemin non-déterministe (obligerait à re-configurer
+    PROJECT_DIR après chaque run), on renomme en `<project>-<exp>/`
+    juste après création et on ajuste `project_path` dans le config.yaml
+    interne de DLC.
+
+    Retourne le nouveau chemin du config.yaml.
     """
-    if not config_py_path.exists():
-        return False
-    lines = config_py_path.read_text(encoding="utf-8").splitlines(keepends=True)
-    new_lines = []
-    patched = False
-    for line in lines:
-        stripped = line.lstrip()
-        if stripped.startswith("PROJECT_DIR = ") and not patched:
-            new_lines.append(
-                f'PROJECT_DIR = WORKDIR / "{project_dir_name}"\n'
-            )
-            patched = True
-        else:
-            new_lines.append(line)
-    if patched:
-        config_py_path.write_text("".join(new_lines), encoding="utf-8")
-    return patched
+    import re
+
+    old_project_dir = dlc_config_path.parent
+    workdir = old_project_dir.parent
+
+    # Match "-YYYY-MM-DD" à la fin du nom
+    m = re.match(r"^(.+)-(\d{4}-\d{2}-\d{2})$", old_project_dir.name)
+    if not m:
+        # Pas de suffixe date reconnu — rien à faire
+        return dlc_config_path
+    new_name = m.group(1)
+    new_project_dir = workdir / new_name
+
+    if new_project_dir.exists():
+        raise RuntimeError(
+            f"Impossible de renommer {old_project_dir.name} → {new_name} : "
+            f"{new_project_dir} existe déjà.\n"
+            f"Renomme ou supprime l'ancien projet avant de relancer 01."
+        )
+
+    old_project_dir.rename(new_project_dir)
+    new_config = new_project_dir / "config.yaml"
+
+    # Update project_path dans le config.yaml pour matcher le nouveau chemin
+    try:
+        from ruamel.yaml import YAML
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        with open(new_config, encoding="utf-8") as f:
+            cfg = yaml.load(f)
+        cfg["project_path"] = str(new_project_dir)
+        with open(new_config, "w", encoding="utf-8") as f:
+            yaml.dump(cfg, f)
+    except ImportError:
+        import yaml
+        with open(new_config, encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        cfg["project_path"] = str(new_project_dir)
+        with open(new_config, "w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg, f, sort_keys=False, allow_unicode=True)
+
+    return new_config
 
 
 def main() -> None:
@@ -140,41 +173,22 @@ def main() -> None:
         copy_videos=True,
     )
     config_path = Path(config_path)
-    print(f"✅ Projet créé : {config_path}")
+
+    # ---- Strip du suffixe date que DLC ajoute au nom du dossier ----
+    # DLC crée <name>-<exp>-YYYY-MM-DD/. On renomme en <name>-<exp>/
+    # pour que le chemin matche PROJECT_DIR qui est déterministe dans
+    # _config.py — plus rien à éditer après ce script.
+    config_path = strip_date_from_dlc_project(config_path)
+    print(f"✅ Projet créé : {config_path.parent}\n")
 
     # ---- Auto-patch du config.yaml DLC ----
-    print(f"\nPatch du config.yaml :")
+    print(f"Patch du config.yaml :")
     print(f"  · bodyparts       = {len(DEFAULT_BODYPARTS)} keypoints")
     print(f"  · skeleton        = {len(DEFAULT_SKELETON)} liaisons")
     print(f"  · numframes2pick  = {N_AUTO_FRAMES}")
     patch_dlc_config(config_path, DEFAULT_BODYPARTS, DEFAULT_SKELETON,
                       N_AUTO_FRAMES)
     print(f"  → OK\n")
-
-    # ---- Auto-patch de PROJECT_DIR dans le _config.py du user ----
-    # DLC choisit lui-même le nom exact du dossier (ajout de la date au
-    # PROJECT_NAME) : on va donc lire ce nom réel et l'écrire dans le
-    # _config.py que le wizard a produit, pour que les scripts 02-06
-    # trouvent le projet sans que l'user n'ait rien à éditer à la main.
-    project_dir_name = config_path.parent.name
-    if args.config_dir is not None:
-        user_config_py = args.config_dir.resolve() / "_config.py"
-        if patch_project_dir_in_config_py(user_config_py, project_dir_name):
-            print(f"✓ PROJECT_DIR écrit dans {user_config_py} :")
-            print(f"     PROJECT_DIR = WORKDIR / \"{project_dir_name}\"\n")
-        else:
-            print(f"⚠  PROJECT_DIR n'a pas pu être patché automatiquement "
-                  f"dans {user_config_py}.\n"
-                  f"   Édite-le à la main :\n"
-                  f"     PROJECT_DIR = WORKDIR / \"{project_dir_name}\"\n",
-                  file=sys.stderr)
-    else:
-        # Cas où on tourne sur le template du repo (pas de --config-dir)
-        print(f"⚠  Sans --config-dir, PROJECT_DIR n'est pas patché "
-              f"automatiquement.\n"
-              f"   Édite scripts/dlc_model-training/_config.py :\n"
-              f"     PROJECT_DIR = WORKDIR / \"{project_dir_name}\"\n",
-              file=sys.stderr)
 
     # ---- Extraction k-means ----
     if args.skip_extract:

@@ -29,9 +29,12 @@ PROJECT_NAME = "souris-bottomview"
 EXPERIMENTER = "labo"
 WORKDIR = Path(r"D:\EthoFlow\models")
 
-# À METTRE À JOUR après le premier run de 01_setup_project.py avec la
-# vraie date figée par DLC. Ex : "souris-bottomview-labo-2026-06-05".
-PROJECT_DIR = WORKDIR / f"{PROJECT_NAME}-{EXPERIMENTER}-2026-06-05"
+# Le dossier DLC est nommé <PROJECT_NAME>-<EXPERIMENTER>/ (sans suffixe
+# date). DLC ajoute une date au nom du dossier qu'il crée par défaut,
+# mais 01_setup_project.py la strip juste après la création pour que
+# ce chemin soit déterministe et matche exactement ce qui est demandé
+# ici — pas d'édition manuelle nécessaire après coup.
+PROJECT_DIR = WORKDIR / f"{PROJECT_NAME}-{EXPERIMENTER}"
 CONFIG = str(PROJECT_DIR / "config.yaml")
 
 
