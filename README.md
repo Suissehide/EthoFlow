@@ -459,14 +459,25 @@ Détail des étapes B.3.1 → B.3.4 ci-dessous.
 
 Recommandation Tony : « prendre autant d'animaux différents que possible » **dès le premier entraînement**. C'est ce qui empêche le modèle d'apprendre des raccourcis liés à une souris ou un décor unique.
 
-Édite `ADDITIONAL_VIDEOS` dans ton `_config.py` (`D:\EthoFlow\models\souris-bottomview\_config.py`) avec 4-6 autres vidéos (souris différentes du pilote), puis :
+Passe les vidéos directement en CLI — le script écrit automatiquement dans `ADDITIONAL_VIDEOS` de ton `_config.py`, tu n'as pas besoin d'ouvrir le fichier :
 
 ```cmd
 python scripts\dlc_model-training\04_add_videos.py ^
-    --config-dir D:\EthoFlow\models\souris-bottomview
+    --config-dir D:\EthoFlow\models\souris-bottomview ^
+    --videos D:\data\bottom_view\2.mp4 D:\data\bottom_view\3.mp4 ^
+             D:\data\bottom_view\4.mp4 D:\data\bottom_view\5.mp4
 ```
 
-Extrait `NEW_VIDEO_FRAMES` (défaut 20) frames k-means par nouvelle vidéo.
+Extrait `NEW_VIDEO_FRAMES` (défaut 20) frames k-means par nouvelle vidéo. Par défaut le script **ajoute** aux vidéos déjà présentes dans `ADDITIONAL_VIDEOS` (dédup automatique), passe `--replace-videos` pour repartir de zéro.
+
+Override du nombre de kmeans par vidéo directement en CLI si tu veux dévier du défaut :
+
+```cmd
+python scripts\dlc_model-training\04_add_videos.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview ^
+    --videos D:\data\... ^
+    --new-video-frames 10
+```
 
 **Ajuste les quotas k-means selon le nombre de vidéos** pour rester dans le range 100-150 kmeans total recommandé par Tony :
 
