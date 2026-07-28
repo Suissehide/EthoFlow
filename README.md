@@ -204,14 +204,22 @@ Le pipeline lit un Excel maître qui décrit tes souris. **Le template a été g
 
 Deux schémas selon **le nombre d'animaux par vidéo** :
 
-**1 animal / vidéo** — feuille `Sessions` — 1 ligne par souris (=1 vidéo=1 session) :
+**1 animal / vidéo** — feuille `Sessions` — **1 ligne par vidéo** (= 1 session) :
 
-| mouse_id | sex | group | cage | tail_label | birth_date | animal_id | line | genotype_mcc | captopril |
-|---|---|---|---|---|---|---|---|---|---|
-| 970 | F | MCCf/f | CD329 | 1 | 2024-10-15 | 54310 | MCC\*Cdh5-cre | fl/fl | oui |
-| 971 | F | MCCiECKO | CD330 | 2 | 2024-10-15 | 54311 | MCC\*Cdh5-cre | fl/fl | oui |
+| id | mouse_id | sex | group | cage | birth_date | genotype_mcc | captopril |
+|---|---|---|---|---|---|---|---|
+| 971 | 971 | F | MCCiECKO | CD330 | 2024-10-15 | fl/fl | oui |
+| 970-M1 | 970 | F | MCCf/f | CD329 | 2024-10-15 | fl/fl | oui |
+| 970-M2 | 970 | F | MCCf/f | CD329 | 2024-10-15 | fl/fl | oui |
 
-`mouse_id` = nom du fichier vidéo attendu (`970.mp4`, `971.mp4`). `group` = ta variable de comparaison principale.
+Deux colonnes clés à ne pas confondre :
+
+- **`id`** — nom du fichier vidéo **sans extension** (`970-M1` → `970-M1.mp4` dans `--videos-dir`). C'est la **clé unique de la session** et le nom du dossier créé dans `data/raw/` (préfixé `BV-`).
+- **`mouse_id`** — identifie l'**animal**. Peut se répéter sur plusieurs lignes si la même souris est filmée à plusieurs timepoints (**design longitudinal**) : dans l'exemple, la souris 970 apparaît deux fois avec des `id` distincts → deux sessions séparées, regroupables par `mouse_id` dans les analyses.
+
+`group` = ta variable de comparaison principale. Les autres colonnes sont optionnelles.
+
+> Le script refuse de tourner si deux lignes ont le même `id` (ça écraserait une session). Sans colonne `id`, `mouse_id` sert d'identifiant de session — mode historique 1 vidéo/souris, sans support longitudinal.
 
 **N animaux / vidéo** — 3 feuilles :
 

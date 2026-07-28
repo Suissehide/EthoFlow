@@ -60,9 +60,15 @@ def _write_instructions_single(ws, project_name: str) -> None:
     ws.append(["Schéma :", "1 animal par vidéo (single)"])
     ws.append([])
     ws.append(["Feuille 'Sessions'"])
-    ws.append(["  - Une ligne par souris."])
-    ws.append(["  - 'mouse_id' doit correspondre EXACTEMENT au nom du fichier vidéo"])
-    ws.append(["    (ex. mouse_id=970 → 970.mp4 dans --videos-dir)"])
+    ws.append(["  - Une ligne par VIDÉO (= une session)."])
+    ws.append(["  - 'id' est OBLIGATOIRE : nom du fichier vidéo sans extension."])
+    ws.append(["    (ex. id=970 → 970.mp4 dans --videos-dir)"])
+    ws.append(["    C'est la clé unique de la session, et le nom du dossier créé"])
+    ws.append(["    dans data/raw/."])
+    ws.append(["  - 'mouse_id' identifie l'ANIMAL. Il peut se répéter sur"])
+    ws.append(["    plusieurs lignes si la même souris est filmée plusieurs fois"])
+    ws.append(["    (design longitudinal). Dans ce cas 'id' diffère à chaque"])
+    ws.append(["    ligne : 970-M1, 970-M2, etc."])
     ws.append(["  - 'group' est la variable de comparaison principale (ex. génotype)."])
     ws.append(["  - Toutes les autres colonnes sont optionnelles ; laisse vide si N/A."])
     ws.append([])
@@ -86,20 +92,26 @@ def _write_instructions_single(ws, project_name: str) -> None:
 
 def _write_sessions_single(ws) -> None:
     headers = [
+        "id",  # OBLIGATOIRE — nom du fichier vidéo (sans extension), clé unique
         "mouse_id", "sex", "group", "cage", "tail_label", "birth_date",
         "animal_id", "line", "origin",
         "genotype_mcc", "genotype_cdh5_cre", "genotype_col1_egfp",
         "captopril", "notes",
     ]
     ws.append(headers)
-    # Deux lignes d'exemple grisées pour montrer le format attendu
+    # Trois lignes d'exemple grisées pour montrer le format attendu.
+    # Les deux dernières montrent la MÊME souris (970) enregistrée à deux
+    # timepoints : `id` diffère (donc 2 sessions), `mouse_id` est identique.
     example_rows = [
-        [970, "F", "MCCf/f",  "CD329", 1, "2024-10-15", 54310,
+        ["971", 971, "F", "MCCiECKO", "CD330", 2, "2024-10-15", 54311,
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
          "exemple à supprimer"],
-        [971, "F", "MCCiECKO","CD330", 2, "2024-10-15", 54311,
+        ["970-M1", 970, "F", "MCCf/f", "CD329", 1, "2024-10-15", 54310,
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
-         "exemple à supprimer"],
+         "exemple — même souris, timepoint 1"],
+        ["970-M2", 970, "F", "MCCf/f", "CD329", 1, "2024-10-15", 54310,
+         "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
+         "exemple — même souris, timepoint 2"],
     ]
     from openpyxl.styles import Font, PatternFill
     grey_font = Font(color="888888", italic=True)
