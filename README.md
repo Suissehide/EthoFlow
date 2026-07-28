@@ -13,8 +13,7 @@ La CLI reflète cette distinction :
 
 - `create_project.py --kind single` = 1 animal par vidéo, pas d'arena split
 - `create_project.py --kind multi` = N animaux par vidéo, arena split activé + coords par défaut écrites
-- `sync_from_excel_single.py` = schéma Excel « 1 ligne par souris »
-- `sync_from_excel_multi.py` = schéma Excel « 1 ligne par vidéo + Arena_Mapping »
+- `sync_from_excel.py` détecte automatiquement le schéma depuis les feuilles de l'Excel — un seul script pour les deux cas
 
 Le pipeline part d'une acquisition brute (vidéo + Excel des souris) et produit des CSV statistiques, des figures et des vidéos annotées, groupables par n'importe quelle variable expérimentale (génotype, traitement, sexe, etc.).
 
@@ -231,29 +230,28 @@ Un exemple pré-rempli est présent dans chaque feuille (lignes grisées, à sup
 
 ### Étape 3 — sync des sessions
 
-Deux scripts selon le schéma Excel utilisé :
+Un seul script, qui **détecte le schéma automatiquement** depuis les feuilles de ton Excel (feuille `Sessions` → 1 animal/vidéo ; feuilles `Trials_Videos` + `Arena_Mapping` → N animaux/vidéo).
 
-**1 animal / vidéo** — `sync_from_excel_single.py` :
+**Mode interactif** (le script demande ce qui manque) :
 
 ```cmd
-python scripts\sync_from_excel_single.py ^
-    --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 ^
-    --excel D:\ethoflow\projects\bottomview-MCC-2026-06\bottomview_sessions.xlsx ^
+python scripts\sync_from_excel.py
+```
+
+Il propose un menu des projets trouvés sous `D:\EthoFlow\projects`, auto-détecte l'Excel à la racine du projet, puis demande le dossier des vidéos et la date.
+
+**Mode arguments** :
+
+```cmd
+python scripts\sync_from_excel.py ^
+    --project-dir D:\EthoFlow\projects\bottomview-MCC-2026-06 ^
     --videos-dir E:\data\bottom_view\08062026 ^
     --date 2026-06-08
 ```
 
-Répète la commande pour chaque batch d'acquisition (`--videos-dir` change, l'Excel reste le même). Utilise `--overwrite` pour re-générer sur une metadata déjà existante.
+`--excel` est optionnel : le script prend le `*_sessions.xlsx` à la racine du projet. Répète la commande pour chaque batch d'acquisition (`--videos-dir` change, l'Excel reste le même). `--overwrite` pour re-générer une metadata existante, `--dry-run` pour prévisualiser.
 
-**N animaux / vidéo** — `sync_from_excel_multi.py` :
-
-```cmd
-python scripts\sync_from_excel_multi.py ^
-    --project-dir D:\ethoflow\projects\openfield-M1-2025-10 ^
-    --excel D:\path\to\OpenField_trials.xlsx
-```
-
-Résultat dans les deux cas : un `metadata.yaml` par session dans `data/raw/<session_id>/`. Vérifie qu'au moins un fichier contient `source_video:` avec un chemin qui existe.
+Résultat : un `metadata.yaml` par session dans `data/raw/<session_id>/`.
 
 ### Étape 4 — (multi-animal seulement) crop optionnel des arènes
 
@@ -785,7 +783,7 @@ default_arenes_coords:
 - `create_project.py` — Init un nouveau projet EthoFlow (dossiers vides + pipeline_config)
 
 **Sync depuis Excel**
-- `sync_from_excel_multi.py` (schéma N animaux / vidéo) / `sync_from_excel_single.py` (schéma 1 animal / vidéo) — Excel maître → 1 metadata.yaml par session
+- `sync_from_excel.py` — Excel maître → 1 metadata.yaml par session. Détecte le schéma (1 animal/vidéo vs N animaux/vidéo) depuis les feuilles présentes.
 - `patch_captopril.py` — Backfill le champ captopril sans re-syncer (schéma 1 animal / vidéo)
 
 **Multi-animal par vidéo — préparation**

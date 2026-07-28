@@ -1,5 +1,5 @@
 # Template de metadata pour une session.
-# En pratique, ce fichier est généré automatiquement par scripts/sync_from_excel_multi.py
+# En pratique, ce fichier est généré automatiquement par scripts/sync_from_excel.py
 # à partir du fichier Excel maître. Ce template sert de référence du schéma.
 
 session_id: OF-M1-20251010-V01

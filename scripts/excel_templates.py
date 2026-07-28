@@ -2,19 +2,19 @@
 
 Appelés par `create_project.py` pour déposer un `<project>/<name>_sessions.xlsx`
 à la racine du projet — l'utilisateur le remplit puis le passe à
-`sync_from_excel_single.py` ou `sync_from_excel_multi.py` selon le --kind.
+`sync_from_excel.py`, qui détecte le schéma automatiquement depuis les
+feuilles présentes.
 
 Deux schémas selon le nombre d'animaux par vidéo :
 
-- `single` : 1 souris par vidéo → 1 feuille Sessions à plat, colonnes
-  matchant META_FIELDS_OPTIONAL de sync_from_excel_single.py.
+- `single` : 1 souris par vidéo → 1 feuille `Sessions` à plat, avec
+  `id` (nom du fichier vidéo, clé de session) en première colonne.
 - `multi`  : N souris dans N arènes par vidéo → 3 feuilles
-  (Subjects, Trials_Videos, Arena_Mapping), matchant l'attendu de
-  sync_from_excel_multi.py.
+  (`Subjects`, `Trials_Videos`, `Arena_Mapping`).
 
 Chaque template inclut une feuille `Instructions` qui explique quoi remplir
-et pointe vers le script de sync correspondant. Colonnes taillées large,
-en-têtes en gras, quelques exemples grisés commentés pour référence.
+et donne la commande de sync. Colonnes taillées large, en-têtes en gras,
+lignes d'exemple grisées pour montrer le format attendu.
 
 Fonction publique unique :
 
@@ -73,7 +73,7 @@ def _write_instructions_single(ws, project_name: str) -> None:
     ws.append(["  - Toutes les autres colonnes sont optionnelles ; laisse vide si N/A."])
     ws.append([])
     ws.append(["Après remplissage, sync depuis un env conda 'ethoflow' :"])
-    ws.append(["  python scripts/sync_from_excel_single.py \\"])
+    ws.append(["  python scripts/sync_from_excel.py \\"])
     ws.append(["      --project-dir <chemin de ce projet> \\"])
     ws.append(["      --excel <chemin de ce fichier> \\"])
     ws.append(["      --videos-dir <dossier contenant les .mp4> \\"])
@@ -146,7 +146,7 @@ def _write_instructions_multi(ws, project_name: str) -> None:
     ws.append(["  - MouseID = souris présente dans cette arène pour cette vidéo."])
     ws.append([])
     ws.append(["Après remplissage, sync depuis l'env conda 'ethoflow' :"])
-    ws.append(["  python scripts/sync_from_excel_multi.py \\"])
+    ws.append(["  python scripts/sync_from_excel.py \\"])
     ws.append(["      --project-dir <chemin de ce projet> \\"])
     ws.append(["      --excel <chemin de ce fichier> \\"])
     ws.append(["      --videos-dir <dossier contenant les .mp4>"])

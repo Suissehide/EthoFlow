@@ -59,41 +59,71 @@ def add_project_dir_arg(
     *,
     required: bool = False,
 ) -> None:
-    """Ajoute `--project-dir` à un parser argparse.
+    """Ajoute `--project-dir` (+ `--no-prompt`) à un parser argparse.
 
-    Si `required=False` (défaut), l'absence de --project-dir fait retomber
-    sur l'arbo legacy `<repo>/data/`. Si `required=True`, le script refuse
-    de tourner sans projet explicite — utile pour les nouvelles features
-    qui ne devraient jamais s'appliquer à l'arbo legacy (e.g.
-    sync_from_excel_single).
+    `--project-dir` n'est jamais marqué `required` au sens argparse :
+    s'il manque, `resolve_project()` demande le projet à l'invite (menu
+    des projets trouvés sous D:/EthoFlow/projects, ou saisie libre).
+    Le paramètre `required` est conservé pour compat d'appel mais n'a
+    plus d'effet — passe `--no-prompt` pour un échec franc en CI.
     """
     parser.add_argument(
         "--project-dir",
         type=Path,
         default=None,
-        required=required,
         help=(
-            "Racine du projet EthoFlow (e.g. D:\\ethoflow\\projects\\foo). "
-            "Si absent, retombe sur la racine legacy <repo>/."
+            "Racine du projet EthoFlow (e.g. D:\\EthoFlow\\projects\\foo). "
+            "Demandé à l'invite si absent."
         ),
     )
+    # Évite le doublon si le script a déjà ajouté --no-prompt lui-même
+    if not any(a.dest == "no_prompt" for a in parser._actions):
+        parser.add_argument(
+            "--no-prompt",
+            action="store_true",
+            help=(
+                "Échoue si un argument requis manque, au lieu de le "
+                "demander à l'invite (mode non-interactif, CI)."
+            ),
+        )
+
+
+# Cache du projet résolu interactivement : certains scripts appellent
+# resolve_project() plusieurs fois (run_vame par sous-commande), on ne
+# veut poser la question qu'une seule fois par process.
+_RESOLVED_PROJECT: Path | None = None
 
 
 def resolve_project(args: argparse.Namespace | Path | None) -> Path:
     """Retourne la racine du projet à utiliser.
 
-    Accepte soit le Namespace argparse complet (et lit args.project_dir),
-    soit directement un Path ou None pour les appels programmatiques.
-    Fallback sur REPO_ROOT si rien n'est fourni — rétrocompatibilité.
+    Accepte le Namespace argparse (lit `args.project_dir`), ou
+    directement un Path / None pour les appels programmatiques.
+
+    Si `project_dir` est absent, demande le projet à l'invite via
+    `interactive.prompt_project()` — menu numéroté des projets trouvés
+    sous D:/EthoFlow/projects, ou saisie d'un chemin libre. La réponse
+    est mise en cache pour le reste du process.
+
+    En mode `--no-prompt`, échoue au lieu de demander.
     """
-    if args is None:
-        return REPO_ROOT
+    global _RESOLVED_PROJECT
+
     if isinstance(args, Path):
         return args.resolve()
-    project = getattr(args, "project_dir", None)
-    if project is None:
-        return REPO_ROOT
-    return Path(project).resolve()
+    if args is not None:
+        project = getattr(args, "project_dir", None)
+        if project is not None:
+            return Path(project).resolve()
+
+    if _RESOLVED_PROJECT is not None:
+        return _RESOLVED_PROJECT
+
+    no_prompt = bool(getattr(args, "no_prompt", False)) if args else False
+    # Import tardif : interactive importe paths pour DEFAULT_PROJECTS_ROOT
+    from interactive import prompt_project  # noqa: WPS433
+    _RESOLVED_PROJECT = prompt_project(no_prompt=no_prompt)
+    return _RESOLVED_PROJECT
 
 
 # ----------------------------------------------------------------------

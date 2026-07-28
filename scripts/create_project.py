@@ -294,7 +294,7 @@ def main() -> None:
     print()
     if args.kind == "single":
         print(f"  2. Sync des sessions depuis l'Excel :")
-        print(f"       python scripts/sync_from_excel_single.py \\")
+        print(f"       python scripts/sync_from_excel.py \\")
         print(f"           --project-dir {project} \\")
         print(f"           --excel {excel_path} \\")
         print(f"           --videos-dir <dossier des .mp4> \\")
@@ -305,7 +305,7 @@ def main() -> None:
               f"--all --mode custom")
     else:
         print(f"  2. Sync des sessions depuis l'Excel multi-animal :")
-        print(f"       python scripts/sync_from_excel_multi.py \\")
+        print(f"       python scripts/sync_from_excel.py \\")
         print(f"           --project-dir {project} \\")
         print(f"           --excel {excel_path} \\")
         print(f"           --videos-dir <dossier des .mp4>")

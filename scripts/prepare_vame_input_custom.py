@@ -180,7 +180,7 @@ def process_session(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    add_project_dir_arg(parser, required=True)
+    add_project_dir_arg(parser)
     parser.add_argument(
         "session_ids", nargs="*",
         help="Sessions à traiter (défaut: toutes celles avec un .h5 dans dlc-output/)",
