@@ -99,9 +99,13 @@ def main() -> None:
     parser.add_argument(
         "--dlc-config", type=str, default=None,
         help=(
-            "Chemin absolu vers le config.yaml du projet DLC (sera écrit "
-            "dans pipeline_config.yaml comme `dlc_project_config`). "
-            "Peut être édité manuellement plus tard."
+            "OPTIONNEL. Chemin absolu vers le config.yaml d'un projet DLC "
+            "déjà entraîné. Écrit dans pipeline_config.yaml comme "
+            "`dlc_project_config`, lu uniquement par run_dlc_inference.py "
+            "--mode custom. Le modèle DLC reste où il est (jamais copié) "
+            "et peut servir à autant de projets EthoFlow que tu veux. "
+            "Saute ce flag si tu ne sais pas encore quel modèle utiliser — "
+            "édite pipeline_config.yaml plus tard, ou relance avec --force."
         ),
     )
     parser.add_argument(

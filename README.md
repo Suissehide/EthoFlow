@@ -134,30 +134,53 @@ python scripts\create_project.py ^
     --dlc-config "D:\EthoFlow\models\souris-bottomview\config.yaml"
 ```
 
-Options :
-- `--kind single` — **1 animal par vidéo**, pas d'arena splitting
-- `--kind multi` — **N animaux par vidéo dans N arènes**, arena splitting activé + coords d'arène par défaut écrites dans `pipeline_config.yaml`
+#### `--kind` — obligatoire, détermine le nombre d'animaux par vidéo
 
-Choisis en fonction du nombre d'animaux par vidéo, pas de l'angle caméra. Pour un projet bottom-view avec 4 souris dans 4 arènes séparées, prends `--kind multi` puis ajuste les `default_arenes_coords` avec `calibrate_arenes.py`.
+| Valeur | Quand l'utiliser | Effet |
+|---|---|---|
+| `single` | **1 animal par vidéo** (1 vidéo = 1 session) | Pas d'arena splitting. Excel à 1 feuille `Sessions`. |
+| `multi` | **N animaux par vidéo dans N arènes séparées** (1 vidéo = N sessions) | Arena splitting activé + `default_arenes_coords` écrites dans `pipeline_config.yaml`. Excel à 3 feuilles. |
 
-**Ce que ça produit** :
+Choisis **en fonction du nombre d'animaux par vidéo, pas de l'angle caméra**. Un projet bottom-view avec 4 souris dans 4 arènes séparées est un `--kind multi` ; un projet top-view avec une seule souris en arène ouverte est un `--kind single`.
+
+Pour du `multi`, ajuste ensuite les coordonnées d'arène à ton setup avec `calibrate_arenes.py` (les valeurs par défaut correspondent à une grille 2×2 sur du 1024×1080).
+
+#### `--dlc-config` — optionnel, pointeur vers le modèle DLC
+
+Le modèle DLC et le projet EthoFlow sont **complètement indépendants** :
+
+- Le modèle vit dans `D:\EthoFlow\models\<nom>\`, **jamais copié** dans le projet EthoFlow
+- Un même modèle peut être utilisé par autant de projets EthoFlow que tu veux (batches différents, mois différents, expériences différentes)
+- Supprimer un projet EthoFlow ne touche pas au modèle ; re-entraîner le modèle profite immédiatement à tous les projets qui pointent dessus
+
+`--dlc-config` écrit juste une ligne dans `configs/pipeline_config.yaml` :
+
+```yaml
+dlc_project_config: D:\EthoFlow\models\souris-bottomview\config.yaml
+```
+
+Cette ligne est lue **uniquement par `run_dlc_inference.py --mode custom`** (étape 5) pour savoir quel modèle appliquer.
+
+**Tu peux le sauter** si tu ne sais pas encore quel modèle utiliser (modèle en cours d'entraînement, projet préparé pour quelqu'un d'autre, comparaison de plusieurs modèles). Dans ce cas :
+
+```cmd
+python scripts\create_project.py ^
+    --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 ^
+    --kind single
+```
+
+Le script affiche un warning `⚠ dlc_project_config n'est pas renseigné` et tu édites `configs/pipeline_config.yaml` à la main avant l'étape 5. Tu peux aussi re-lancer `create_project.py --force --dlc-config <path>` pour re-générer le YAML.
+
+#### Ce que le script produit
 
 ```
 D:\ethoflow\projects\bottomview-MCC-2026-06\
-├── configs\pipeline_config.yaml       ← pointeur DLC + éventuelles coords
+├── configs\pipeline_config.yaml                   ← pointeur DLC + (multi) coords d'arène
 ├── data\{raw,cropped,dlc-output,vame,results}\    ← dossiers vides prêts
 └── bottomview-MCC-2026-06_sessions.xlsx           ← starter Excel auto-généré
 ```
 
-Le starter Excel contient un onglet **Instructions** avec le mode d'emploi + les onglets de données adaptés au kind (1 seule feuille `Sessions` pour `single`, 3 feuilles `Subjects` + `Trials_Videos` + `Arena_Mapping` pour `multi`). Ouvre-le, remplace les 2-3 lignes d'exemple grisées par tes vraies souris, sauvegarde.
-
-Ce que le script crée automatiquement dans le dossier du projet :
-
-- Une **arborescence vide** `data/{raw,cropped,dlc-output,vame,results}` + `configs/`
-- `configs/pipeline_config.yaml` — pointe vers le modèle DLC via `--dlc-config`
-- `<project>_sessions.xlsx` — **template Excel** à la racine, prêt à remplir. Ouvre-le : la feuille `Instructions` t'explique quoi mettre dans les autres feuilles (`Sessions` pour `single`, `Subjects` + `Trials_Videos` + `Arena_Mapping` pour `multi`). Deux lignes d'exemple grisées montrent le format attendu.
-
-Résultat : arborescence vide + `configs/pipeline_config.yaml` qui pointe vers ton config DLC.
+Le starter Excel contient un onglet **Instructions** avec le mode d'emploi + les onglets de données adaptés au kind (1 feuille `Sessions` pour `single`, 3 feuilles `Subjects` + `Trials_Videos` + `Arena_Mapping` pour `multi`). Ouvre-le, remplace les lignes d'exemple grisées par tes vraies souris, sauvegarde.
 
 ### Étape 2 — remplir l'Excel de sessions
 
