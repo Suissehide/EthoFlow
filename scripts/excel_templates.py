@@ -59,42 +59,76 @@ def _write_instructions_single(ws, project_name: str) -> None:
     ws.append(["Projet :", project_name])
     ws.append(["Schéma :", "1 animal par vidéo (single)"])
     ws.append([])
-    ws.append(["Feuille 'Sessions'"])
-    ws.append(["  - Une ligne par VIDÉO (= une session)."])
-    ws.append(["  - 'id' est OBLIGATOIRE : nom du fichier vidéo sans extension."])
-    ws.append(["    (ex. id=970 → 970.mp4 dans --videos-dir)"])
-    ws.append(["    C'est la clé unique de la session, et le nom du dossier créé"])
-    ws.append(["    dans data/raw/."])
-    ws.append(["  - 'mouse_id' identifie l'ANIMAL. Il peut se répéter sur"])
-    ws.append(["    plusieurs lignes si la même souris est filmée plusieurs fois"])
-    ws.append(["    (design longitudinal). Dans ce cas 'id' diffère à chaque"])
-    ws.append(["    ligne : 970-M1, 970-M2, etc."])
-    ws.append(["  - 'group' est la variable de comparaison principale (ex. génotype)."])
-    ws.append(["  - Toutes les autres colonnes sont optionnelles ; laisse vide si N/A."])
+    ws.append(["Feuille 'Sessions' — une ligne par VIDÉO (= une session)"])
     ws.append([])
-    ws.append(["Après remplissage, sync depuis un env conda 'ethoflow' :"])
-    ws.append(["  python scripts/sync_from_excel.py \\"])
-    ws.append(["      --project-dir <chemin de ce projet> \\"])
-    ws.append(["      --excel <chemin de ce fichier> \\"])
-    ws.append(["      --videos-dir <dossier contenant les .mp4> \\"])
-    ws.append(["      --date YYYY-MM-DD"])
+    ws.append(["COLONNE OBLIGATOIRE"])
+    ws.append(["  id"])
+    ws.append(["      Nom du fichier vidéo SANS extension."])
+    ws.append(["      Ex. id=970 → cherche 970.mp4 dans le dossier vidéos."])
+    ws.append(["      C'est la clé unique de la session et le nom du dossier"])
+    ws.append(["      créé dans data/raw/ (préfixé BV-)."])
+    ws.append(["      Deux lignes ne peuvent pas avoir le même id."])
     ws.append([])
-    ws.append(["Répète pour chaque batch d'acquisition (--videos-dir change,"])
-    ws.append(["l'Excel reste le même). --overwrite pour re-générer sur une"])
-    ws.append(["metadata déjà existante."])
-    # Style : première colonne en gras
+    ws.append(["COLONNES RECOMMANDÉES"])
+    ws.append(["  mouse_id"])
+    ws.append(["      Identifie l'ANIMAL. Peut se répéter sur plusieurs lignes"])
+    ws.append(["      si la même souris est filmée à plusieurs timepoints"])
+    ws.append(["      (design longitudinal) : id=970-M1 et id=970-M2 avec"])
+    ws.append(["      mouse_id=970 dans les deux cas. Permet de regrouper les"])
+    ws.append(["      sessions par animal dans les analyses."])
+    ws.append(["  group"])
+    ws.append(["      Variable de comparaison principale (ex. génotype,"])
+    ws.append(["      traitement). C'est ce qui sépare tes groupes dans"])
+    ws.append(["      analyze_vame.py."])
+    ws.append([])
+    ws.append(["TOUTES LES AUTRES COLONNES SONT LIBRES"])
+    ws.append(["  Tu peux les renommer, les supprimer, ou en ajouter."])
+    ws.append(["  Chaque colonne remplie est recopiée telle quelle dans le"])
+    ws.append(["  metadata.yaml de la session, et devient utilisable comme"])
+    ws.append(["  variable de groupement dans les analyses."])
+    ws.append(["  Celles proposées ici (sex, cage, birth_date, genotype_*,"])
+    ws.append(["  captopril...) sont des exemples adaptés au projet MCC —"])
+    ws.append(["  adapte-les à ton étude."])
+    ws.append(["  Laisse vide une cellule si l'info n'existe pas."])
+    ws.append([])
+    ws.append(["SYNC — depuis l'env conda 'ethoflow'"])
+    ws.append(["  Mode interactif (le script demande ce qui manque) :"])
+    ws.append(["      python scripts/sync_from_excel.py"])
+    ws.append([])
+    ws.append(["  Mode arguments :"])
+    ws.append(["      python scripts/sync_from_excel.py \\"])
+    ws.append(["          --project-dir <chemin de ce projet> \\"])
+    ws.append(["          --videos-dir <dossier contenant les .mp4> \\"])
+    ws.append(["          --date YYYY-MM-DD"])
+    ws.append([])
+    ws.append(["  Répète pour chaque batch d'acquisition (--videos-dir change,"])
+    ws.append(["  l'Excel reste le même). --overwrite pour re-générer une"])
+    ws.append(["  metadata déjà existante, --dry-run pour prévisualiser."])
+    # Style : en-têtes de section en gras (lignes en MAJUSCULES, "Feuille ...",
+    # ou finissant par ":")
     for r in range(1, ws.max_row + 1):
         cell = ws.cell(row=r, column=1)
-        if cell.value and str(cell.value).endswith(":"):
+        v = str(cell.value) if cell.value else ""
+        if not v:
+            continue
+        is_section = (
+            v.endswith(":")
+            or v.startswith("Feuille")
+            or (v == v.upper() and len(v) > 3 and not v.startswith(" "))
+        )
+        if is_section:
             cell.font = Font(bold=True)
-    ws.column_dimensions["A"].width = 70
+    ws.column_dimensions["A"].width = 72
 
 
 def _write_sessions_single(ws) -> None:
     headers = [
-        "id",  # OBLIGATOIRE — nom du fichier vidéo (sans extension), clé unique
-        "mouse_id", "sex", "group", "cage", "tail_label", "birth_date",
-        "animal_id", "line", "origin",
+        "id",        # OBLIGATOIRE — nom du fichier vidéo, clé unique de session
+        "mouse_id",  # RECOMMANDÉ — identifie l'animal (regroupement longitudinal)
+        "group",     # RECOMMANDÉ — variable de comparaison principale
+        # ── Colonnes libres : renomme / supprime / ajoute à volonté ──
+        "sex", "cage", "tail_label", "birth_date",
+        "line", "origin",
         "genotype_mcc", "genotype_cdh5_cre", "genotype_col1_egfp",
         "captopril", "notes",
     ]
@@ -103,13 +137,13 @@ def _write_sessions_single(ws) -> None:
     # Les deux dernières montrent la MÊME souris (970) enregistrée à deux
     # timepoints : `id` diffère (donc 2 sessions), `mouse_id` est identique.
     example_rows = [
-        ["971", 971, "F", "MCCiECKO", "CD330", 2, "2024-10-15", 54311,
+        ["971", 971, "MCCiECKO", "F", "CD330", 2, "2024-10-15",
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
          "exemple à supprimer"],
-        ["970-M1", 970, "F", "MCCf/f", "CD329", 1, "2024-10-15", 54310,
+        ["970-M1", 970, "MCCf/f", "F", "CD329", 1, "2024-10-15",
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
          "exemple — même souris, timepoint 1"],
-        ["970-M2", 970, "F", "MCCf/f", "CD329", 1, "2024-10-15", 54310,
+        ["970-M2", 970, "MCCf/f", "F", "CD329", 1, "2024-10-15",
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
          "exemple — même souris, timepoint 2"],
     ]
@@ -130,32 +164,56 @@ def _write_instructions_multi(ws, project_name: str) -> None:
     ws.append(["Projet :", project_name])
     ws.append(["Schéma :", "N animaux par vidéo (multi), typiquement 4 arènes"])
     ws.append([])
+    ws.append(["COLONNES OBLIGATOIRES"])
+    ws.append(["  Trials_Videos.TrialCode  — identifiant unique de la vidéo"])
+    ws.append(["  Arena_Mapping.TrialCode  — référence vers Trials_Videos"])
+    ws.append(["  Arena_Mapping.Arena      — numéro d'arène (1, 2, 3, 4)"])
+    ws.append(["  Arena_Mapping.MouseID    — souris dans cette arène"])
+    ws.append([])
     ws.append(["Feuille 'Subjects'"])
     ws.append(["  - Une ligne par souris (MouseID unique)."])
     ws.append(["  - Renseigne le groupe expérimental par timepoint."])
+    ws.append(["  - Colonnes libres : adapte-les à ton étude."])
     ws.append([])
     ws.append(["Feuille 'Trials_Videos'"])
     ws.append(["  - Une ligne par vidéo enregistrée."])
     ws.append(["  - TrialCode conventionnel : OF-<M1|M2>-<YYYYMMDD>-V<##>"])
-    ws.append(["  - Le fichier vidéo correspondant doit être dans --videos-dir"])
-    ws.append(["    (nommé selon 'Original file name' ou <TrialCode>.mp4)."])
+    ws.append(["  - Le fichier vidéo correspondant doit être dans le dossier"])
+    ws.append(["    vidéos, nommé selon 'Original file name' ou <TrialCode>.mp4."])
+    ws.append(["  - FPS / Width / Height sont optionnels (info seulement)."])
     ws.append([])
     ws.append(["Feuille 'Arena_Mapping'"])
     ws.append(["  - Une ligne par (vidéo × arène). N lignes = N vidéos × 4."])
-    ws.append(["  - ArenaCode conventionnel : <TrialCode>_A<1..4>"])
     ws.append(["  - MouseID = souris présente dans cette arène pour cette vidéo."])
+    ws.append(["  - Une même souris peut apparaître dans plusieurs vidéos"])
+    ws.append(["    (timepoints différents) — c'est le cas longitudinal."])
     ws.append([])
-    ws.append(["Après remplissage, sync depuis l'env conda 'ethoflow' :"])
-    ws.append(["  python scripts/sync_from_excel.py \\"])
-    ws.append(["      --project-dir <chemin de ce projet> \\"])
-    ws.append(["      --excel <chemin de ce fichier> \\"])
-    ws.append(["      --videos-dir <dossier contenant les .mp4>"])
+    ws.append(["TOUTES LES AUTRES COLONNES SONT LIBRES"])
+    ws.append(["  Renomme, supprime ou ajoute selon ton étude. Ce qui est"])
+    ws.append(["  rempli finit dans le metadata.yaml et devient utilisable"])
+    ws.append(["  comme variable de groupement dans les analyses."])
+    ws.append([])
+    ws.append(["SYNC — depuis l'env conda 'ethoflow'"])
+    ws.append(["  Mode interactif (le script demande ce qui manque) :"])
+    ws.append(["      python scripts/sync_from_excel.py"])
+    ws.append([])
+    ws.append(["  Mode arguments :"])
+    ws.append(["      python scripts/sync_from_excel.py \\"])
+    ws.append(["          --project-dir <chemin de ce projet> \\"])
+    ws.append(["          --videos-dir <dossier contenant les .mp4>"])
     for r in range(1, ws.max_row + 1):
         cell = ws.cell(row=r, column=1)
-        if cell.value and (str(cell.value).endswith(":") or
-                            str(cell.value).startswith("Feuille")):
+        v = str(cell.value) if cell.value else ""
+        if not v:
+            continue
+        is_section = (
+            v.endswith(":")
+            or v.startswith("Feuille")
+            or (v == v.upper() and len(v) > 3 and not v.startswith(" "))
+        )
+        if is_section:
             cell.font = Font(bold=True)
-    ws.column_dimensions["A"].width = 70
+    ws.column_dimensions["A"].width = 72
 
 
 def _write_subjects_multi(ws) -> None:

@@ -112,6 +112,10 @@ python -c "import vame; print(vame.__version__)"
 
 Un seul parcours de bout en bout, avec **une seule bifurcation** au début : soit tu as déjà un modèle DLC utilisable, soit tu dois l'entraîner. Après cette bifurcation, la suite est identique.
 
+> **Tous les scripts marchent sans argument.** Lance `python scripts\<script>.py` : ce qui manque est demandé à l'invite (menu des projets trouvés sous `D:\EthoFlow\projects`, chemins avec valeurs par défaut). Les arguments servent à aller plus vite quand tu sais déjà, ou à scripter. `--no-prompt` fait échouer au lieu de demander (CI, automatisation).
+>
+> Chaque étape ci-dessous montre les deux formes.
+
 ### Étape 0 — bifurcation modèle DLC
 
 **As-tu déjà un modèle DLC entraîné pour ton setup imaging ?**
@@ -205,26 +209,32 @@ Deux schémas selon **le nombre d'animaux par vidéo** :
 
 **1 animal / vidéo** — feuille `Sessions` — **1 ligne par vidéo** (= 1 session) :
 
-| id | mouse_id | sex | group | cage | birth_date | genotype_mcc | captopril |
+| id | mouse_id | group | sex | cage | birth_date | genotype_mcc | captopril |
 |---|---|---|---|---|---|---|---|
-| 971 | 971 | F | MCCiECKO | CD330 | 2024-10-15 | fl/fl | oui |
-| 970-M1 | 970 | F | MCCf/f | CD329 | 2024-10-15 | fl/fl | oui |
-| 970-M2 | 970 | F | MCCf/f | CD329 | 2024-10-15 | fl/fl | oui |
+| 971 | 971 | MCCiECKO | F | CD330 | 2024-10-15 | fl/fl | oui |
+| 970-M1 | 970 | MCCf/f | F | CD329 | 2024-10-15 | fl/fl | oui |
+| 970-M2 | 970 | MCCf/f | F | CD329 | 2024-10-15 | fl/fl | oui |
 
-Deux colonnes clés à ne pas confondre :
+**Une seule colonne est obligatoire** :
 
-- **`id`** — nom du fichier vidéo **sans extension** (`970-M1` → `970-M1.mp4` dans `--videos-dir`). C'est la **clé unique de la session** et le nom du dossier créé dans `data/raw/` (préfixé `BV-`).
-- **`mouse_id`** — identifie l'**animal**. Peut se répéter sur plusieurs lignes si la même souris est filmée à plusieurs timepoints (**design longitudinal**) : dans l'exemple, la souris 970 apparaît deux fois avec des `id` distincts → deux sessions séparées, regroupables par `mouse_id` dans les analyses.
+- **`id`** — nom du fichier vidéo **sans extension** (`970-M1` → cherche `970-M1.mp4`). C'est la **clé unique de la session** et le nom du dossier créé dans `data/raw/` (préfixé `BV-`). Deux lignes ne peuvent pas avoir le même `id`.
 
-`group` = ta variable de comparaison principale. Les autres colonnes sont optionnelles.
+**Deux colonnes recommandées** :
 
-> Le script refuse de tourner si deux lignes ont le même `id` (ça écraserait une session). Sans colonne `id`, `mouse_id` sert d'identifiant de session — mode historique 1 vidéo/souris, sans support longitudinal.
+- **`mouse_id`** — identifie l'**animal**. Se répète sur plusieurs lignes si la même souris est filmée à plusieurs timepoints (**design longitudinal**) : dans l'exemple, la souris 970 apparaît deux fois avec des `id` distincts → deux sessions séparées, regroupables par animal dans les analyses.
+- **`group`** — ta variable de comparaison principale (génotype, traitement). C'est ce qui sépare tes groupes dans `analyze_vame.py`.
+
+**Toutes les autres colonnes sont libres.** Renomme-les, supprime-les, ou ajoute les tiennes : chaque colonne remplie est recopiée telle quelle dans le `metadata.yaml` de la session et devient utilisable comme variable de groupement. Celles du template (`sex`, `cage`, `birth_date`, `genotype_*`, `captopril`…) sont des exemples du projet MCC — adapte-les à ton étude. Laisse une cellule vide si l'info n'existe pas.
+
+> Sans colonne `id`, `mouse_id` sert d'identifiant de session — mode historique 1 vidéo/souris, sans support longitudinal.
 
 **N animaux / vidéo** — 3 feuilles :
 
 - `Subjects` — 1 ligne par MouseID avec attributs (groupe M1/M2, stress, notes)
 - `Trials_Videos` — 1 ligne par vidéo (TrialCode conventionnel `OF-<M1|M2>-YYYYMMDD-V<##>`, date, FPS, dimensions)
 - `Arena_Mapping` — 1 ligne par (vidéo × arène), reliant chaque arène de chaque vidéo à un MouseID
+
+**Colonnes obligatoires** : `Trials_Videos.TrialCode`, `Arena_Mapping.TrialCode`, `Arena_Mapping.Arena`, `Arena_Mapping.MouseID`. Le reste est libre et adaptable à ton étude.
 
 Un exemple pré-rempli est présent dans chaque feuille (lignes grisées, à supprimer). Voir aussi `configs/metadata_template.yaml` pour la structure de la metadata YAML produite en aval.
 
@@ -263,11 +273,13 @@ Si tu as **N animaux par vidéo** (peu importe l'angle caméra), tu as deux voie
 Pour la voie B (crop) :
 
 ```cmd
-:: (Une seule fois par setup) trace les N rectangles d'arène si pas déjà fait
-python scripts\calibrate_arenes.py --project-dir <...>
+:: Interactif — demande le projet
+python scripts\calibrate_arenes.py
+python scripts\crop_arenes.py --all
 
-:: Ensuite crop de toutes les sessions
-python scripts\crop_arenes.py --project-dir <...> --all
+:: Ou avec arguments
+python scripts\calibrate_arenes.py --project-dir D:\EthoFlow\projects\mon-projet
+python scripts\crop_arenes.py --project-dir D:\EthoFlow\projects\mon-projet --all
 ```
 
 Si tu as **1 animal par vidéo**, cette étape n'existe pas — passe directement à l'étape 5.
@@ -280,19 +292,25 @@ Trois modes possibles selon le combo (nombre d'animaux, modèle DLC dispo) :
 
 ```cmd
 conda activate dlc
-python scripts\run_dlc_inference.py --project-dir <...> --all --mode custom
+
+:: Interactif — demande le projet
+python scripts\run_dlc_inference.py --all --mode custom
+
+:: Ou avec arguments
+python scripts\run_dlc_inference.py --project-dir D:\EthoFlow\projects\mon-projet --all --mode custom
 ```
 
 **N animaux / vidéo, DLC multi-animal SuperAnimal** (voie A, défaut sans training custom) :
 
 ```cmd
-python scripts\run_dlc_inference.py --project-dir <...> --all
+python scripts\run_dlc_inference.py --all
+python scripts\run_dlc_inference.py --project-dir D:\EthoFlow\projects\mon-projet --all
 ```
 
 **N animaux / vidéo, single-animal sur vidéos croppées** (voie B, quand tu as croppé à l'étape 4) :
 
 ```cmd
-python scripts\run_dlc_inference.py --project-dir <...> --all --mode single-animal ^
+python scripts\run_dlc_inference.py --all --mode single-animal ^
     --video-adapt --video-adapt-batch-size 2
 ```
 
@@ -311,7 +329,11 @@ VAME veut un h5 single-animal par session, sans NaN aggressifs, avec les mauvais
 **Sortie DLC custom (1 animal/vidéo ou voie B multi-animal)** — nettoyage temporel + masking + interpolation :
 
 ```cmd
-python scripts\prepare_vame_input_custom.py --project-dir <...>
+:: Interactif
+python scripts\prepare_vame_input_custom.py
+
+:: Ou avec arguments
+python scripts\prepare_vame_input_custom.py --project-dir D:\EthoFlow\projects\mon-projet
 ```
 
 Fait pour chaque session : `dlc.filterpredictions` (median filter temporel) + masking des prédictions à likelihood < 0.3 + interpolation linéaire des trous ≤ 25 frames. Écrit `<session>_clean.h5` à côté du .h5 brut.
@@ -320,7 +342,8 @@ Fait pour chaque session : `dlc.filterpredictions` (median filter temporel) + ma
 
 ```cmd
 conda activate ethoflow
-python scripts\assign_arenas.py --project-dir <...> --all
+python scripts\assign_arenas.py --all
+python scripts\assign_arenas.py --project-dir D:\EthoFlow\projects\mon-projet --all
 ```
 
 Puis éventuellement `fill_nan_h5.py --root <project>/data/dlc-output` pour remplir les trous résiduels si VAME râle.
@@ -333,24 +356,27 @@ VAME s'entraîne **une fois par projet** (le VAE apprend la structure des poses 
 conda activate vame
 cd D:\EthoFlow
 
-:: 1. Init du projet VAME dans <project>/data/vame/
-python scripts\run_vame.py --project-dir <...> setup
-
-:: 2. Alignement égocentrique des poses (rotation/translation pour recentrer)
-python scripts\run_vame.py --project-dir <...> align
-
-:: 3. Construction du trainset
-python scripts\run_vame.py --project-dir <...> trainset
-
-:: 4. Entraînement du VAE (LONG — plusieurs heures)
-python scripts\run_vame.py --project-dir <...> train
-
-:: 5. Évaluation (courbes de loss, KL divergence)
-python scripts\run_vame.py --project-dir <...> evaluate
-
-:: 6. Segmentation : assigne un motif à chaque frame de chaque session
-python scripts\run_vame.py --project-dir <...> segment
+:: Interactif — le projet est demandé une fois, puis chaque sous-commande
+python scripts\run_vame.py setup      :: 1. Init du projet VAME
+python scripts\run_vame.py align      :: 2. Alignement égocentrique des poses
+python scripts\run_vame.py trainset   :: 3. Construction du trainset
+python scripts\run_vame.py train      :: 4. Entraînement du VAE (LONG)
+python scripts\run_vame.py evaluate   :: 5. Courbes de loss, KL divergence
+python scripts\run_vame.py segment    :: 6. Un motif par frame
 ```
+
+Ou avec arguments :
+
+```cmd
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet setup
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet align
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet trainset
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet train
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet evaluate
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet segment
+```
+
+Raccourci : `python scripts\run_vame.py all` enchaîne setup → segment d'une traite.
 
 Sortie : `data/vame/results/<session>/<model>/hmm-15/15_hmm_label_<session>.npy` (1 label motif par frame).
 
@@ -360,7 +386,8 @@ VAME te donne 15 motifs numérotés 0-14. Il faut les nommer et les catégoriser
 
 - **Générer les vidéos par motif** — 30-60 clips de 10s pour chaque motif :
   ```cmd
-  python scripts\run_vame.py --project-dir <...> motif-videos
+  python scripts\run_vame.py motif-videos
+  python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet motif-videos
   ```
   Sortie : `data/vame/results/community_videos/motif_<N>.mp4`. Regarde chaque vidéo, décide du nom et de la catégorie ETHOGRAM (Locomotion / Sniffing / Rearing / Grooming / Stationary / Vertical exploration).
 
@@ -377,10 +404,14 @@ Ce CSV est lu par toutes les analyses en aval. Sans lui, les figures affichent `
 ### Étape 9 — analyses + visualisations
 
 ```cmd
-python scripts\analyze_vame.py --project-dir <...>
+:: Interactif
+python scripts\analyze_vame.py
+
+:: Ou avec arguments
+python scripts\analyze_vame.py --project-dir D:\EthoFlow\projects\mon-projet
 
 :: Analyses étendues (bouts, spatial, temporal quarters)
-python scripts\analyze_vame.py --project-dir <...> --extended --extended-by group4
+python scripts\analyze_vame.py --project-dir D:\EthoFlow\projects\mon-projet --extended --extended-by group4
 ```
 
 Sortie dans `data/vame/analysis/` :
@@ -395,15 +426,16 @@ Les stats utilisent Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3 groupes) av
 
 ```cmd
 :: GIF avec bande de motif color-codée sous la vidéo
-python scripts\motif_gif.py --project-dir <...> --session BV-970 --duration 60
+python scripts\motif_gif.py --session BV-970 --duration 60
+python scripts\motif_gif.py --project-dir D:\EthoFlow\projects\mon-projet --session BV-970 --duration 60
 
 :: Manifold VAME style README, en pooled (référentiel commun toutes sessions)
-python scripts\behavior_structure_gif.py --project-dir <...> --session BV-970 ^
+python scripts\behavior_structure_gif.py --session BV-970 ^
     --pool-all-sessions --with-video --duration 30 --output-format mp4
 
 :: Dendrogramme des communautés de motifs avec labels lisibles
-python scripts\community_dendrogram.py --project-dir <...>
-python scripts\community_dendrogram.py --project-dir <...> --group MCCiECKO
+python scripts\community_dendrogram.py
+python scripts\community_dendrogram.py --project-dir D:\EthoFlow\projects\mon-projet --group MCCiECKO
 ```
 
 ---

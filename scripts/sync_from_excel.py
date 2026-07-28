@@ -122,11 +122,19 @@ def _coerce(val):
 # Schéma 1 animal / vidéo
 # ======================================================================
 
+# Colonnes du template recopiées telles quelles dans metadata.yaml.
+# Note : toute colonne PRÉSENTE dans l'Excel et non listée ici est aussi
+# recopiée (cf. build_metadata_single) — cette liste ne sert qu'à fixer
+# l'ordre des champs connus. L'utilisateur peut ajouter ses propres
+# colonnes sans toucher au code.
 META_FIELDS_SINGLE = [
-    "sex", "group", "cage", "tail_label", "birth_date", "animal_id",
+    "group", "sex", "cage", "tail_label", "birth_date",
     "line", "origin", "genotype_mcc", "genotype_cdh5_cre",
     "genotype_col1_egfp", "captopril", "notes",
 ]
+
+# Colonnes à ne jamais recopier telles quelles (déjà traitées à part)
+_RESERVED_COLS = {"id", "mouse_id"}
 
 
 def parse_single(excel_path: Path) -> pd.DataFrame:
@@ -187,12 +195,22 @@ def build_metadata_single(row: pd.Series, video_path: Path,
     if date_recorded:
         meta["date_recorded"] = date_recorded
 
+    # 1) Champs connus d'abord (ordre stable et lisible dans le YAML)
     for col in META_FIELDS_SINGLE:
-        if col not in row.index:
+        if col in row.index:
+            val = _coerce(row[col])
+            if val is not None:
+                meta[col] = val
+
+    # 2) Puis TOUTE autre colonne présente dans l'Excel — l'utilisateur
+    #    peut ajouter ses propres colonnes sans modifier le code, elles
+    #    deviennent utilisables comme variables de groupement.
+    for col in row.index:
+        if col in _RESERVED_COLS or col in META_FIELDS_SINGLE:
             continue
         val = _coerce(row[col])
         if val is not None:
-            meta[col] = val
+            meta[str(col)] = val
     return meta
 
 
