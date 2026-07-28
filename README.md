@@ -126,13 +126,29 @@ Le même modèle DLC entraîné une fois est réutilisé pour tous les projets E
 
 ### Étape 1 — créer un projet EthoFlow
 
+Deux façons de lancer — **interactif** (le script demande ce qui manque) ou **tout en arguments**.
+
+**Mode interactif** (recommandé la première fois) :
+
+```cmd
+conda activate ethoflow
+python scripts\create_project.py
+```
+
+Le script demande à l'invite : dossier racine des projets (défaut `D:\EthoFlow\projects`), nom du projet, type `single`/`multi`, et config DLC (laisse vide si tu ne sais pas encore).
+
+**Mode arguments** :
+
 ```cmd
 conda activate ethoflow
 python scripts\create_project.py ^
-    --project-dir D:\ethoflow\projects\bottomview-MCC-2026-06 ^
+    --projects-root D:\EthoFlow\projects ^
+    --name bottomview-MCC-2026-06 ^
     --kind single ^
     --dlc-config "D:\EthoFlow\models\souris-bottomview\config.yaml"
 ```
+
+Le projet est créé à `<projects-root>\<name>\`. Tu peux aussi passer le chemin complet d'un coup avec `--project-dir D:\EthoFlow\projects\bottomview-MCC-2026-06` (pratique pour les scripts). Ajoute `--no-prompt` pour échouer au lieu de demander si un argument manque (CI, automatisation).
 
 #### `--kind` — obligatoire, détermine le nombre d'animaux par vidéo
 
