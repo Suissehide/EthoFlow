@@ -908,6 +908,7 @@ default_arenes_coords:
 - `community_dendrogram.py` — Dendrogramme labellisé des motifs
 - `inspect_session.py` — QC par session (couverture, gaps)
 - `inspect_vame_project.py` — QC d'un projet VAME (.nc files)
+- `diagnose_dlc_model.py` — Diagnostique un modèle DLC qui refuse de servir à l'inférence (projet déplacé, shuffle incohérent, jamais entraîné) et répare
 - `prepare_dlc_feedback_kit.py` — Kit diagnostic à envoyer à une équipe partenaire
 
 **Visualisations**
@@ -942,6 +943,20 @@ python -c "import torch; x = torch.randn(1024,1024,device='cuda'); print(torch.c
 ```
 
 ### « Could not find a shuffle with trainingset fraction 0.95 and index 1 »
+
+**Lance d'abord le diagnostic** — il vérifie tout et répare ce qui est réparable :
+
+```cmd
+:: Interactif — menu des modèles trouvés sous D:\EthoFlow\models
+python scripts\diagnose_dlc_model.py
+
+:: Sur un modèle précis, avec réparation automatique
+python scripts\diagnose_dlc_model.py ^
+    --model-dir D:\EthoFlow\models\souris-bottomview-Leo-2026-06-05 --fix
+
+:: Ou depuis un projet EthoFlow (lit dlc_project_config tout seul)
+python scripts\diagnose_dlc_model.py --project-dir D:\EthoFlow\projects\mon-projet
+```
 
 Trois causes possibles, toutes détectées en amont par le script.
 
