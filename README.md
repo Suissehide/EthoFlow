@@ -255,11 +255,18 @@ Il propose un menu des projets trouvés sous `D:\EthoFlow\projects`, auto-détec
 ```cmd
 python scripts\sync_from_excel.py ^
     --project-dir D:\EthoFlow\projects\bottomview-MCC-2026-06 ^
-    --videos-dir E:\data\bottom_view\08062026 ^
-    --date 2026-06-08
+    --videos-dir E:\data\bottom_view\08062026
 ```
 
 `--excel` est optionnel : le script prend le `*_sessions.xlsx` à la racine du projet. Répète la commande pour chaque batch d'acquisition (`--videos-dir` change, l'Excel reste le même). `--overwrite` pour re-générer une metadata existante, `--dry-run` pour prévisualiser.
+
+**La date d'enregistrement est résolue automatiquement**, par ordre de priorité :
+
+1. Colonne `date` (ou `date_recorded`) de l'Excel — **par ligne**, donc un batch peut mélanger plusieurs jours d'acquisition
+2. `--date 2026-06-08` en CLI — tamponne les lignes sans colonne date
+3. Date de modification du fichier vidéo — fallback automatique
+
+Tu n'as normalement rien à passer : ajoute une colonne `date` dans ton Excel si tu veux la maîtriser, sinon la date du fichier fait l'affaire. Le script indique à la fin d'où viennent les dates utilisées.
 
 Résultat : un `metadata.yaml` par session dans `data/raw/<session_id>/`.
 

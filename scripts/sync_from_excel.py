@@ -13,10 +13,13 @@ l'Excel généré par `create_project.py` et lance ce script.
 Schéma 1 animal / vidéo — feuille `Sessions`
 ---------------------------------------------------------------------
 
-    id | mouse_id | sex | group | cage | tail_label | birth_date |
-    animal_id | line | origin | genotype_* | captopril | notes
+    id | mouse_id | group | sex | cage | tail_label | birth_date |
+    line | origin | genotype_* | captopril | notes
 
-Une ligne = une vidéo = une session.
+Une ligne = une vidéo = une session. Seule `id` est obligatoire ;
+`mouse_id` et `group` sont recommandés. Toute autre colonne présente
+est recopiée telle quelle dans le metadata.yaml — tu peux ajouter les
+tiennes sans toucher au code.
 
 `id` = nom du fichier vidéo sans extension (`970` → `970.mp4`). C'est
 la clé unique de la session et le nom du dossier `data/raw/BV-<id>/`.
@@ -60,6 +63,21 @@ Usage
 Répète la commande pour chaque batch d'acquisition (`--videos-dir`
 change, l'Excel reste le même). `--overwrite` pour re-générer une
 metadata déjà existante.
+
+---------------------------------------------------------------------
+Date d'enregistrement
+---------------------------------------------------------------------
+
+Résolue automatiquement, par ordre de priorité :
+
+  1. Colonne `date` (ou `date_recorded`) de l'Excel — **par ligne**,
+     donc un batch peut mélanger plusieurs jours d'acquisition.
+  2. `--date YYYY-MM-DD` en CLI — tamponne les lignes sans colonne date.
+  3. Date de modification du fichier vidéo — fallback automatique.
+
+Tu n'as donc normalement rien à passer : ajoute une colonne `date`
+dans ton Excel si tu veux la maîtriser, sinon la date du fichier fait
+l'affaire.
 """
 from __future__ import annotations
 
@@ -181,6 +199,42 @@ def session_key_single(row: pd.Series) -> str:
     return str(int(row["mouse_id"]))
 
 
+def resolve_date(row: pd.Series, video_path: Path,
+                  cli_date: str | None) -> tuple[str | None, str]:
+    """Détermine la date d'enregistrement d'une session.
+
+    Ordre de priorité :
+      1. Colonne `date` ou `date_recorded` de l'Excel (par ligne — gère
+         un batch qui mélange plusieurs jours d'acquisition)
+      2. `--date` en CLI (tamponne tout le batch)
+      3. Date de modification du fichier vidéo (fallback automatique)
+
+    Returns:
+        (date au format YYYY-MM-DD ou None, source pour l'affichage)
+    """
+    for col in ("date", "date_recorded"):
+        if col in row.index and pd.notna(row[col]):
+            val = row[col]
+            if isinstance(val, pd.Timestamp):
+                return val.strftime("%Y-%m-%d"), "excel"
+            s = str(val).strip().split(" ")[0]
+            if s:
+                return s, "excel"
+
+    if cli_date:
+        return cli_date, "cli"
+
+    # Fallback : date de modification du fichier vidéo. Pas parfait (une
+    # copie de fichier la réécrit) mais mieux que rien, et évite de
+    # demander une info que le système connaît déjà.
+    try:
+        from datetime import datetime
+        mtime = video_path.stat().st_mtime
+        return datetime.fromtimestamp(mtime).strftime("%Y-%m-%d"), "fichier"
+    except OSError:
+        return None, "aucune"
+
+
 def build_metadata_single(row: pd.Series, video_path: Path,
                             date_recorded: str | None) -> dict:
     """Metadata pour une session 1-animal."""
@@ -220,6 +274,7 @@ def sync_single(excel: Path, videos_dir: Path, raw: Path, date: str | None,
     print(f"Lignes Excel valides : {len(df)}\n")
 
     n_written = n_skipped = n_no_video = 0
+    date_sources: dict[str, int] = {}
     for _, row in df.iterrows():
         key = session_key_single(row)
         video_path = videos_dir / f"{key}.{video_ext}"
@@ -237,7 +292,10 @@ def sync_single(excel: Path, videos_dir: Path, raw: Path, date: str | None,
             n_skipped += 1
             continue
 
-        meta = build_metadata_single(row, video_path, date)
+        row_date, src = resolve_date(row, video_path, date)
+        date_sources[src] = date_sources.get(src, 0) + 1
+
+        meta = build_metadata_single(row, video_path, row_date)
         if dry_run:
             print(f"  [dry] {session_id}  group={meta.get('group')} "
                   f"→ {video_path.name}")
@@ -248,6 +306,12 @@ def sync_single(excel: Path, videos_dir: Path, raw: Path, date: str | None,
             print(f"  ✓ {session_id}  group={meta.get('group')} "
                   f"→ {video_path.name}")
         n_written += 1
+
+    if date_sources:
+        labels = {"excel": "colonne Excel", "cli": "--date",
+                  "fichier": "date du fichier vidéo", "aucune": "non renseignée"}
+        detail = ", ".join(f"{labels[k]} ({v})" for k, v in date_sources.items())
+        print(f"\n  Dates d'enregistrement : {detail}")
     return n_written, n_skipped, n_no_video
 
 
@@ -467,8 +531,10 @@ def main() -> None:
     parser.add_argument("--videos-dir", type=Path, default=None,
                         help="Dossier contenant les .mp4. Demandé si absent.")
     parser.add_argument("--date", type=str, default=None,
-                        help="Date d'enregistrement YYYY-MM-DD injectée dans "
-                             "la metadata (schéma 1 animal/vidéo).")
+                        help="OPTIONNEL. Date YYYY-MM-DD appliquée aux lignes "
+                             "sans colonne `date` dans l'Excel. Sans ce flag "
+                             "et sans colonne date, la date de modification "
+                             "du fichier vidéo est utilisée.")
     parser.add_argument("--video-ext", default="mp4",
                         help="Extension vidéo à matcher (défaut : mp4)")
     parser.add_argument("--schema", choices=["single", "multi"], default=None,
@@ -517,11 +583,10 @@ def main() -> None:
         print(f"❌ Dossier vidéos introuvable : {videos_dir}", file=sys.stderr)
         sys.exit(1)
 
-    # ---- Date (schéma single seulement, optionnelle) ----
+    # ---- Date ----
+    # Plus de prompt : résolue par ligne dans resolve_date() depuis la
+    # colonne Excel, sinon --date, sinon la date du fichier vidéo.
     date = args.date
-    if date is None and schema == "single" and not args.no_prompt:
-        date = prompt("Date d'enregistrement (YYYY-MM-DD, vide pour ignorer)",
-                       allow_empty=True) or None
 
     raw = raw_dir(project)
     print()
