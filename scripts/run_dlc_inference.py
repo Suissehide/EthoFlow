@@ -351,6 +351,74 @@ def resolve_dlc_config(project: Path, no_prompt: bool = False) -> str:
     return str(chosen)
 
 
+def check_model_is_trained(dlc_config_path: str) -> None:
+    """Vérifie qu'au moins un snapshot entraîné existe dans le projet DLC.
+
+    Sans ça, DLC lève une erreur cryptique au moment d'`analyze_videos` :
+
+        Could not find a shuffle with trainingset fraction 0.95 and index 1
+
+    ce qui veut simplement dire « ce modèle n'a jamais été entraîné ».
+    On le détecte en amont pour renvoyer vers la bonne étape.
+    """
+    dlc_dir = Path(dlc_config_path).parent
+
+    # DLC 3.x (pytorch) : dlc-models-pytorch/ ; DLC 2.x : dlc-models/
+    snapshots = []
+    for models_root in ("dlc-models-pytorch", "dlc-models"):
+        root = dlc_dir / models_root
+        if root.exists():
+            snapshots += list(root.rglob("snapshot-*.pt"))
+            snapshots += list(root.rglob("snapshot-*.index"))  # TF legacy
+    if snapshots:
+        return
+
+    # Diagnostic plus fin pour orienter l'utilisateur
+    labeled = dlc_dir / "labeled-data"
+    n_labeled_dirs = 0
+    n_collected = 0
+    if labeled.exists():
+        subdirs = [d for d in labeled.iterdir()
+                   if d.is_dir() and not d.name.endswith("_labeled")]
+        n_labeled_dirs = len(subdirs)
+        n_collected = sum(1 for d in subdirs
+                          if list(d.glob("CollectedData_*.h5")))
+
+    msg = [
+        f"Le modèle DLC n'a pas encore été entraîné :",
+        f"   {dlc_dir}",
+        f"",
+        f"   Aucun snapshot trouvé dans dlc-models-pytorch/ ou dlc-models/.",
+        f"",
+    ]
+    if n_labeled_dirs == 0:
+        msg += [
+            "   Aucune frame extraite. Reprends au début du Parcours B :",
+            "     python scripts/dlc_model-training/01_setup_project.py "
+            "--config-dir <dossier du modèle>",
+        ]
+    elif n_collected == 0:
+        msg += [
+            f"   {n_labeled_dirs} dossier(s) de frames extraites, mais aucune",
+            f"   frame labellisée (pas de CollectedData_*.h5).",
+            f"   → Labellise d'abord dans la GUI DLC :",
+            f"     python -c \"import deeplabcut; deeplabcut.launch_dlc()\"",
+        ]
+    else:
+        msg += [
+            f"   {n_collected} vidéo(s) labellisée(s) — il ne manque que",
+            f"   l'entraînement :",
+            f"     python scripts/dlc_model-training/02_train.py "
+            f"--config-dir <dossier du modèle>",
+        ]
+    msg += [
+        "",
+        "   (ou pointe ce projet vers un autre modèle déjà entraîné en",
+        "   éditant `dlc_project_config` dans configs/pipeline_config.yaml)",
+    ]
+    raise ValueError("\n".join(msg))
+
+
 def run_custom(project: Path, session_id: str,
                 no_prompt: bool = False) -> None:
     try:
@@ -362,6 +430,7 @@ def run_custom(project: Path, session_id: str,
     # Chaque projet a sa propre config : un projet mono-animal et un
     # projet multi-animal pointeront vers des modèles DLC différents.
     dlc_project_config = resolve_dlc_config(project, no_prompt=no_prompt)
+    check_model_is_trained(dlc_project_config)
 
     metadata = load_session_metadata(project, session_id)
     source = get_source_video(metadata)

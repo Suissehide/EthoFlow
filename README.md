@@ -941,6 +941,23 @@ pip install --pre torch torchvision torchaudio ^
 python -c "import torch; x = torch.randn(1024,1024,device='cuda'); print(torch.cuda.get_device_name(0))"
 ```
 
+### « Could not find a shuffle with trainingset fraction 0.95 and index 1 »
+
+Le modèle DLC vers lequel pointe ton projet **n'a jamais été entraîné**. DLC cherche un split train/test entraîné dans `dlc-models-pytorch/` et n'en trouve aucun.
+
+Le script détecte maintenant ce cas en amont et t'oriente selon l'état réel du modèle :
+
+- **Aucune frame extraite** → reprends au [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc) depuis `01_setup_project.py`
+- **Frames extraites mais pas labellisées** → labellise dans la GUI (`deeplabcut.launch_dlc()`), puis `02_train.py`
+- **Frames labellisées, entraînement pas lancé** → `02_train.py --config-dir <dossier du modèle>`
+
+Si tu voulais en fait utiliser un **autre** modèle déjà entraîné, corrige le pointeur :
+
+```yaml
+# <project>/configs/pipeline_config.yaml
+dlc_project_config: D:\EthoFlow\models\<modele-entraine>\config.yaml
+```
+
 ### VAME `motif_videos` : "Video capture could not be opened"
 
 Sur Windows, le hardware decoder MSMF de cv2 rentre en conflit avec CUDA quand torch est chargé avant cv2. Le fix est déjà dans `run_vame.py` (env var au top du module). Si tu appelles VAME depuis un autre script, ajoute au tout début :
