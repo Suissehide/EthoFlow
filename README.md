@@ -260,27 +260,6 @@ python scripts\sync_from_excel.py ^
 
 `--excel` est optionnel : le script prend le `*_sessions.xlsx` à la racine du projet. Répète la commande pour chaque batch d'acquisition (`--videos-dir` change, l'Excel reste le même). `--overwrite` pour re-générer une metadata existante, `--dry-run` pour prévisualiser.
 
-**Tu n'as pas à passer de date.** Pour chaque session, le script cherche sa date d'enregistrement dans cet ordre :
-
-1. **La cellule `date` de cette ligne** dans l'Excel — si elle est remplie, c'est elle
-2. **Sinon**, la valeur de `--date` si tu l'as passée
-3. **Sinon**, la date du fichier `.mp4`
-
-Exemple avec une colonne `date` remplie sur une seule ligne :
-
-| id | date (Excel) | → date retenue |
-|---|---|---|
-| 970 | *(vide)* | date du fichier `970.mp4` |
-| 971 | 2026-03-15 | **2026-03-15** |
-
-Les trois usages possibles :
-
-- **Ne rien faire** — chaque session prend la date de son fichier vidéo. Le cas normal.
-- **Ajouter une colonne `date` dans l'Excel** — tu maîtrises session par session. Utile si les fichiers ont été copiés (leur date système est alors fausse), ou si un batch mélange plusieurs jours d'acquisition.
-- **Passer `--date 2026-06-08`** — tamponne tout le batch d'un coup, sans toucher à l'Excel.
-
-Le script indique en fin de run d'où viennent les dates qu'il a utilisées.
-
 Résultat : un `metadata.yaml` par session dans `data/raw/<session_id>/`.
 
 ### Étape 4 — (multi-animal seulement) crop optionnel des arènes

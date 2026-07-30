@@ -98,8 +98,7 @@ def _write_instructions_single(ws, project_name: str) -> None:
     ws.append(["  Mode arguments :"])
     ws.append(["      python scripts/sync_from_excel.py \\"])
     ws.append(["          --project-dir <chemin de ce projet> \\"])
-    ws.append(["          --videos-dir <dossier contenant les .mp4> \\"])
-    ws.append(["          --date YYYY-MM-DD"])
+    ws.append(["          --videos-dir <dossier contenant les .mp4>"])
     ws.append([])
     ws.append(["  Répète pour chaque batch d'acquisition (--videos-dir change,"])
     ws.append(["  l'Excel reste le même). --overwrite pour re-générer une"])
@@ -127,6 +126,7 @@ def _write_sessions_single(ws) -> None:
         "mouse_id",  # RECOMMANDÉ — identifie l'animal (regroupement longitudinal)
         "group",     # RECOMMANDÉ — variable de comparaison principale
         # ── Colonnes libres : renomme / supprime / ajoute à volonté ──
+        "date",  # date d'enregistrement, à remplir si tu veux la tracer
         "sex", "cage", "tail_label", "birth_date",
         "line", "origin",
         "genotype_mcc", "genotype_cdh5_cre", "genotype_col1_egfp",
@@ -137,13 +137,13 @@ def _write_sessions_single(ws) -> None:
     # Les deux dernières montrent la MÊME souris (970) enregistrée à deux
     # timepoints : `id` diffère (donc 2 sessions), `mouse_id` est identique.
     example_rows = [
-        ["971", 971, "MCCiECKO", "F", "CD330", 2, "2024-10-15",
+        ["971", 971, "MCCiECKO", "2026-06-08", "F", "CD330", 2, "2024-10-15",
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
          "exemple à supprimer"],
-        ["970-M1", 970, "MCCf/f", "F", "CD329", 1, "2024-10-15",
+        ["970-M1", 970, "MCCf/f", "2026-06-08", "F", "CD329", 1, "2024-10-15",
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
          "exemple — même souris, timepoint 1"],
-        ["970-M2", 970, "MCCf/f", "F", "CD329", 1, "2024-10-15",
+        ["970-M2", 970, "MCCf/f", "2026-09-14", "F", "CD329", 1, "2024-10-15",
          "MCC*Cdh5-cre", None, "fl/fl", "cre+", "+/+", "oui",
          "exemple — même souris, timepoint 2"],
     ]
