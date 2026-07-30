@@ -299,6 +299,20 @@ python scripts\run_dlc_inference.py --all --mode custom
 python scripts\run_dlc_inference.py --project-dir D:\EthoFlow\projects\mon-projet --all --mode custom
 ```
 
+> **Si tu n'as pas renseigné `--dlc-config` à l'étape 1**, le script te demande quel modèle utiliser au premier lancement, avec un menu des modèles trouvés sous `D:\EthoFlow\models` :
+>
+> ```
+> ℹ  Aucun modèle DLC configuré pour ce projet.
+>
+> Modèles DLC trouvés dans D:\EthoFlow\models :
+>   1. souris-bottomview
+>   2. openfield-topview
+>   3. (autre chemin)
+> Modèle DLC [1] :
+> ```
+>
+> Ton choix est écrit dans `configs/pipeline_config.yaml` — il ne te sera plus redemandé. Même comportement si le modèle référencé a été déplacé ou supprimé.
+
 **N animaux / vidéo, DLC multi-animal SuperAnimal** (voie A, défaut sans training custom) :
 
 ```cmd

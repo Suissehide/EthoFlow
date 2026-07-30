@@ -37,6 +37,11 @@ from pathlib import Path
 # create_project.py). Sert de base aux prompts de sélection de projet.
 DEFAULT_PROJECTS_ROOT = Path(r"D:\EthoFlow\projects")
 
+# Racine par défaut des modèles DLC entraînés (cohérent avec le wizard
+# 00_init_training_config.py). Un modèle = un dossier contenant un
+# config.yaml.
+DEFAULT_MODELS_ROOT = Path(r"D:\EthoFlow\models")
+
 
 def add_no_prompt_arg(parser: argparse.ArgumentParser) -> None:
     """Ajoute --no-prompt (échoue au lieu de demander)."""

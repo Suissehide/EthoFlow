@@ -273,30 +273,95 @@ def run_superanimal_cropped(
     print(f"\n✅ Single-animal cropped terminé : {out_dir}")
 
 
-def run_custom(project: Path, session_id: str) -> None:
+def resolve_dlc_config(project: Path, no_prompt: bool = False) -> str:
+    """Retourne le chemin du config.yaml DLC à utiliser pour ce projet.
+
+    Lu depuis `configs/pipeline_config.yaml` (clé `dlc_project_config`).
+    S'il est absent ou invalide, le demande à l'invite avec un menu des
+    modèles trouvés sous D:/EthoFlow/models, puis l'écrit dans le YAML
+    pour les prochaines fois.
+
+    Le modèle DLC reste où il est — on ne stocke qu'un pointeur.
+    """
+    from interactive import DEFAULT_MODELS_ROOT, prompt, prompt_existing_path
+
+    pipeline_cfg_path = pipeline_config_path(project)
+    config = {}
+    if pipeline_cfg_path.exists():
+        with open(pipeline_cfg_path) as f:
+            config = yaml.safe_load(f) or {}
+
+    dlc_cfg = config.get("dlc_project_config")
+    if dlc_cfg and Path(dlc_cfg).exists():
+        return dlc_cfg
+
+    # ---- Absent ou cassé : on demande ----
+    if dlc_cfg:
+        print(f"⚠  Le modèle DLC référencé n'existe plus :\n     {dlc_cfg}",
+              file=sys.stderr)
+    else:
+        print(f"ℹ  Aucun modèle DLC configuré pour ce projet "
+              f"(clé 'dlc_project_config' absente de {pipeline_cfg_path.name}).")
+
+    if no_prompt:
+        print(f"❌ Renseigne 'dlc_project_config' dans {pipeline_cfg_path}, "
+              f"ou relance sans --no-prompt.", file=sys.stderr)
+        sys.exit(1)
+
+    # Menu des modèles disponibles : un dossier contenant un config.yaml
+    models = []
+    if DEFAULT_MODELS_ROOT.exists():
+        models = sorted(
+            d for d in DEFAULT_MODELS_ROOT.iterdir()
+            if d.is_dir() and (d / "config.yaml").exists()
+        )
+
+    chosen: Path | None = None
+    if models:
+        print(f"\nModèles DLC trouvés dans {DEFAULT_MODELS_ROOT} :")
+        for i, m in enumerate(models, start=1):
+            print(f"  {i}. {m.name}")
+        print(f"  {len(models) + 1}. (autre chemin)")
+        while True:
+            choice = prompt("Modèle DLC", default="1")
+            if choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(models):
+                    chosen = models[idx - 1] / "config.yaml"
+                    break
+                if idx == len(models) + 1:
+                    break
+            match = [m for m in models if m.name == choice]
+            if match:
+                chosen = match[0] / "config.yaml"
+                break
+            print("  ⚠ choix invalide")
+
+    if chosen is None:
+        chosen = prompt_existing_path(
+            "Chemin du config.yaml DLC", must_exist=True,
+        )
+
+    # Mémorise pour les prochaines fois
+    config["dlc_project_config"] = str(chosen)
+    pipeline_cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(pipeline_cfg_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
+    print(f"✓ Écrit dans {pipeline_cfg_path} — plus besoin de le redemander.\n")
+    return str(chosen)
+
+
+def run_custom(project: Path, session_id: str,
+                no_prompt: bool = False) -> None:
     try:
         import deeplabcut
     except ImportError:
         print("❌ DeepLabCut non installé.", file=sys.stderr)
         sys.exit(1)
 
-    # On lit la pipeline_config DU PROJET (chaque projet a sa propre config :
-    # un projet topview et un projet bottomview pointeront vers des
-    # dlc_project_config différents).
-    pipeline_cfg_path = pipeline_config_path(project)
-    if not pipeline_cfg_path.exists():
-        raise FileNotFoundError(
-            f"Config absente : {pipeline_cfg_path}\n"
-            f"Crée le fichier avec au minimum :\n"
-            f"  dlc_project_config: <chemin absolu vers le config.yaml DLC>"
-        )
-    with open(pipeline_cfg_path) as f:
-        config = yaml.safe_load(f) or {}
-    dlc_project_config = config.get("dlc_project_config")
-    if not dlc_project_config:
-        raise ValueError(
-            f"Clé 'dlc_project_config' manquante dans {pipeline_cfg_path}"
-        )
+    # Chaque projet a sa propre config : un projet mono-animal et un
+    # projet multi-animal pointeront vers des modèles DLC différents.
+    dlc_project_config = resolve_dlc_config(project, no_prompt=no_prompt)
 
     metadata = load_session_metadata(project, session_id)
     source = get_source_video(metadata)
@@ -403,7 +468,8 @@ if __name__ == "__main__":
                     output_dir=args.output_dir,
                 )
             else:
-                run_custom(project, session_id)
+                run_custom(project, session_id,
+                            no_prompt=getattr(args, "no_prompt", False))
             n_ok += 1
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ {session_id} : {e}", file=sys.stderr)
