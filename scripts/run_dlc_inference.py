@@ -351,6 +351,52 @@ def resolve_dlc_config(project: Path, no_prompt: bool = False) -> str:
     return str(chosen)
 
 
+def check_project_path(dlc_config_path: str, auto_fix: bool = True) -> None:
+    """Vérifie que `project_path` du config.yaml pointe vers le bon dossier.
+
+    DLC stocke un chemin absolu dans son config.yaml. Si le projet a été
+    déplacé (autre disque, autre dossier), ce chemin devient obsolète :
+    DLC va chercher training-datasets/ et dlc-models/ à l'ancien endroit
+    et sort « Could not find a shuffle ... » alors que le modèle EST
+    entraîné.
+
+    Répare automatiquement par défaut — c'est sans risque, le bon chemin
+    est celui où se trouve le config.yaml lui-même.
+    """
+    cfg_path = Path(dlc_config_path)
+    dlc_dir = cfg_path.parent
+    with open(cfg_path) as f:
+        cfg = yaml.safe_load(f) or {}
+
+    declared = cfg.get("project_path")
+    if declared is None:
+        return
+    if Path(declared).resolve() == dlc_dir.resolve():
+        return  # tout va bien
+
+    print(f"⚠  Le projet DLC a été déplacé :", file=sys.stderr)
+    print(f"     config.yaml déclare : {declared}", file=sys.stderr)
+    print(f"     emplacement réel    : {dlc_dir}", file=sys.stderr)
+
+    if not auto_fix:
+        raise ValueError(
+            f"`project_path` obsolète dans {cfg_path}. Corrige-le en :\n"
+            f"     project_path: {dlc_dir}"
+        )
+
+    # Substitution texte globale : couvre project_path ET les chemins
+    # absolus stockés dans video_sets (même logique que le merge de
+    # 01_setup_project.py).
+    text = cfg_path.read_text(encoding="utf-8")
+    old, new = str(declared), str(dlc_dir)
+    text = text.replace(old, new)
+    old_fwd, new_fwd = old.replace("\\", "/"), new.replace("\\", "/")
+    if old_fwd != old:
+        text = text.replace(old_fwd, new_fwd)
+    cfg_path.write_text(text, encoding="utf-8")
+    print(f"✓ project_path corrigé automatiquement dans {cfg_path.name}\n")
+
+
 def check_model_is_trained(dlc_config_path: str) -> None:
     """Vérifie qu'au moins un snapshot entraîné existe dans le projet DLC.
 
@@ -358,19 +404,72 @@ def check_model_is_trained(dlc_config_path: str) -> None:
 
         Could not find a shuffle with trainingset fraction 0.95 and index 1
 
-    ce qui veut simplement dire « ce modèle n'a jamais été entraîné ».
-    On le détecte en amont pour renvoyer vers la bonne étape.
+    Deux causes possibles, toutes deux traitées ici :
+      1. le modèle n'a jamais été entraîné (aucun snapshot) ;
+      2. le modèle EST entraîné mais l'`iteration` ou la
+         `TrainingFraction` du config.yaml ne correspond à aucun dossier
+         de shuffle existant (typiquement après un refinement partiel).
+
+    Le cas « projet déplacé » est traité en amont par check_project_path.
     """
     dlc_dir = Path(dlc_config_path).parent
 
     # DLC 3.x (pytorch) : dlc-models-pytorch/ ; DLC 2.x : dlc-models/
     snapshots = []
+    shuffle_dirs = []
     for models_root in ("dlc-models-pytorch", "dlc-models"):
         root = dlc_dir / models_root
         if root.exists():
             snapshots += list(root.rglob("snapshot-*.pt"))
             snapshots += list(root.rglob("snapshot-*.index"))  # TF legacy
+            shuffle_dirs += [d for d in root.rglob("*-trainset*shuffle*")
+                             if d.is_dir()]
+
     if snapshots:
+        # Le modèle est entraîné. Vérifie que le shuffle que DLC va
+        # chercher (iteration + TrainingFraction du config) existe bien.
+        import re
+        with open(dlc_config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+        iteration = cfg.get("iteration", 0)
+        fractions = cfg.get("TrainingFraction") or [0.95]
+
+        # Les shuffles existants, avec leur iteration et leur fraction
+        available = []
+        for d in shuffle_dirs:
+            m = re.search(r"-trainset(\d+)shuffle(\d+)$", d.name)
+            if not m:
+                continue
+            frac = int(m.group(1)) / 100
+            it = None
+            for parent in d.parents:
+                mi = re.fullmatch(r"iteration-(\d+)", parent.name)
+                if mi:
+                    it = int(mi.group(1))
+                    break
+            available.append((it, frac, d.name))
+
+        if available and not any(
+            it == iteration and abs(frac - float(fractions[0])) < 1e-6
+            for it, frac, _ in available
+        ):
+            lines = [
+                "Le modèle est entraîné, mais le config.yaml demande un "
+                "shuffle qui n'existe pas :",
+                f"   config.yaml : iteration={iteration}, "
+                f"TrainingFraction={fractions}",
+                "",
+                "   Shuffles réellement présents :",
+            ]
+            for it, frac, name in sorted(available):
+                lines.append(f"     · iteration-{it}, fraction {frac}  ({name})")
+            lines += [
+                "",
+                f"   Corrige `iteration` et/ou `TrainingFraction` dans :",
+                f"     {dlc_config_path}",
+                "   pour qu'ils correspondent à un shuffle existant.",
+            ]
+            raise ValueError("\n".join(lines))
         return
 
     # Diagnostic plus fin pour orienter l'utilisateur
@@ -430,6 +529,7 @@ def run_custom(project: Path, session_id: str,
     # Chaque projet a sa propre config : un projet mono-animal et un
     # projet multi-animal pointeront vers des modèles DLC différents.
     dlc_project_config = resolve_dlc_config(project, no_prompt=no_prompt)
+    check_project_path(dlc_project_config)
     check_model_is_trained(dlc_project_config)
 
     metadata = load_session_metadata(project, session_id)

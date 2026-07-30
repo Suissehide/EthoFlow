@@ -943,9 +943,20 @@ python -c "import torch; x = torch.randn(1024,1024,device='cuda'); print(torch.c
 
 ### « Could not find a shuffle with trainingset fraction 0.95 and index 1 »
 
-Le modèle DLC vers lequel pointe ton projet **n'a jamais été entraîné**. DLC cherche un split train/test entraîné dans `dlc-models-pytorch/` et n'en trouve aucun.
+Trois causes possibles, toutes détectées en amont par le script.
 
-Le script détecte maintenant ce cas en amont et t'oriente selon l'état réel du modèle :
+**1. Le projet DLC a été déplacé.** C'est le cas le plus fréquent quand un modèle change de disque ou de dossier. DLC stocke un chemin absolu dans `project_path` du `config.yaml` ; s'il pointe vers l'ancien emplacement, DLC cherche `dlc-models-pytorch/` là-bas et ne trouve rien — alors que le modèle est bien entraîné. Le script détecte et **corrige automatiquement** :
+
+```
+⚠  Le projet DLC a été déplacé :
+     config.yaml déclare : E:\LEO\dlc-projects\souris-bottomview-Leo-2026-06-05
+     emplacement réel    : D:\EthoFlow\models\souris-bottomview-Leo-2026-06-05
+✓ project_path corrigé automatiquement dans config.yaml
+```
+
+**2. `iteration` ou `TrainingFraction` ne correspondent à aucun shuffle existant.** Arrive après un refinement partiel (`iteration` incrémenté sans re-entraîner). Le script liste les shuffles réellement présents pour que tu corriges le `config.yaml`.
+
+**3. Le modèle n'a jamais été entraîné.** Le script t'oriente selon l'état réel :
 
 - **Aucune frame extraite** → reprends au [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc) depuis `01_setup_project.py`
 - **Frames extraites mais pas labellisées** → labellise dans la GUI (`deeplabcut.launch_dlc()`), puis `02_train.py`
