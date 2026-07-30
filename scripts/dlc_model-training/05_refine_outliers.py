@@ -6,9 +6,10 @@ likelihood (en pratique : les pattes).
 sélection automatique** pour ce genre de refinement. L'auto-detect
 (cf. OUTLIER_ALGORITHM ci-dessous) attrape des cas évidents rapidement,
 mais le vrai levier c'est ta passe à toi : regarder les vidéos
-analysées, identifier les patterns d'échec (rearing, occlusion, jamb
-L/R), puis extraire à la main 50-100 frames par situation
-problématique. Utilise ce script comme premier passage rapide, puis
+analysées, identifier les patterns d'échec (rearing, occlusion,
+ambiguïté L/R), puis extraire à la main **50-100 frames AU TOTAL**,
+réparties entre ces situations — c'est un budget global, pas un quota
+par situation. Utilise ce script comme premier passage rapide, puis
 enchaîne une passe manuelle dans la GUI DLC.
 
 Pourquoi ce workflow plutôt que +epochs ou +mice :

@@ -55,7 +55,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from assign_arenas import clean_individual  # noqa: E402
+from pose_cleaning import clean_dataframe, plot_trajectory_qc  # noqa: E402
 from paths import (  # noqa: E402
     add_project_dir_arg,
     cleaned_h5_path,
@@ -135,6 +135,12 @@ def process_session(
     interp_limit: int,
     window_length: int,
     skip_filter: bool,
+    fps: float = 30.0,
+    px_per_cm: float | None = None,
+    max_speed_ms: float = 5.0,
+    detect_sticky: bool = True,
+    qc_plot: bool = True,
+    qc_bodypart: str = "tail_base",
 ) -> dict:
     """Pipeline complet pour une session. Renvoie un dict stats."""
     session_out = dlc_output_dir(project) / session_id
@@ -163,14 +169,36 @@ def process_session(
             raw_h5, source_video, dlc_config, session_out, window_length,
         )
 
-    # 2) Mask + interpolation via clean_individual (réutilisation de assign_arenas)
+    # 2) Nettoyage multi-méthodes (cf. pose_cleaning.py) :
+    #    cutoff likelihood → vitesse aberrante → points collants →
+    #    interpolation des frames marquées.
     df = pd.read_hdf(h5_to_clean)
-    df_clean, stats = clean_individual(df, likelihood_threshold, interp_limit)
+    df_clean, stats = clean_dataframe(
+        df,
+        fps=fps,
+        px_per_cm=px_per_cm,
+        likelihood_threshold=likelihood_threshold,
+        max_speed_ms=max_speed_ms,
+        interp_limit=interp_limit,
+        detect_sticky=detect_sticky,
+    )
 
     # 3) Écriture finale : <project>/data/dlc-output/<session>/<session>_clean.h5
     out_path = cleaned_h5_path(project, session_id)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     df_clean.to_hdf(out_path, key="df_with_missing", mode="w", format="table")
+
+    # 4) Graphe de contrôle trajectoire (le critère d'acceptation de Tony :
+    #    aucun saut anormal visible sur la trajectoire complète)
+    if qc_plot:
+        qc_dir = dlc_output_dir(project) / "_qc_trajectories"
+        qc_dir.mkdir(parents=True, exist_ok=True)
+        ok = plot_trajectory_qc(
+            df, df_clean, qc_bodypart,
+            qc_dir / f"{session_id}_{qc_bodypart}.png",
+            session_id=session_id, stats=stats,
+        )
+        stats["qc_plot"] = str(qc_dir / f"{session_id}_{qc_bodypart}.png") if ok else None
 
     stats["raw_h5"] = raw_h5.name
     stats["filtered_h5"] = h5_to_clean.name if not skip_filter else "(skipped)"
@@ -186,8 +214,43 @@ def main() -> None:
         help="Sessions à traiter (défaut: toutes celles avec un .h5 dans dlc-output/)",
     )
     parser.add_argument(
-        "--likelihood-threshold", type=float, default=0.3,
-        help="Seuil de likelihood en dessous duquel (x,y) deviennent NaN (défaut: 0.3)",
+        "--likelihood-threshold", type=float, default=0.70,
+        help="Seuil de likelihood en dessous duquel (x,y) deviennent NaN "
+             "(défaut: 0.70, recommandation Tony/LIN). Le cutoff seul n'est "
+             "qu'un proxy — il est complété par la détection de vitesse "
+             "aberrante et de points collants ci-dessous.",
+    )
+    parser.add_argument(
+        "--px-per-cm", type=float, default=None,
+        help="Échelle de la caméra en pixels par centimètre. ACTIVE la "
+             "détection de vitesse aberrante (le meilleur filtre selon "
+             "Tony). Obtiens-la avec calibrate_scale.py. Sans cette valeur "
+             "la détection de vitesse est désactivée.",
+    )
+    parser.add_argument(
+        "--max-speed", type=float, default=5.0,
+        help="Vitesse max plausible d'un keypoint en m/s (défaut: 5.0). "
+             "Au-delà, la frame est considérée comme un saut de tracking "
+             "et interpolée depuis ses voisines.",
+    )
+    parser.add_argument(
+        "--fps", type=float, default=None,
+        help="Framerate des vidéos (défaut: lu depuis la metadata, sinon 30).",
+    )
+    parser.add_argument(
+        "--no-sticky-detection", action="store_true",
+        help="Désactive la détection des points collants (coordonnées où "
+             "un keypoint bruité atterrit anormalement souvent : reflet IR "
+             "fixe, coin d'arène...).",
+    )
+    parser.add_argument(
+        "--no-qc-plot", action="store_true",
+        help="Ne génère pas les graphes de contrôle trajectoire.",
+    )
+    parser.add_argument(
+        "--qc-bodypart", default="tail_base",
+        help="Keypoint tracé dans le graphe de contrôle (défaut: tail_base, "
+             "le plus stable pour juger la trajectoire globale).",
     )
     parser.add_argument(
         "--interp-limit", type=int, default=25,
@@ -243,6 +306,34 @@ def main() -> None:
     # Charge le dlc_config une seule fois
     dlc_config = None if args.no_filter else load_dlc_project_config(project)
 
+    # ---- fps et échelle px/cm ----
+    # fps : CLI > pipeline_config.yaml > 30 par défaut
+    fps = args.fps
+    px_per_cm = args.px_per_cm
+    if fps is None or px_per_cm is None:
+        import yaml as _yaml
+        cfg_path = pipeline_config_path(project)
+        cfg = {}
+        if cfg_path.exists():
+            with open(cfg_path) as f:
+                cfg = _yaml.safe_load(f) or {}
+        if fps is None:
+            fps = float(cfg.get("fps", 30.0))
+        if px_per_cm is None and cfg.get("px_per_cm"):
+            px_per_cm = float(cfg["px_per_cm"])
+
+    print(f"Nettoyage      : cutoff {args.likelihood_threshold}, "
+          f"interp ≤ {args.interp_limit} frames, {fps:.0f} fps")
+    if px_per_cm:
+        print(f"Échelle        : {px_per_cm:.2f} px/cm → détection de "
+              f"vitesse > {args.max_speed} m/s ACTIVE")
+    else:
+        print("Échelle        : non renseignée → détection de vitesse "
+              "DÉSACTIVÉE")
+        print("                 (lance calibrate_scale.py, ou passe "
+              "--px-per-cm)")
+    print()
+
     n_ok = n_fail = 0
     for i, session_id in enumerate(sessions, 1):
         print(f"[{i}/{len(sessions)}] {session_id}")
@@ -251,13 +342,28 @@ def main() -> None:
                 project, session_id, dlc_config,
                 args.likelihood_threshold, args.interp_limit,
                 args.window_length, args.no_filter,
+                fps=fps, px_per_cm=px_per_cm, max_speed_ms=args.max_speed,
+                detect_sticky=not args.no_sticky_detection,
+                qc_plot=not args.no_qc_plot, qc_bodypart=args.qc_bodypart,
             )
-            slots = stats.get("total_slots") or 1
+            slots = stats["n_frames"] * max(stats["n_keypoints"], 1)
             pct_useful = 100 - 100 * stats["n_remaining_nan"] / slots
+            detail = [f"cutoff {stats['n_low_likelihood']}"]
+            if stats["velocity_enabled"]:
+                detail.append(f"vitesse {stats['n_velocity_outliers']}")
+            if stats["n_sticky"]:
+                detail.append(f"collants {stats['n_sticky']}")
             print(f"  ✓ {stats['n_frames']} frames | "
                   f"{stats['n_keypoints']} kpts | "
-                  f"{pct_useful:.1f}% utilisables après clean | "
-                  f"→ {Path(stats['out_path']).name}\n")
+                  f"marquées : {', '.join(detail)} | "
+                  f"réparées {stats['n_repaired']} | "
+                  f"{pct_useful:.1f}% utilisables | "
+                  f"→ {Path(stats['out_path']).name}")
+            if stats.get("sticky_points"):
+                for bp, pts in list(stats["sticky_points"].items())[:3]:
+                    coords = ", ".join(f"({x:.0f},{y:.0f})" for x, y in pts[:2])
+                    print(f"      · point collant sur {bp} : {coords}")
+            print()
             n_ok += 1
         except (FileNotFoundError, ValueError, RuntimeError) as e:
             print(f"  ❌ {e}\n", file=sys.stderr)

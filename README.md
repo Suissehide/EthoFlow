@@ -324,9 +324,33 @@ Sortie : `data/dlc-output/<session>/<hash>.h5` + éventuellement `_labeled.mp4`.
 
 ### Étape 6 — préparer les fichiers pour VAME
 
-VAME veut un h5 single-animal par session, sans NaN aggressifs, avec les mauvaises prédictions déjà masquées. Selon ce que tu as en entrée à cette étape :
+VAME veut un h5 single-animal par session, sans sauts de tracking aberrants. Cette étape fait **plus qu'un simple seuil de confiance** — recommandation Tony (VAME/LIN) :
 
-**Sortie DLC custom (1 animal/vidéo ou voie B multi-animal)** — nettoyage temporel + masking + interpolation :
+> « Le cutoff n'est qu'un proxy qui marche en moyenne sur un nombre suffisant de frames, et devrait toujours être combiné à d'autres méthodes. J'utiliserais un cutoff autour de 70 % et j'appliquerais des méthodes qui détectent les frames individuelles au tracking cassé et essaient de les corriger. »
+
+#### 6a — Calibrer l'échelle px/cm (une fois par setup caméra)
+
+Nécessaire pour juger si un déplacement de label est physiquement plausible. Tony suggère de photographier une règle avec ton setup (plutôt que d'utiliser les dimensions de l'arène : plus l'objet est grand, plus la distorsion de lentille fausse la mesure).
+
+```cmd
+:: Interactif — demande la source et la distance connue
+python scripts\calibrate_scale.py
+
+:: Depuis une photo de règle
+python scripts\calibrate_scale.py --project-dir D:\EthoFlow\projects\mon-projet ^
+    --image D:\EthoFlow\calibration\regle.png --known-cm 10
+
+:: Ou depuis une frame d'une vidéo existante
+python scripts\calibrate_scale.py --project-dir D:\EthoFlow\projects\mon-projet ^
+    --video E:\data\bottom_view\970.mp4 --known-cm 10
+
+:: Si tu connais déjà la valeur
+python scripts\calibrate_scale.py --project-dir D:\EthoFlow\projects\mon-projet --set 12.5
+```
+
+Une fenêtre s'ouvre, tu cliques les deux extrémités de la distance connue, le script écrit `px_per_cm` dans `configs/pipeline_config.yaml`. L'étape 6b la lit automatiquement.
+
+#### 6b — Nettoyage des poses
 
 ```cmd
 :: Interactif
@@ -336,9 +360,30 @@ python scripts\prepare_vame_input_custom.py
 python scripts\prepare_vame_input_custom.py --project-dir D:\EthoFlow\projects\mon-projet
 ```
 
-Fait pour chaque session : `dlc.filterpredictions` (median filter temporel) + masking des prédictions à likelihood < 0.3 + interpolation linéaire des trous ≤ 25 frames. Écrit `<session>_clean.h5` à côté du .h5 brut.
+Quatre passes successives par session :
 
-**Sortie DLC multi-animal (voie A)** — split par arène en amont, avant le nettoyage :
+1. **Filtre médian temporel** (`dlc.filterpredictions`, fenêtre 5 frames) — tue les jitters d'une ou deux frames.
+2. **Cutoff de likelihood à 0.70** (`--likelihood-threshold`) — le filet grossier.
+3. **Détection de vitesse aberrante** (`--max-speed`, défaut 5 m/s) — la méthode que Tony privilégie. Convertit chaque déplacement inter-frame en m/s via `px_per_cm` et marque les frames physiquement impossibles. **Indépendant de la likelihood** : attrape aussi les labels *confiants mais faux*.
+4. **Détection de points collants** — repère les coordonnées où un keypoint atterrit anormalement souvent (reflet IR fixe, coin d'arène). Tony : « parfois les labels bruités sautent toujours au même point que l'animal ne peut pas atteindre ». Le script distingue un artefact (frames dispersées dans le temps) d'une immobilité réelle (frames contiguës) et ne touche qu'aux premiers.
+
+Les frames marquées par 2/3/4 sont **interpolées** depuis leurs voisines valides, pas jetées. Les trous > `--interp-limit` (défaut 25 frames ≈ 1 s) restent NaN.
+
+**Critère d'acceptation** — le script produit un graphe avant/après dans `data/dlc-output/_qc_trajectories/<session>_tail_base.png`. Objectif de Tony :
+
+> « Ce que tu veux voir au final, c'est que tracer la trajectoire de l'animal sur toute la vidéo ne montre aucun saut anormal de position dans l'arène, sans avoir à jeter complètement des points, ce qui pose beaucoup de problèmes en aval. »
+
+Si des sauts subsistent sur le graphe, baisse `--max-speed` (4 m/s) ou monte `--likelihood-threshold`. Si au contraire trop de frames sont réparées (>10-15 %), c'est que le modèle DLC est encore faible — retourne au Parcours B plutôt que de compenser en post-processing.
+
+**Options utiles** :
+
+- `--px-per-cm 12.5` — override l'échelle sans passer par 6a
+- `--max-speed 4` — plus strict sur les sauts
+- `--no-sticky-detection` — désactive la passe 4
+- `--qc-bodypart center` — trace un autre keypoint dans le graphe de contrôle
+- `--no-qc-plot` — pas de graphes (gagne quelques secondes par session)
+
+**Si tu as N animaux par vidéo** (voie A), fais le split par arène en amont :
 
 ```cmd
 conda activate ethoflow
@@ -346,7 +391,7 @@ python scripts\assign_arenas.py --all
 python scripts\assign_arenas.py --project-dir D:\EthoFlow\projects\mon-projet --all
 ```
 
-Puis éventuellement `fill_nan_h5.py --root <project>/data/dlc-output` pour remplir les trous résiduels si VAME râle.
+Puis éventuellement `fill_nan_h5.py --root <project>/data/dlc-output` pour boucher les NaN résiduels si VAME râle.
 
 ### Étape 7 — setup + train + segment VAME
 
@@ -689,12 +734,12 @@ Deux options — Tony recommande fortement l'**option A (manuelle)** comme levie
 
 #### Option A — Extraction manuelle (recommandé)
 
-Recommandation Tony : « le vrai gain vient du fait que tu vois exactement où le modèle échoue et que tu choisis les 50-100 frames les plus informatives par situation problématique ».
+Recommandation Tony : « le vrai gain vient du fait que tu vois exactement où le modèle échoue et que tu choisis les frames les plus informatives ».
 
 Workflow :
 
 1. **Regarde toutes tes vidéos analysées** en priorité (pas seulement la pilote). Identifie les patterns d'échec : « les pattes ratent quand elle grimpe le long du mur », « L/R switch pendant les demi-tours rapides », « rearing avec deux pattes cachées mal résolu ».
-2. **Pour chaque pattern d'échec**, décide de combien de frames tu vas dédier. Tony suggère **50-100 nouvelles frames par situation problématique** (au-delà, rendement décroissant).
+2. **Budget total : 50-100 nouvelles frames**, réparties entre les situations problématiques identifiées. Tony est explicite là-dessus : c'est un total, **pas un quota par situation**. Le nombre à extraire dépend de combien de situations distinctes posent problème — 3 patterns d'échec → ~20-30 frames chacun ; 8 patterns → ~10 frames chacun.
 3. **Extrait les frames à la main** dans les vidéos. Depuis Python (env `dlc` actif) :
 
    ```python
@@ -834,7 +879,9 @@ default_arenes_coords:
 - `run_dlc_inference.py` — Inférence DLC (SuperAnimal ou custom)
 
 **DLC → VAME prep**
-- `prepare_vame_input_custom.py` — filterpredictions + mask + interp → `<session>_clean.h5` (pour tout .h5 single-animal sorti par modèle custom)
+- `calibrate_scale.py` — Calibre l'échelle px/cm depuis une photo de règle (active la détection de vitesse)
+- `pose_cleaning.py` — Module de nettoyage : cutoff + vitesse aberrante + points collants + interpolation + graphe QC
+- `prepare_vame_input_custom.py` — Applique le nettoyage complet → `<session>_clean.h5`
 - `filter_keypoints.py` — Vire les keypoints non fiables (queue distale, etc.)
 - `fill_nan_h5.py` — Impute agressivement les NaN restants
 - `rekey_h5.py` — Re-clé un h5 à la convention VAME (`df_with_missing`)

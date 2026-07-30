@@ -204,8 +204,11 @@ NEW_VIDEO_FRAMES = 20
 #
 # Recommandation Tony : « après le premier training, extraire les
 # outliers MANUELLEMENT — pas via l'auto-detect. Tu vois exactement où
-# le réseau échoue, tu peux choisir les 50-100 frames les plus utiles
-# par situation problématique (rearing, occlusion, ambiguïté L/R). »
+# le réseau échoue, tu peux choisir les frames les plus utiles. Vise
+# 50-100 frames AU TOTAL (pas par situation), réparties entre les
+# situations problématiques que tu as identifiées (rearing, occlusion,
+# ambiguïté L/R...). Le nombre dépend de combien de situations
+# distinctes posent problème. »
 # Ce script sert de béquille pour attraper les cas évidents, mais le
 # vrai gain vient d'une passe manuelle dans la GUI DLC.
 TRAINING_VIDEOS_FOR_REFINE: list[Path] = [
