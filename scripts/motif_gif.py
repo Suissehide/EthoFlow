@@ -52,6 +52,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from interactive import prompt_session  # noqa: E402
 from paths import add_project_dir_arg, raw_dir, resolve_project, vame_dir  # noqa: E402
 
 
@@ -123,7 +124,7 @@ def get_source_video(project_ethoflow: Path, session: str) -> Path | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_project_dir_arg(parser, required=True)
-    parser.add_argument("--session", required=True,
+    parser.add_argument("--session", default=None,
                         help="Session ID (ex: BV-970)")
     parser.add_argument("--algo", default="hmm", choices=["hmm", "kmeans"])
     parser.add_argument("--labels", type=Path, default=None,
@@ -148,6 +149,11 @@ def main() -> None:
         sys.exit(1)
 
     project = resolve_project(args)
+    args.session = prompt_session(
+        project, args.session,
+        no_prompt=getattr(args, "no_prompt", False),
+        title="Quelle session pour le GIF ?",
+    )
     vame_proj = vame_dir(project)
     if not (vame_proj / "config.yaml").exists():
         print(f"❌ Projet VAME introuvable : {vame_proj}", file=sys.stderr)

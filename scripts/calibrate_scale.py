@@ -61,37 +61,9 @@ from paths import pipeline_config_path, raw_dir  # noqa: E402
 from interactive import (  # noqa: E402
     add_no_prompt_arg,
     prompt,
-    prompt_existing_path,
+    prompt_session_video,
     resolve_or_prompt_project,
 )
-
-
-def list_session_videos(project: Path) -> list[tuple[str, Path]]:
-    """Liste les (session_id, vidéo source) du projet, vidéos existantes.
-
-    Évite de faire taper un chemin complet alors que le projet connaît
-    déjà ses vidéos via les metadata.yaml.
-    """
-    out = []
-    rd = raw_dir(project)
-    if not rd.exists():
-        return out
-    for session_dir in sorted(rd.iterdir()):
-        meta_path = session_dir / "metadata.yaml"
-        if not meta_path.exists():
-            continue
-        try:
-            with open(meta_path) as f:
-                meta = yaml.safe_load(f) or {}
-        except Exception:
-            continue
-        src = meta.get("source_video")
-        if not src:
-            continue
-        p = Path(src)
-        if p.exists():
-            out.append((meta.get("session_id") or session_dir.name, p))
-    return out
 
 
 def pick_two_points(image_path: Path | None = None,
@@ -221,70 +193,17 @@ def main() -> None:
         print(f"✅ px_per_cm = {args.set_value} écrit dans {cfg_path}")
         return
 
-    # ---- Source de l'image ----
-    image, video = args.image, args.video
-
-    # --session : reprend la vidéo de cette session depuis sa metadata
-    if video is None and image is None and args.session:
-        matches = [(sid, v) for sid, v in list_session_videos(project)
-                   if sid == args.session or sid.endswith(f"-{args.session}")]
-        if not matches:
-            print(f"❌ Session '{args.session}' introuvable dans {project}, "
-                  f"ou sa vidéo n'existe plus.", file=sys.stderr)
-            sys.exit(1)
-        video = matches[0][1]
-        print(f"ℹ  Vidéo de la session {matches[0][0]} : {video.name}")
-
-    if image is None and video is None:
-        if args.no_prompt:
-            print("❌ --session, --image, --video ou --set requis en mode "
-                  "--no-prompt.", file=sys.stderr)
-            sys.exit(1)
-
-        # Menu des vidéos déjà connues du projet — évite de taper un chemin
-        sessions = list_session_videos(project)
-        if sessions:
-            print("Sur quelle vidéo veux-tu calibrer ?")
-            shown = sessions[:15]
-            for i, (sid, v) in enumerate(shown, start=1):
-                print(f"  {i}. {sid}  ({v.name})")
-            if len(sessions) > len(shown):
-                print(f"     … et {len(sessions) - len(shown)} autre(s)")
-            n = len(shown)
-            print(f"  {n + 1}. Une photo de règle (image)")
-            print(f"  {n + 2}. Une autre vidéo (chemin libre)")
-            while True:
-                choice = prompt("Choix", default="1")
-                if choice.isdigit():
-                    idx = int(choice)
-                    if 1 <= idx <= n:
-                        video = shown[idx - 1][1]
-                        break
-                    if idx == n + 1:
-                        image = prompt_existing_path("Chemin de l'image",
-                                                      must_exist=True)
-                        break
-                    if idx == n + 2:
-                        video = prompt_existing_path("Chemin de la vidéo",
-                                                      must_exist=True)
-                        break
-                match = [v for sid, v in sessions if sid == choice]
-                if match:
-                    video = match[0]
-                    break
-                print("  ⚠ choix invalide")
-        else:
-            print("Aucune session avec vidéo dans ce projet.")
-            print("Source de calibration :")
-            print("  1. Une image (photo d'une règle sur le plancher)")
-            print("  2. Une vidéo")
-            choice = prompt("Source", default="1", choices=["1", "2"])
-            if choice == "1":
-                image = prompt_existing_path("Chemin de l'image",
-                                              must_exist=True)
-            else:
-                video = prompt_existing_path("Chemin de la vidéo",
-                                              must_exist=True)
+    # ---- Source (vidéo de session, autre vidéo, ou photo de règle) ----
+    video, image = prompt_session_video(
+        project,
+        session=args.session,
+        video=args.video,
+        allow_image=True,
+        no_prompt=args.no_prompt,
+        title="Sur quelle vidéo veux-tu calibrer ?",
+    )
+    if args.image is not None:
+        image, video = args.image, None
 
     # ---- Distance connue ----
     known_cm = args.known_cm

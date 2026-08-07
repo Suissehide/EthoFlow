@@ -42,6 +42,7 @@ import yaml
 
 # Import des chemins projet-aware
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from interactive import add_no_prompt_arg, prompt_session_video  # noqa: E402
 from paths import (  # noqa: E402
     add_project_dir_arg,
     pipeline_config_path,
@@ -53,19 +54,19 @@ N_ARENAS = 4
 
 
 def resolve_video(project: Path, args) -> Path:
-    if args.session:
-        meta_path = raw_dir(project) / args.session / "metadata.yaml"
-        if not meta_path.exists():
-            raise FileNotFoundError(f"Metadata absent : {meta_path}")
-        with open(meta_path) as f:
-            meta = yaml.safe_load(f)
-        source = meta.get("source_video")
-        if not source:
-            raise ValueError("Pas de `source_video` dans le metadata")
-        return Path(source)
-    if args.video:
-        return Path(args.video)
-    raise ValueError("Préciser --session ou un chemin vidéo en argument")
+    """Vidéo sur laquelle tracer les arènes.
+
+    Ordre : argument positionnel > --session > menu des sessions du
+    projet. Plus besoin de connaître un chemin par cœur.
+    """
+    video, _ = prompt_session_video(
+        project,
+        session=args.session,
+        video=Path(args.video) if args.video else None,
+        no_prompt=getattr(args, "no_prompt", False),
+        title="Sur quelle vidéo tracer les arènes ?",
+    )
+    return video
 
 
 def extract_frame(video_path: Path, frame_idx: int | None) -> "cv2.Mat":
@@ -235,7 +236,8 @@ def main():
     parser = argparse.ArgumentParser(description="Calibration interactive des 4 arènes")
     add_project_dir_arg(parser)
     parser.add_argument("video", nargs="?", help="Chemin vers une vidéo source")
-    parser.add_argument("--session", help="Session ID (utilise sa source_video)")
+    parser.add_argument("--session", help="Session ID (utilise sa source_video). "
+                                          "Demandé à l'invite si absent.")
     parser.add_argument("--frame", type=int, default=None,
                         help="Numéro de frame à afficher (défaut : milieu)")
     parser.add_argument("--save-to", choices=["default", "session"], default="default",

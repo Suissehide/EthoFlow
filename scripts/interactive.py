@@ -164,6 +164,166 @@ def resolve_or_prompt_project(args: argparse.Namespace,
     return prompt_project(root, no_prompt=getattr(args, "no_prompt", False))
 
 
+def list_session_videos(project: Path) -> list[tuple[str, Path]]:
+    """Liste les (session_id, vidéo source) d'un projet.
+
+    Ne garde que les vidéos qui existent réellement sur le disque — une
+    session dont le fichier a été déplacé ne pollue pas les menus.
+    """
+    import yaml
+
+    out: list[tuple[str, Path]] = []
+    rd = project / "data" / "raw"
+    if not rd.exists():
+        return out
+    for session_dir in sorted(rd.iterdir()):
+        meta_path = session_dir / "metadata.yaml"
+        if not meta_path.exists():
+            continue
+        try:
+            with open(meta_path) as f:
+                meta = yaml.safe_load(f) or {}
+        except Exception:
+            continue
+        src = meta.get("source_video")
+        if not src:
+            continue
+        p = Path(src)
+        if p.exists():
+            out.append((meta.get("session_id") or session_dir.name, p))
+    return out
+
+
+def prompt_session_video(project: Path,
+                          session: str | None = None,
+                          video: Path | None = None,
+                          allow_image: bool = False,
+                          no_prompt: bool = False,
+                          title: str = "Sur quelle vidéo travailler ?",
+                          max_shown: int = 15,
+                          ) -> tuple[Path | None, Path | None]:
+    """Choisit une vidéo (ou une image) pour un script du pipeline.
+
+    Ordre : `video` explicite > `session` explicite > menu des sessions
+    du projet > saisie libre.
+
+    Args:
+        allow_image: ajoute une entrée « photo » au menu (calibration)
+        title: en-tête du menu
+
+    Returns:
+        (video, image) — l'un des deux est None.
+    """
+    if video is not None:
+        return Path(video), None
+
+    if session:
+        matches = [(sid, v) for sid, v in list_session_videos(project)
+                   if sid == session or sid.endswith(f"-{session}")]
+        if not matches:
+            print(f"❌ Session '{session}' introuvable dans {project}, "
+                  f"ou sa vidéo n'existe plus.", file=sys.stderr)
+            sys.exit(1)
+        print(f"ℹ  Vidéo de la session {matches[0][0]} : {matches[0][1].name}")
+        return matches[0][1], None
+
+    if no_prompt:
+        print("❌ --session ou --video requis en mode --no-prompt.",
+              file=sys.stderr)
+        sys.exit(1)
+
+    sessions = list_session_videos(project)
+    if not sessions:
+        print(f"Aucune session avec vidéo dans {project}.")
+        if allow_image:
+            print("Source :")
+            print("  1. Une image")
+            print("  2. Une vidéo")
+            if prompt("Source", default="2", choices=["1", "2"]) == "1":
+                return None, prompt_existing_path("Chemin de l'image",
+                                                   must_exist=True)
+        return prompt_existing_path("Chemin de la vidéo",
+                                     must_exist=True), None
+
+    print(title)
+    shown = sessions[:max_shown]
+    for i, (sid, v) in enumerate(shown, start=1):
+        print(f"  {i}. {sid}  ({v.name})")
+    if len(sessions) > len(shown):
+        print(f"     … et {len(sessions) - len(shown)} autre(s)")
+    n = len(shown)
+    if allow_image:
+        print(f"  {n + 1}. Une photo (image)")
+        print(f"  {n + 2}. Une autre vidéo (chemin libre)")
+    else:
+        print(f"  {n + 1}. Une autre vidéo (chemin libre)")
+
+    while True:
+        choice = prompt("Choix", default="1")
+        if choice.isdigit():
+            idx = int(choice)
+            if 1 <= idx <= n:
+                return shown[idx - 1][1], None
+            if allow_image and idx == n + 1:
+                return None, prompt_existing_path("Chemin de l'image",
+                                                   must_exist=True)
+            if idx == (n + 2 if allow_image else n + 1):
+                return prompt_existing_path("Chemin de la vidéo",
+                                             must_exist=True), None
+        match = [v for sid, v in sessions if sid == choice]
+        if match:
+            return match[0], None
+        print("  ⚠ choix invalide")
+
+
+def prompt_session(project: Path, session: str | None = None,
+                    no_prompt: bool = False,
+                    title: str = "Quelle session ?") -> str:
+    """Choisit un session_id parmi ceux du projet.
+
+    Pour les scripts qui travaillent sur une session sans avoir besoin
+    du chemin vidéo (visualisations VAME, analyses par session).
+    """
+    import yaml
+
+    if session:
+        return session
+    if no_prompt:
+        print("❌ --session requis en mode --no-prompt.", file=sys.stderr)
+        sys.exit(1)
+
+    rd = project / "data" / "raw"
+    sessions: list[str] = []
+    if rd.exists():
+        for d in sorted(rd.iterdir()):
+            meta = d / "metadata.yaml"
+            if not meta.exists():
+                continue
+            try:
+                with open(meta) as f:
+                    m = yaml.safe_load(f) or {}
+            except Exception:
+                m = {}
+            sessions.append(m.get("session_id") or d.name)
+
+    if not sessions:
+        return prompt("Session ID")
+
+    print(title)
+    shown = sessions[:20]
+    for i, sid in enumerate(shown, start=1):
+        print(f"  {i}. {sid}")
+    if len(sessions) > len(shown):
+        print(f"     … et {len(sessions) - len(shown)} autre(s)")
+    while True:
+        choice = prompt("Choix", default="1")
+        if choice.isdigit() and 1 <= int(choice) <= len(shown):
+            return shown[int(choice) - 1]
+        if choice in sessions:
+            return choice
+        print("  ⚠ choix invalide")
+
+
 def confirm(question: str, default: str = "y",
              no_prompt: bool = False) -> bool:
     """Demande une confirmation y/n. Renvoie True si l'utilisateur accepte.
