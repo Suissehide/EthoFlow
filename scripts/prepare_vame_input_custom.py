@@ -7,10 +7,12 @@
        Smooth temporel : tue les jitters d'une-deux frames sans toucher
        aux mouvements réels. Produit un `*_filtered.h5` à côté du brut.
 
-    2. Likelihood < seuil → NaN  (défaut 0.3)
-       Sur bottom-view IR, le seuil par défaut DLC (0.6) écrase 90 % des
-       prédictions paws. À 0.3 on garde le corps confiant ET les pattes
-       intermittentes. Tout point sous le seuil devient NaN.
+    2. Likelihood < seuil → NaN  (défaut 0.70)
+       La « likelihood » est la confiance que DLC attribue à chaque point,
+       entre 0 et 1. Sous le seuil, la position est jugée non fiable :
+       elle devient NaN, puis est reconstruite à l'étape 3. Seuil haut =
+       sévère (beaucoup de points reconstruits) ; seuil bas = permissif.
+       Demandé à l'invite si `--likelihood-threshold` n'est pas passé.
 
     3. Interpolation linéaire des trous ≤ interp_limit frames (défaut 25)
        Reuses `clean_individual` de assign_arenas.py. Les trous longs
@@ -56,6 +58,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pose_cleaning import clean_dataframe, plot_trajectory_qc  # noqa: E402
+from interactive import prompt  # noqa: E402
 from paths import (  # noqa: E402
     add_project_dir_arg,
     cleaned_h5_path,
@@ -64,6 +67,24 @@ from paths import (  # noqa: E402
     raw_dir,
     resolve_project,
 )
+
+DEFAULT_LIKELIHOOD = 0.70
+DEFAULT_MAX_SPEED = 5.0
+
+
+def prompt_float(question: str, default: float, explain: str,
+                  no_prompt: bool) -> float:
+    """Demande un seuil numérique en expliquant d'abord ce qu'il fait."""
+    if no_prompt:
+        return default
+    print()
+    print(explain)
+    while True:
+        raw = prompt(question, default=str(default))
+        try:
+            return float(raw.replace(",", "."))
+        except ValueError:
+            print("  ⚠ entre un nombre (ex : 0.70)")
 
 
 def load_dlc_project_config(project: Path) -> str:
@@ -214,11 +235,11 @@ def main() -> None:
         help="Sessions à traiter (défaut: toutes celles avec un .h5 dans dlc-output/)",
     )
     parser.add_argument(
-        "--likelihood-threshold", type=float, default=0.70,
-        help="Seuil de likelihood en dessous duquel (x,y) deviennent NaN "
-             "(défaut: 0.70, recommandation Tony/LIN). Le cutoff seul n'est "
-             "qu'un proxy — il est complété par la détection de vitesse "
-             "aberrante et de points collants ci-dessous.",
+        "--likelihood-threshold", type=float, default=None,
+        help="Seuil de confiance DLC en dessous duquel (x,y) deviennent NaN "
+             "(défaut: 0.70, recommandation Tony/LIN). Demandé à l'invite si "
+             "absent. Le cutoff seul n'est qu'un proxy — il est complété par "
+             "la détection de vitesse aberrante et de points collants.",
     )
     parser.add_argument(
         "--px-per-cm", type=float, default=None,
@@ -228,10 +249,10 @@ def main() -> None:
              "la détection de vitesse est désactivée.",
     )
     parser.add_argument(
-        "--max-speed", type=float, default=5.0,
+        "--max-speed", type=float, default=None,
         help="Vitesse max plausible d'un keypoint en m/s (défaut: 5.0). "
-             "Au-delà, la frame est considérée comme un saut de tracking "
-             "et interpolée depuis ses voisines.",
+             "Demandé à l'invite si absent. Au-delà, la frame est considérée "
+             "comme un saut de tracking et interpolée depuis ses voisines.",
     )
     parser.add_argument(
         "--fps", type=float, default=None,
@@ -272,13 +293,12 @@ def main() -> None:
     args = parser.parse_args()
 
     project = resolve_project(args)
+    no_prompt = getattr(args, "no_prompt", False)
     out_root = dlc_output_dir(project)
     print(f"Projet     : {project}")
     print(f"Sortie     : {out_root}/<session>/<session>_clean.h5")
-    print(f"Threshold  : {args.likelihood_threshold}  (paws bottom-view : 0.3 OK)")
     print(f"Interp lim : {args.interp_limit} frames")
     print(f"Filtre DLC : {'OFF (--no-filter)' if args.no_filter else f'median win={args.window_length}'}")
-    print()
 
     # Liste des sessions à traiter
     dlc_out = dlc_output_dir(project)
@@ -322,11 +342,43 @@ def main() -> None:
         if px_per_cm is None and cfg.get("px_per_cm"):
             px_per_cm = float(cfg["px_per_cm"])
 
-    print(f"Nettoyage      : cutoff {args.likelihood_threshold}, "
+    # ---- Seuils : arguments s'ils sont passés, sinon demandés ----
+    likelihood_threshold = args.likelihood_threshold
+    if likelihood_threshold is None:
+        likelihood_threshold = prompt_float(
+            "Seuil de likelihood", DEFAULT_LIKELIHOOD,
+            "Seuil de likelihood — la confiance que DLC attribue à chaque\n"
+            "point, entre 0 (aucune) et 1 (certaine). En dessous du seuil,\n"
+            "la position est jugée non fiable, effacée, puis reconstruite\n"
+            "par interpolation depuis les frames voisines.\n"
+            "  · plus haut (0.9) = plus sévère, plus de points reconstruits\n"
+            "  · plus bas  (0.3) = plus permissif, on garde des points douteux\n"
+            f"  · {DEFAULT_LIKELIHOOD} = recommandation de l'équipe VAME/LIN",
+            no_prompt,
+        )
+
+    max_speed = args.max_speed
+    if max_speed is None:
+        if px_per_cm:
+            max_speed = prompt_float(
+                "Vitesse max plausible (m/s)", DEFAULT_MAX_SPEED,
+                "Vitesse max — un keypoint qui se déplace plus vite que ça\n"
+                "entre deux frames est un saut de tracking, pas un mouvement\n"
+                "réel. Attrape les erreurs que la likelihood rate (un point\n"
+                "peut être faux ET confiant).\n"
+                f"  · {DEFAULT_MAX_SPEED} m/s = recommandation VAME/LIN pour une souris\n"
+                "  · 4 m/s = plus strict s'il reste des sauts sur le graphe QC",
+                no_prompt,
+            )
+        else:
+            max_speed = DEFAULT_MAX_SPEED
+
+    print()
+    print(f"Nettoyage      : cutoff {likelihood_threshold}, "
           f"interp ≤ {args.interp_limit} frames, {fps:.0f} fps")
     if px_per_cm:
         print(f"Échelle        : {px_per_cm:.2f} px/cm → détection de "
-              f"vitesse > {args.max_speed} m/s ACTIVE")
+              f"vitesse > {max_speed} m/s ACTIVE")
     else:
         print("Échelle        : non renseignée → détection de vitesse "
               "DÉSACTIVÉE")
@@ -340,9 +392,9 @@ def main() -> None:
         try:
             stats = process_session(
                 project, session_id, dlc_config,
-                args.likelihood_threshold, args.interp_limit,
+                likelihood_threshold, args.interp_limit,
                 args.window_length, args.no_filter,
-                fps=fps, px_per_cm=px_per_cm, max_speed_ms=args.max_speed,
+                fps=fps, px_per_cm=px_per_cm, max_speed_ms=max_speed,
                 detect_sticky=not args.no_sticky_detection,
                 qc_plot=not args.no_qc_plot, qc_bodypart=args.qc_bodypart,
             )

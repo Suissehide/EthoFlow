@@ -377,24 +377,51 @@ Une fenêtre s'ouvre, tu cliques les deux extrémités de la distance connue, le
 
 #### 6b — Nettoyage des poses
 
+**À quoi ça sert.** DLC te rend une position pour chaque keypoint, sur chaque frame, quoi qu'il arrive — y compris quand la patte est cachée sous le corps ou qu'un reflet IR ressemble à une truffe. Le fichier brut contient donc des positions fausses, mêlées aux bonnes. Ce script les repère et les remplace par une position reconstruite à partir des frames voisines. VAME segmente des **trajectoires** : un keypoint qui téléporte à travers l'arène pendant 3 frames crée un faux motif comportemental que tu retrouveras dans tes stats.
+
+**Ce n'est pas obligatoire.** Le pipeline tourne sans : tu peux enchaîner directement sur l'étape 7 avec les `.h5` bruts. Cette étape est de l'assurance qualité, pas une conversion de format. Elle vaut le coup si tes vidéos ont des occlusions (bottom-view avec pattes qui passent sous le corps), un contraste faible, ou si le modèle DLC est encore jeune. Si ton modèle est excellent et tes vidéos propres, elle ne changera presque rien — le résumé de fin (`% utilisables`, nombre de frames réparées) te le dira en une ligne.
+
 ```cmd
-:: Interactif
+:: Interactif — les seuils sont demandés avec leur valeur par défaut
 python scripts\prepare_vame_input_custom.py
 
-:: Ou avec arguments
-python scripts\prepare_vame_input_custom.py --project-dir D:\EthoFlow\projects\mon-projet
+:: Ou avec arguments (rien n'est demandé)
+python scripts\prepare_vame_input_custom.py --project-dir D:\EthoFlow\projects\mon-projet ^
+    --likelihood-threshold 0.70 --max-speed 5
 ```
+
+Sans argument, le script explique chaque seuil avant de le demander :
+
+```
+Seuil de likelihood — la confiance que DLC attribue à chaque
+point, entre 0 (aucune) et 1 (certaine). En dessous du seuil,
+la position est jugée non fiable, effacée, puis reconstruite
+par interpolation depuis les frames voisines.
+  · plus haut (0.9) = plus sévère, plus de points reconstruits
+  · plus bas  (0.3) = plus permissif, on garde des points douteux
+  · 0.7 = recommandation de l'équipe VAME/LIN
+Seuil de likelihood [0.7] :
+```
+
+**Qu'est-ce que la « likelihood » exactement ?** C'est un nombre entre 0 et 1 que DeepLabCut produit à côté de chaque coordonnée `(x, y)` : sa propre estimation de la probabilité que ce point soit au bon endroit. Elle vient de l'intensité du pic dans la carte de chaleur que le réseau produit pour ce keypoint — pic net et isolé → likelihood proche de 1 ; carte plate ou à deux pics → likelihood basse. C'est une auto-évaluation du modèle, pas une vérité : **un point peut être faux tout en étant confiant** (le modèle confond systématiquement patte avant droite et patte avant gauche, par exemple). D'où les passes 3 et 4 ci-dessous, qui ne regardent pas la likelihood du tout.
 
 Quatre passes successives par session :
 
 1. **Filtre médian temporel** (`dlc.filterpredictions`, fenêtre 5 frames) — tue les jitters d'une ou deux frames.
-2. **Cutoff de likelihood à 0.70** (`--likelihood-threshold`) — le filet grossier.
-3. **Détection de vitesse aberrante** (`--max-speed`, défaut 5 m/s) — la méthode que Tony privilégie. Convertit chaque déplacement inter-frame en m/s via `px_per_cm` et marque les frames physiquement impossibles. **Indépendant de la likelihood** : attrape aussi les labels *confiants mais faux*.
+2. **Cutoff de likelihood** (`--likelihood-threshold`, défaut 0.70) — le filet grossier.
+3. **Détection de vitesse aberrante** (`--max-speed`, défaut 5 m/s) — la méthode que Tony privilégie. Convertit chaque déplacement inter-frame en m/s via `px_per_cm` et marque les frames physiquement impossibles. **Indépendant de la likelihood** : attrape aussi les labels *confiants mais faux*. Nécessite l'étape 6a, sinon la passe est silencieusement désactivée.
 4. **Détection de points collants** — repère les coordonnées où un keypoint atterrit anormalement souvent (reflet IR fixe, coin d'arène). Tony : « parfois les labels bruités sautent toujours au même point que l'animal ne peut pas atteindre ». Le script distingue un artefact (frames dispersées dans le temps) d'une immobilité réelle (frames contiguës) et ne touche qu'aux premiers.
 
 Les frames marquées par 2/3/4 sont **interpolées** depuis leurs voisines valides, pas jetées. Les trous > `--interp-limit` (défaut 25 frames ≈ 1 s) restent NaN.
 
-**Critère d'acceptation** — le script produit un graphe avant/après dans `data/dlc-output/_qc_trajectories/<session>_tail_base.png`. Objectif de Tony :
+**Critère d'acceptation** — le script produit un graphe avant/après par session dans `data/dlc-output/_qc_trajectories/`. Le nom du fichier est `<session>_<keypoint>.png`, par exemple `BV-970_tail_base.png` : le graphe ne trace **qu'un seul keypoint**, celui passé à `--qc-bodypart`, et `tail_base` est le défaut. C'est le point le plus stable du corps — il ne disparaît jamais sous l'animal et bouge peu par rapport au centre de masse, donc un saut visible sur sa trajectoire est forcément une erreur de tracking, jamais un vrai mouvement. Le keypoint est dans le nom pour que tu puisses en tracer plusieurs sans écraser le précédent :
+
+```cmd
+python scripts\prepare_vame_input_custom.py --qc-bodypart paw_front_left
+:: → data/dlc-output/_qc_trajectories/BV-970_paw_front_left.png, à côté du tail_base
+```
+
+Objectif de Tony :
 
 > « Ce que tu veux voir au final, c'est que tracer la trajectoire de l'animal sur toute la vidéo ne montre aucun saut anormal de position dans l'arène, sans avoir à jeter complètement des points, ce qui pose beaucoup de problèmes en aval. »
 
@@ -407,6 +434,7 @@ Si des sauts subsistent sur le graphe, baisse `--max-speed` (4 m/s) ou monte `--
 - `--no-sticky-detection` — désactive la passe 4
 - `--qc-bodypart center` — trace un autre keypoint dans le graphe de contrôle
 - `--no-qc-plot` — pas de graphes (gagne quelques secondes par session)
+- `--no-prompt` — n'ouvre aucune invite, prend les défauts (pour du batch)
 
 **Si tu as N animaux par vidéo** (voie A), fais le split par arène en amont :
 
@@ -452,24 +480,58 @@ Sortie : `data/vame/results/<session>/<model>/hmm-15/15_hmm_label_<session>.npy`
 
 ### Étape 8 — labelliser les motifs à la main
 
-VAME te donne 15 motifs numérotés 0-14. Il faut les nommer et les catégoriser. Deux options :
+VAME te donne 15 motifs numérotés 0-14. Il faut les nommer et les catégoriser.
 
-- **Générer les vidéos par motif** — 30-60 clips de 10s pour chaque motif :
-  ```cmd
-  python scripts\run_vame.py motif-videos
-  python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet motif-videos
-  ```
-  Sortie : `data/vame/results/community_videos/motif_<N>.mp4`. Regarde chaque vidéo, décide du nom et de la catégorie ETHOGRAM (Locomotion / Sniffing / Rearing / Grooming / Stationary / Vertical exploration).
+**1. Générer les clips + le fichier de labels** — une seule commande :
 
-- **Remplir `data/vame/motif_labels.csv`** avec 15 lignes :
-  ```csv
-  motif_id;label;category;confidence;notes
-  0;grooming_face;Grooming;high;
-  1;walking;Locomotion;high;
-  ...
-  ```
+```cmd
+python scripts\run_vame.py motif-videos
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet motif-videos
+```
+
+Elle produit les clips (`data/vame/results/community_videos/motif_<N>.mp4`) **et** `data/vame/motif_labels.csv`, pré-rempli avec une ligne par motif :
+
+```csv
+motif_id;label;category;confidence;qc_inspected_sessions;notes;usage_pct;video
+0;;;;;;18.42;results/community_videos/motif_0.mp4
+1;;;;;;12.07;results/community_videos/motif_1.mp4
+2;;;;;;9.85;results/community_videos/motif_2.mp4
+```
+
+`usage_pct` (fréquence du motif, toutes sessions confondues) et `video` (chemin du clip) sont remplis pour toi. `label` et `category` sont vides — c'est ton travail après visionnage. Trie par `usage_pct` décroissant et commence par le haut : les motifs à moins de 1 % ne pèsent presque rien dans les analyses.
+
+Le fichier existant n'est **jamais écrasé** — ton travail d'annotation est préservé même si tu relances `motif-videos`. Pour repartir de zéro : `--regen-labels`. Pour regénérer le CSV seul, sans refaire les clips (long) :
+
+```cmd
+python scripts\run_vame.py motif-labels
+```
+
+**2. Remplir `label` et `category`.** Le `label` est un nom libre et spécifique (`grooming_face`, `walking_slow`) ; la `category` vient du référentiel ETHOGRAM : `Locomotion`, `Stationary`, `Vertical exploration`, `Sniffing`, `Grooming`, `Exploration`, `Specific behaviors`, `Transitions`. Les analyses groupent par `category`, donc reste dans cette liste.
+
+```csv
+motif_id;label;category;confidence;qc_inspected_sessions;notes;usage_pct;video
+0;grooming_face;Grooming;high;BV-970;;18.42;results/community_videos/motif_0.mp4
+1;walking;Locomotion;high;BV-970,BV-971;;12.07;results/community_videos/motif_1.mp4
+```
+
+Un motif ininterprétable (bruit de tracking, animal hors champ) : mets `artifact` dans `category`, `analyze_vame.py` l'exclura des stats au lieu de le compter comme un comportement.
 
 Ce CSV est lu par toutes les analyses en aval. Sans lui, les figures affichent `motif_0`, `motif_1`, etc.
+
+#### Faire plus (ou moins) de 15 motifs
+
+15 est le défaut de VAME, pas une contrainte. Le nombre de motifs est le paramètre `n_clusters` du config VAME. Passe-le à la segmentation :
+
+```cmd
+python scripts\run_vame.py segment --n-clusters 25
+python scripts\run_vame.py motif-videos
+```
+
+`--n-clusters` écrit la valeur dans `data/vame/config.yaml` puis segmente. Chaque valeur crée **son propre dossier de résultats** (`results/<session>/<model>/hmm-25/` à côté de `hmm-15/`) : rien n'est écrasé, tu peux comparer deux granularités. En revanche `motif_labels.csv` est unique par projet — si tu changes de `n_clusters` après avoir annoté, sauvegarde ton CSV (`motif_labels_hmm15.csv`) et repasse-le plus tard avec `analyze_vame.py --labels`, sinon `--regen-labels` te fabriquera le nouveau squelette par-dessus.
+
+Pour choisir un nombre plutôt qu'un autre : 15 motifs se labellisent en une petite heure, 30 en une demi-journée, et au-delà de ~40 sur un jeu de données modeste tu commences à découper le même comportement en sous-motifs quasi identiques. Les analyses en aval acceptent n'importe quelle valeur ; c'est ton temps de labellisation qui est la contrainte.
+
+Le nombre est aussi modifiable directement dans `data/vame/config.yaml` (clé `n_clusters`) si tu préfères, avant de relancer `segment` sans argument.
 
 ### Étape 9 — analyses + visualisations
 
@@ -913,7 +975,7 @@ default_arenes_coords:
 - `reencode_vame_videos.py` — Re-encode H.264/yuv420p pour compat OpenCV
 
 **VAME**
-- `run_vame.py` — Orchestre setup/align/trainset/train/evaluate/segment/motif-videos/all
+- `run_vame.py` — Orchestre setup/align/trainset/train/evaluate/segment/motif-videos/motif-labels/community/all. `segment --n-clusters N` change le nombre de motifs ; `motif-videos` génère aussi `motif_labels.csv` pré-rempli
 
 **Analyses**
 - `analyze_vame.py` — Croise motifs avec conditions, CSV + heatmaps + boxplots + stats

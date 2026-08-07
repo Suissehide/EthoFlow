@@ -9,6 +9,10 @@ Runner VAME — bootstrap d'un projet à partir de data/dlc-output/.
     train     entraînement du VAE
     evaluate  diagnostics du modèle entraîné
     segment   segmentation des poses en motifs comportementaux
+              (--n-clusters N pour autre chose que les 15 motifs par défaut)
+    motif-videos  clips d'exemple par motif + génère data/vame/motif_labels.csv
+    motif-labels  (re)génère seulement le CSV de labels
+    community regroupement des motifs en communautés
     info      affiche le projet courant et le statut
     all       enchaîne setup → segment (long, plusieurs heures sur GPU)
 
@@ -29,6 +33,8 @@ Usage typique :
     python scripts/run_vame.py train
     python scripts/run_vame.py evaluate
     python scripts/run_vame.py segment
+    python scripts/run_vame.py segment --n-clusters 25   # autre granularité
+    python scripts/run_vame.py motif-videos              # clips + motif_labels.csv
 
 Référence officielle (à garder ouverte pour ajuster les hyperparamètres) :
     https://github.com/LINCellularNeuroscience/VAME/blob/master/examples/demo.py
@@ -589,17 +595,153 @@ def cmd_evaluate(args) -> None:
     print("\n✅ Évaluation terminée — vois les figures dans le dossier du projet.")
 
 
+def set_n_clusters(project: Path, n: int) -> None:
+    """Écrit `n_clusters` dans le config.yaml du projet VAME.
+
+    C'est ce nombre qui décide combien de motifs la segmentation produit
+    (défaut VAME : 15). Le changer et relancer `segment` produit un
+    nouveau dossier `results/<session>/<model>/<algo>-<n>/` — les
+    résultats précédents ne sont pas écrasés.
+    """
+    import yaml as _yaml
+    cfg_path = vame_config_yaml(project)
+    with open(cfg_path) as f:
+        cfg = _yaml.safe_load(f) or {}
+    key = "n_clusters" if "n_clusters" in cfg or "n_cluster" not in cfg \
+        else "n_cluster"
+    old = cfg.get(key)
+    cfg[key] = int(n)
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        _yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+    print(f"ℹ  {key} : {old} → {n}  (dans {cfg_path.name})")
+
+
 def cmd_segment(args) -> None:
     """vame-py >= 0.x : `pose_segmentation` renommée en `segment_session`."""
     import vame
-    print("Segmentation des poses en motifs comportementaux...")
     project = resolve_project(args)
+    if getattr(args, "n_clusters", None):
+        set_n_clusters(project, args.n_clusters)
+    print("Segmentation des poses en motifs comportementaux...")
     vame.segment_session(load_vame_config(project))
     print("\n✅ Segmentation terminée.")
     print("\nÉtapes suivantes possibles :")
-    print("  - python scripts/run_vame.py motif-videos   # vidéos d'exemple par motif")
+    print("  - python scripts/run_vame.py motif-videos   # clips par motif + motif_labels.csv")
     print("  - python scripts/run_vame.py community      # regroupement de motifs en communautés")
     print("  - python scripts/analyze_vame.py            # comparaison par condition (custom EthoFlow)")
+
+
+MOTIF_LABELS_COLUMNS = [
+    "motif_id", "label", "category", "confidence",
+    "qc_inspected_sessions", "notes", "usage_pct", "video",
+]
+
+# Catégories du référentiel ETHOGRAM, rappelées en commentaire du CSV pour
+# que l'utilisateur n'ait pas à les chercher au moment de remplir.
+ETHOGRAM_CATEGORIES = [
+    "Locomotion", "Stationary", "Vertical exploration", "Sniffing",
+    "Grooming", "Exploration", "Specific behaviors", "Transitions",
+]
+
+
+def read_vame_clusters(project: Path) -> tuple[int | None, list[str]]:
+    """Lit (n_clusters, algorithmes de segmentation) du config VAME."""
+    import yaml as _yaml
+    cfg_path = vame_config_yaml(project)
+    if not cfg_path.exists():
+        return None, ["hmm"]
+    with open(cfg_path) as f:
+        cfg = _yaml.safe_load(f) or {}
+    n = cfg.get("n_clusters", cfg.get("n_cluster"))
+    algos = cfg.get("segmentation_algorithms") or ["hmm"]
+    if isinstance(algos, str):
+        algos = [algos]
+    return (int(n) if n else None), list(algos)
+
+
+def motif_usage_pct(vame_project: Path, algo: str,
+                     n_clusters: int) -> list[float]:
+    """Fréquence d'usage de chaque motif, en % du total, toutes sessions.
+
+    Sert à pré-remplir le CSV : un motif à 0.1 % ne mérite probablement pas
+    qu'on passe 10 min à le nommer, un motif à 20 % oui.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return [float("nan")] * n_clusters
+    total = None
+    for npy in (vame_project / "results").glob(
+            f"*/*/{algo}-{n_clusters}/motif_usage_*.npy"):
+        try:
+            arr = np.asarray(np.load(npy), dtype=float).ravel()
+        except Exception:
+            continue
+        if arr.size < n_clusters:
+            arr = np.pad(arr, (0, n_clusters - arr.size))
+        arr = arr[:n_clusters]
+        total = arr if total is None else total + arr
+    if total is None or total.sum() <= 0:
+        return [float("nan")] * n_clusters
+    return list(100.0 * total / total.sum())
+
+
+def find_motif_video(vame_project: Path, motif_id: int) -> str:
+    """Chemin (relatif au projet VAME) d'un clip d'exemple du motif."""
+    for pattern in (f"**/*motif_{motif_id}.mp4", f"**/*motif_{motif_id}.avi",
+                    f"**/*motif_{motif_id}_*.mp4"):
+        for p in (vame_project / "results").glob(pattern):
+            return str(p.relative_to(vame_project))
+    return ""
+
+
+def write_motif_labels_csv(project: Path, vame_project: Path,
+                            overwrite: bool = False) -> Path | None:
+    """Écrit `data/vame/motif_labels.csv` pré-rempli, une ligne par motif.
+
+    Les colonnes `label` et `category` sont laissées **vides** : c'est le
+    travail de l'utilisateur après visionnage des clips. Le reste est
+    pré-rempli (id, fréquence d'usage, chemin du clip) pour lui éviter de
+    fabriquer le fichier à la main.
+
+    Si le fichier existe déjà, on ne l'écrase pas (le travail
+    d'annotation est précieux) sauf `overwrite=True`.
+    """
+    import csv
+
+    out_path = vame_project / "motif_labels.csv"
+    n_clusters, algos = read_vame_clusters(project)
+    if not n_clusters:
+        print("⚠  n_clusters introuvable dans le config VAME — "
+              "CSV de labels non généré.")
+        return None
+
+    if out_path.exists() and not overwrite:
+        print(f"ℹ  {out_path.name} existe déjà — laissé intact "
+              f"(--regen-labels pour le regénérer).")
+        return out_path
+
+    algo = algos[0]
+    usage = motif_usage_pct(vame_project, algo, n_clusters)
+
+    with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(MOTIF_LABELS_COLUMNS)
+        for i in range(n_clusters):
+            pct = usage[i]
+            w.writerow([
+                i, "", "", "", "", "",
+                "" if pct != pct else f"{pct:.2f}",   # NaN → vide
+                find_motif_video(vame_project, i),
+            ])
+
+    print(f"\n✅ CSV de labels pré-rempli : {out_path}")
+    print(f"   {n_clusters} lignes (algo={algo}), colonnes `label` et "
+          f"`category` à remplir après visionnage.")
+    print(f"   Catégories ETHOGRAM : {', '.join(ETHOGRAM_CATEGORIES)}")
+    print("   Un motif jamais interprétable ? mets `artifact` en category, "
+          "analyze_vame.py l'exclura.")
+    return out_path
 
 
 def cmd_motif_videos(args) -> None:
@@ -612,6 +754,17 @@ def cmd_motif_videos(args) -> None:
     vame_project = Path(load_config_pointer(project)).parent
     sample_path = vame_project / "results" / "<session>" / "<model>" / "<algo>-<n>" / "motif_videos"
     print(f"   Cherche dans : {sample_path}")
+
+    write_motif_labels_csv(project, vame_project,
+                            overwrite=getattr(args, "regen_labels", False))
+
+
+def cmd_motif_labels(args) -> None:
+    """(Re)génère seulement le CSV de labels, sans refaire les vidéos."""
+    project = resolve_project(args)
+    vame_project = Path(load_config_pointer(project)).parent
+    write_motif_labels_csv(project, vame_project,
+                            overwrite=getattr(args, "regen_labels", False))
 
 
 def cmd_community(args) -> None:
@@ -725,8 +878,21 @@ def main() -> None:
                          help="Désactive vame.cluster_loss (no-op). À utiliser "
                               "quand le SVD plante au premier epoch.")
     sub.add_parser("evaluate", help="Évaluation du modèle")
-    sub.add_parser("segment",  help="Segmentation en motifs")
-    sub.add_parser("motif-videos", help="Vidéos d'exemple par motif")
+    p_seg = sub.add_parser("segment", help="Segmentation en motifs")
+    p_seg.add_argument("--n-clusters", type=int, default=None,
+                       help="Nombre de motifs à produire (défaut VAME : 15). "
+                            "Écrit la valeur dans le config VAME avant de "
+                            "segmenter. Chaque valeur crée son propre dossier "
+                            "de résultats, rien n'est écrasé.")
+    p_mv = sub.add_parser("motif-videos",
+                          help="Vidéos d'exemple par motif + motif_labels.csv")
+    p_mv.add_argument("--regen-labels", action="store_true",
+                      help="Écrase motif_labels.csv s'il existe déjà "
+                           "(attention : perd les labels saisis).")
+    p_ml = sub.add_parser("motif-labels",
+                          help="(Re)génère seulement data/vame/motif_labels.csv")
+    p_ml.add_argument("--regen-labels", action="store_true",
+                      help="Écrase le fichier existant.")
     sub.add_parser("community",   help="Regroupement des motifs en communautés")
 
     p_info = sub.add_parser("info", help="État du projet VAME unique du projet EthoFlow")
@@ -746,6 +912,7 @@ def main() -> None:
         "evaluate":     cmd_evaluate,
         "segment":      cmd_segment,
         "motif-videos": cmd_motif_videos,
+        "motif-labels": cmd_motif_labels,
         "community":    cmd_community,
         "info":         cmd_info,
         "all":          cmd_all,
