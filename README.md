@@ -346,19 +346,31 @@ VAME veut un h5 single-animal par session, sans sauts de tracking aberrants. Cet
 Nécessaire pour juger si un déplacement de label est physiquement plausible. Tony suggère de photographier une règle avec ton setup (plutôt que d'utiliser les dimensions de l'arène : plus l'objet est grand, plus la distorsion de lentille fausse la mesure).
 
 ```cmd
-:: Interactif — demande la source et la distance connue
+:: Interactif — liste les vidéos de tes sessions, tu en choisis une
 python scripts\calibrate_scale.py
+
+:: Sur une session précise (pas de chemin à taper)
+python scripts\calibrate_scale.py --project-dir D:\EthoFlow\projects\mon-projet ^
+    --session BV-970 --known-cm 10
 
 :: Depuis une photo de règle
 python scripts\calibrate_scale.py --project-dir D:\EthoFlow\projects\mon-projet ^
     --image D:\EthoFlow\calibration\regle.png --known-cm 10
 
-:: Ou depuis une frame d'une vidéo existante
-python scripts\calibrate_scale.py --project-dir D:\EthoFlow\projects\mon-projet ^
-    --video E:\data\bottom_view\970.mp4 --known-cm 10
-
 :: Si tu connais déjà la valeur
 python scripts\calibrate_scale.py --project-dir D:\EthoFlow\projects\mon-projet --set 12.5
+```
+
+Sans argument, le script propose les vidéos de tes sessions :
+
+```
+Sur quelle vidéo veux-tu calibrer ?
+  1. BV-970  (970.mp4)
+  2. BV-971  (971.mp4)
+  3. BV-998  (998.mp4)
+  4. Une photo de règle (image)
+  5. Une autre vidéo (chemin libre)
+Choix [1] :
 ```
 
 Une fenêtre s'ouvre, tu cliques les deux extrémités de la distance connue, le script écrit `px_per_cm` dans `configs/pipeline_config.yaml`. L'étape 6b la lit automatiquement.
