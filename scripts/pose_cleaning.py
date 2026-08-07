@@ -335,8 +335,16 @@ def plot_trajectory_qc(df_before: pd.DataFrame, df_after: pd.DataFrame,
         ax.plot(x, y, "-", lw=0.4, color="#1f77b4", alpha=0.7)
         ax.set_title(title, fontsize=11)
         ax.set_xlabel("x (px)")
-        ax.invert_yaxis()  # repère image : y vers le bas
-        ax.set_aspect("equal", adjustable="datalim")
+        # `datalim` est interdit sur des axes partagés (matplotlib lève une
+        # ValueError) : il voudrait étirer les limites de chaque panneau
+        # indépendamment, ce que sharex/sharey empêchent par construction.
+        # `box` garde les limites communes et ajuste la boîte à la place —
+        # c'est ce qu'on veut de toute façon : les deux trajectoires doivent
+        # se lire dans le même repère pour être comparables.
+        ax.set_aspect("equal", adjustable="box")
+    # Repère image (y vers le bas). Les axes étant partagés, une seule
+    # inversion suffit — l'appliquer aux deux annulerait la première.
+    axes[0].invert_yaxis()
     axes[0].set_ylabel("y (px)")
 
     suptitle = f"Contrôle trajectoire — {session_id}" if session_id else \

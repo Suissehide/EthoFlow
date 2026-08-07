@@ -214,12 +214,19 @@ def process_session(
     if qc_plot:
         qc_dir = dlc_output_dir(project) / "_qc_trajectories"
         qc_dir.mkdir(parents=True, exist_ok=True)
-        ok = plot_trajectory_qc(
-            df, df_clean, qc_bodypart,
-            qc_dir / f"{session_id}_{qc_bodypart}.png",
-            session_id=session_id, stats=stats,
-        )
-        stats["qc_plot"] = str(qc_dir / f"{session_id}_{qc_bodypart}.png") if ok else None
+        qc_path = qc_dir / f"{session_id}_{qc_bodypart}.png"
+        # Le .h5 nettoyé est déjà écrit à ce stade : un plantage du graphe
+        # de contrôle (backend matplotlib, keypoint absent, écran headless)
+        # ne doit pas faire compter la session comme un échec.
+        try:
+            ok = plot_trajectory_qc(
+                df, df_clean, qc_bodypart, qc_path,
+                session_id=session_id, stats=stats,
+            )
+        except Exception as e:  # noqa: BLE001 — QC best-effort
+            print(f"  ⚠ graphe de contrôle non généré ({type(e).__name__}: {e})")
+            ok = False
+        stats["qc_plot"] = str(qc_path) if ok else None
 
     stats["raw_h5"] = raw_h5.name
     stats["filtered_h5"] = h5_to_clean.name if not skip_filter else "(skipped)"
