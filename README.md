@@ -548,11 +548,111 @@ python scripts\analyze_vame.py --project-dir D:\EthoFlow\projects\mon-projet --e
 
 Sortie dans `data/vame/analysis/` :
 - **CSV** : `motif_usage.csv`, `motif_usage_long.csv`, `stats_by_motif_*.csv`, `usage_by_category.csv`
-- **Heatmaps groupées** : `heatmap_usage_by_condition.png`, `_by_captopril.png`, `_by_group4.png` (sessions triées par groupe, séparateurs visuels)
+- **Heatmaps groupées** : `heatmap_usage_by_<colonne>.png` (sessions triées par groupe, séparateurs visuels)
 - **Barres + boxplots** : `mean_by_*.png`, `boxplots_top_by_*.png`, `boxplots_by_category_by_*.png`
 - **Extended** : `bout_duration_by_*.png`, `thigmotaxis_by_*.png`, `temporal_by_motif_*.png`
 
 Les stats utilisent Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3 groupes) avec correction Benjamini-Hochberg.
+
+#### Comment les colonnes de ton Excel deviennent des graphes
+
+C'est le point central de l'analyse, donc en détail. **Toute colonne de ton Excel peut servir d'axe de comparaison**, y compris celles que tu as inventées — le script ne connaît aucune colonne à l'avance.
+
+**La chaîne, de bout en bout :**
+
+```
+mon_projet_sessions.xlsx          ton fichier, une ligne par vidéo
+        │                          colonnes : id, mouse_id, group, sex, captopril, ...
+        │  python scripts\sync_from_excel.py
+        ▼
+data/raw/<session>/metadata.yaml  chaque colonne recopiée telle quelle
+        │
+        │  python scripts\analyze_vame.py
+        ▼
+data/vame/analysis/*.png          une série de graphes par colonne exploitable
+```
+
+`sync_from_excel.py` recopie **toutes** les colonnes, pas seulement celles qu'il connaît. Une colonne `regime_alimentaire` que tu ajoutes dans ton Excel se retrouve dans les metadata, puis devient utilisable comme axe sans toucher au code.
+
+**1. Voir ce qui est disponible.** À lancer en premier :
+
+```cmd
+python scripts\analyze_vame.py --list-columns
+```
+
+```
+Colonnes exploitables comme axe de comparaison (6) :
+
+  captopril                2 groupes : Captopril (8 sessions), Control (8 sessions)
+  condition                2 groupes : MCCiECKO (8 sessions), MCCf/f (8 sessions)
+  regime_alimentaire       2 groupes : standard (8 sessions), gras (8 sessions)
+  sex                      2 groupes : M (8 sessions), F (8 sessions)
+  cage                     4 groupes : C0 (4 sessions), C1 (4 sessions), ...
+  group4                   4 groupes : MCCiECKO_Captopril (4 sessions), ...
+```
+
+Une colonne absente de cette liste a soit **une seule valeur** (rien à comparer — typiquement `operateur` si c'est toujours toi), soit **plus de 12** (c'est un identifiant comme `mouse_id`, pas un facteur expérimental). Les alias qui contiennent exactement la même information (`group` et `condition`) sont dédoublonnés pour ne pas produire deux fois les mêmes figures.
+
+Si une colonne que tu attends n'apparaît pas : vérifie qu'elle est bien dans ton Excel **et** que tu as relancé `sync_from_excel.py` depuis que tu l'as ajoutée.
+
+**2. Lancer sans rien préciser** — le script produit une série complète pour *chaque* colonne exploitable :
+
+```cmd
+python scripts\analyze_vame.py
+```
+
+```
+  → axes de comparaison : captopril, condition, regime_alimentaire, sex, cage, group4
+✓ Heatmap groupée par captopril : heatmap_usage_by_captopril.png
+✓ Barres par captopril (2 groupes) : mean_by_captopril.png
+  → boxplots top motifs : boxplots_top_by_captopril.png (motifs [14, 6, 8, 5, 2, 12])
+✓ Stats Mann-Whitney (BH-corrected) : stats_by_motif_captopril.csv  (3/15 motifs significatifs à q<0.05)
+... (idem pour condition, regime_alimentaire, sex, cage, group4)
+```
+
+Pour chaque axe tu obtiens : une heatmap groupée, un graphe en barres, des boxplots des 6 motifs les plus différenciants, un CSV de stats, et — si tu as rempli les catégories dans `motif_labels.csv` — les mêmes par catégorie ETHOGRAM.
+
+**3. Restreindre à ce qui t'intéresse.** Sur 6 axes ça fait beaucoup de fichiers ; `--group-by` limite :
+
+```cmd
+:: Un seul axe
+python scripts\analyze_vame.py --group-by captopril
+
+:: Deux axes, chacun avec sa série de graphes
+python scripts\analyze_vame.py --group-by condition captopril
+```
+
+**4. Croiser deux colonnes** (design factoriel) avec `--cross` :
+
+```cmd
+:: 4 groupes : MCCf/f_Control, MCCf/f_Captopril, MCCiECKO_Control, MCCiECKO_Captopril
+python scripts\analyze_vame.py --cross condition captopril
+
+:: Croisement + axes simples, et plusieurs croisements
+python scripts\analyze_vame.py --group-by sex --cross condition captopril --cross sex cage
+```
+
+La colonne composite s'appelle `condition_x_captopril` et les fichiers suivent (`mean_by_condition_x_captopril.png`). Une session dont l'une des deux valeurs manque est exclue de ce croisement uniquement, pas des autres graphes.
+
+`group4` (génotype × captopril) existe en dur pour rétrocompatibilité avec les analyses déjà produites — c'est exactement l'équivalent de `--cross condition captopril`.
+
+**5. Analyses étendues sur l'axe de ton choix :**
+
+```cmd
+python scripts\analyze_vame.py --extended --extended-by regime_alimentaire
+python scripts\analyze_vame.py --extended --cross condition captopril --extended-by condition_x_captopril
+```
+
+**Combien de groupes, combien de sessions ?** Le test statistique s'adapte : 2 groupes → Mann-Whitney, 3+ → Kruskal-Wallis. En dessous de 3 sessions par groupe le motif est ignoré (pas assez pour un test). Un axe à 6 groupes sur 16 sessions donnera des p-values inexploitables — regarde `--list-columns` et vérifie que chaque valeur a assez de sessions avant de conclure quoi que ce soit.
+
+**Ajouter un facteur en cours de route :**
+
+1. Ouvre `mon_projet_sessions.xlsx`, ajoute une colonne (nom sans espace ni accent, ex : `regime_alimentaire`), remplis-la
+2. `python scripts\sync_from_excel.py` — les metadata sont mises à jour
+3. `python scripts\analyze_vame.py --list-columns` — vérifie qu'elle apparaît
+4. `python scripts\analyze_vame.py --group-by regime_alimentaire`
+
+Aucune ré-inférence DLC ni ré-entraînement VAME nécessaire : les motifs sont déjà calculés, tu ne fais que les recouper autrement.
 
 **Visualisations optionnelles** (parlant pour figures/posters) :
 
@@ -978,7 +1078,7 @@ default_arenes_coords:
 - `run_vame.py` — Orchestre setup/align/trainset/train/evaluate/segment/motif-videos/motif-labels/community/all. `segment --n-clusters N` change le nombre de motifs ; `motif-videos` génère aussi `motif_labels.csv` pré-rempli
 
 **Analyses**
-- `analyze_vame.py` — Croise motifs avec conditions, CSV + heatmaps + boxplots + stats
+- `analyze_vame.py` — Croise les motifs avec n'importe quelle colonne de ton Excel : CSV + heatmaps + boxplots + stats. `--list-columns` pour voir les axes disponibles, `--group-by` pour choisir, `--cross A B` pour un facteur composite
 - `community_dendrogram.py` — Dendrogramme labellisé des motifs
 - `inspect_session.py` — QC par session (couverture, gaps)
 - `inspect_vame_project.py` — QC d'un projet VAME (.nc files)

@@ -3,9 +3,9 @@ Analyse des résultats VAME en croisant avec les conditions expérimentales Etho
 
 Pour un projet VAME donné, ce script :
   1. Liste toutes les sessions segmentées (motif_usage_<session>.npy)
-  2. Récupère pour chaque session-arène : condition, stress, ANGII, timepoint
-     depuis les metadata.yaml d'ethoflow
-  3. Construit un DataFrame combiné session × motif × condition
+  2. Récupère TOUTES les colonnes des metadata.yaml d'ethoflow — donc toutes
+     les colonnes de ton Excel, que sync_from_excel.py y a recopiées
+  3. Construit un DataFrame combiné session × motif × métadonnées
   4. (optionnel) Détecte les frames "empty arena" en bord d'enregistrement
      via --validity-source ; --mask-empty les exclut des fréquences
   5. Sauvegarde un CSV et plusieurs plots de comparaison
@@ -17,6 +17,29 @@ Sortie : <project>/analysis/
   - heatmap_usage.png           : heatmap (sessions × motifs)
   - mean_by_condition.png       : usage moyen par groupe
   - boxplots_top_motifs.png     : distribution des motifs les plus différenciants
+
+Choisir ses axes de comparaison
+-------------------------------
+N'importe quelle colonne de ton Excel peut servir d'axe. Le script n'en
+connaît aucune à l'avance : il détecte celles qui ont entre 2 et 12 valeurs
+distinctes (en dessous il n'y a rien à comparer, au-dessus c'est un
+identifiant, pas un facteur expérimental).
+
+    # 1. Voir ce qui est disponible et avec combien de sessions par valeur
+    python scripts/analyze_vame.py --list-columns
+
+    # 2. Sans rien préciser : une série de graphes pour CHAQUE colonne
+    python scripts/analyze_vame.py
+
+    # 3. Restreindre
+    python scripts/analyze_vame.py --group-by captopril
+    python scripts/analyze_vame.py --group-by condition captopril
+
+    # 4. Croiser deux colonnes (design factoriel → 4 groupes)
+    python scripts/analyze_vame.py --cross condition captopril
+
+Ajouter un facteur : colonne dans l'Excel → sync_from_excel.py → --group-by
+ma_colonne. Ni DLC ni VAME ne sont à relancer, les motifs sont déjà calculés.
 
 Usage:
     python scripts/analyze_vame.py
@@ -460,21 +483,108 @@ def load_metadata_index(project: Path) -> dict[tuple[str, str], dict]:
                 elif y == "2026":
                     captopril = "non"
 
-            index[(session_id, "")] = {
+            # Toutes les colonnes de l'Excel arrivent ici via sync_from_excel
+            # (il recopie chaque colonne dans metadata.yaml). On les reprend
+            # telles quelles : n'importe quelle colonne que l'utilisateur
+            # ajoute à son Excel devient utilisable comme axe d'analyse
+            # (`--group-by ma_colonne`) sans toucher au code.
+            entry = {
+                k: v for k, v in meta.items()
+                if not isinstance(v, (dict, list))
+            }
+            # Puis les alias canoniques, qui écrasent en cas de collision.
+            entry.update({
                 "session_id": session_id,
                 "arena": "",
                 "mouse_id": meta.get("mouse_id"),
                 "condition": meta.get("group"),  # MCCiECKO / MCCf/f
                 "captopril": captopril,
-                "sex": meta.get("sex"),
-                "cage": meta.get("cage"),
                 "birth_date": birth,
-                "date": meta.get("date_recorded"),
-                "line": meta.get("line"),
-                "genotype_mcc": meta.get("genotype_mcc"),
-                "genotype_cdh5_cre": meta.get("genotype_cdh5_cre"),
-            }
+                "date": meta.get("date_recorded") or meta.get("date"),
+            })
+            index[(session_id, "")] = entry
     return index
+
+
+# Colonnes de metadata qui ne sont pas des axes d'analyse plausibles :
+# identifiants uniques, chemins, champs libres. Exclues de --list-columns
+# et de la détection automatique, mais utilisables si explicitement demandées.
+_NON_GROUPING_COLS = {
+    "session_id", "session_full", "arena", "source_video", "notes",
+    "id", "motif", "label", "frequency", "count", "category",
+    "empty_arena_count", "empty_arena_fraction",
+}
+
+
+def usable_group_columns(df: pd.DataFrame, max_groups: int = 12
+                          ) -> list[tuple[str, int, list]]:
+    """Colonnes du DataFrame utilisables comme axe de comparaison.
+
+    Critère : au moins 2 valeurs distinctes (sinon il n'y a rien à comparer)
+    et pas plus de `max_groups` (au-delà c'est un identifiant, pas un
+    facteur expérimental).
+
+    Retourne [(colonne, n_groupes, valeurs)] trié par nombre de groupes.
+    """
+    out = []
+    seen_signatures: dict[tuple, str] = {}
+    for col in df.columns:
+        if col in _NON_GROUPING_COLS:
+            continue
+        vals = df[col].dropna().unique()
+        if not (2 <= len(vals) <= max_groups):
+            continue
+        # Dédoublonnage : `group` et `condition` sont le même champ sous deux
+        # noms (alias historique), pareil pour `date` / `date_recorded`.
+        # Produire deux fois les mêmes figures n'apporte rien.
+        signature = tuple(df[col].astype("string").fillna("␀"))
+        if signature in seen_signatures:
+            continue
+        seen_signatures[signature] = col
+        out.append((col, len(vals), sorted(str(v) for v in vals)))
+    return sorted(out, key=lambda t: (t[1], t[0]))
+
+
+# Libellés lisibles pour les colonnes connues. Toute colonne absente d'ici
+# est affichée telle quelle — un nom d'axe est toujours le nom de la colonne
+# Excel, donc l'utilisateur reconnaît sa propre nomenclature.
+_COLUMN_TITLES = {
+    "condition": "génotype",
+    "group": "génotype",
+    "captopril": "traitement Captopril",
+    "group4": "génotype × Captopril",
+    "sex": "sexe",
+    "cage": "cage",
+    "timepoint": "timepoint",
+    "stress": "stress",
+    "angii": "ANGII",
+    "line": "lignée",
+    "date": "date d'enregistrement",
+}
+
+
+def group_title(col: str, n_groups: int) -> str:
+    """Titre de figure pour un axe de comparaison."""
+    nice = _COLUMN_TITLES.get(col, col.replace("_x_", " × ").replace("_", " "))
+    return f"Usage moyen par {nice} ({n_groups} groupes)"
+
+
+def make_cross_column(df: pd.DataFrame, cols: list[str]) -> str:
+    """Crée une colonne composite `a_x_b` dans df et retourne son nom.
+
+    Sert aux designs factoriels : croiser génotype × traitement donne les
+    4 groupes de l'analyse 2×2. Les lignes où l'une des colonnes est
+    manquante restent NaN et seront filtrées par le dropna en aval.
+    """
+    name = "_x_".join(cols)
+    parts = [df[c].astype("string") for c in cols]
+    combined = parts[0]
+    for p in parts[1:]:
+        combined = combined + "_" + p
+    # `+` sur des StringDtype propage déjà NaN, mais on force pour être sûr
+    mask = df[cols].isna().any(axis=1)
+    df[name] = combined.mask(mask)
+    return name
 
 
 def build_dataframe(seg_files: list[Path],
@@ -590,6 +700,14 @@ def build_dataframe(seg_files: list[Path],
                 "frequency": float(usage_norm[motif_i]),
                 "count": int(usage_original[motif_i]),
             }
+            # Toute autre colonne de la metadata (donc de l'Excel) est
+            # recopiée telle quelle. C'est ce qui rend `--group-by` ouvert :
+            # ajoute une colonne `traitement` dans ton Excel, resynchronise,
+            # et `--group-by traitement` marche sans modifier ce script.
+            for k, v in meta.items():
+                if k not in row and not isinstance(v, (dict, list)):
+                    row[k] = v
+
             if per_motif_empty is not None:
                 orig = int(usage_original[motif_i])
                 row["empty_arena_count"] = int(per_motif_empty[motif_i])
@@ -600,7 +718,8 @@ def build_dataframe(seg_files: list[Path],
     return pd.DataFrame(rows), pd.DataFrame(validity_rows)
 
 
-def aggregate_by_category(df: pd.DataFrame) -> pd.DataFrame:
+def aggregate_by_category(df: pd.DataFrame,
+                           extra_keys: list[str] | None = None) -> pd.DataFrame:
     """Agrège la fréquence par catégorie ETHOGRAM (ex: 'Sniffing') plutôt
     que par motif individuel. Ignore les motifs sans catégorie assignée.
 
@@ -611,9 +730,11 @@ def aggregate_by_category(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     # `captopril` et `group4` sont conservés dans le groupby s'ils existent
     # (bottomview) — un groupby sur des colonnes absentes casse en pandas.
-    keys = ["session_full", "session_id", "arena", "condition"]
-    for opt in ("captopril", "group4", "sex", "cage", "date"):
-        if opt in df_cat.columns:
+    keys = ["session_full", "session_id", "arena"]
+    optional = ["condition", "captopril", "group4", "sex", "cage", "date"]
+    optional += [c for c in (extra_keys or []) if c not in optional]
+    for opt in optional:
+        if opt in df_cat.columns and opt not in keys:
             keys.append(opt)
     keys.append("category")
     agg = (
@@ -1068,11 +1189,28 @@ def main() -> None:
                              "de bout par motif, dynamique temporelle (4 quarts), "
                              "analyse spatiale (center/periphery via tail_base).")
     parser.add_argument("--extended-by", default="condition",
-                        choices=["condition", "captopril", "group4"],
-                        help="Variable de groupement pour les analyses "
-                             "étendues (défaut : condition). Utilise 'captopril' "
-                             "pour comparer oui/non, ou 'group4' pour le 4-way "
-                             "génotype × captopril.")
+                        help="Colonne de groupement pour les analyses "
+                             "étendues (défaut : condition). N'importe quelle "
+                             "colonne de l'Excel, ou un croisement déclaré "
+                             "avec --cross (ex : genotype_x_captopril).")
+    parser.add_argument("--group-by", nargs="+", default=None, metavar="COL",
+                        help="Colonnes de l'Excel à utiliser comme axes de "
+                             "comparaison. Une série complète de graphes est "
+                             "produite pour chacune. Défaut : toutes les "
+                             "colonnes exploitables détectées automatiquement "
+                             "(2 à 12 valeurs distinctes).")
+    parser.add_argument("--cross", nargs="+", action="append", default=None,
+                        metavar="COL",
+                        help="Croise 2 colonnes (ou plus) en un facteur "
+                             "composite, ex : --cross group captopril donne "
+                             "les 4 groupes MCCf/f_Control, MCCf/f_Captopril, "
+                             "etc. Répétable pour plusieurs croisements.")
+    parser.add_argument("--list-columns", action="store_true",
+                        help="Affiche les colonnes disponibles (issues de ton "
+                             "Excel via les metadata) avec leurs valeurs et le "
+                             "nombre de sessions par valeur, puis quitte. "
+                             "À lancer en premier pour savoir quoi passer à "
+                             "--group-by.")
     parser.add_argument("--fps", type=float, default=30.0,
                         help="Framerate des vidéos source (pour la conversion "
                              "durée frame → secondes). Défaut : 30.")
@@ -1143,6 +1281,68 @@ def main() -> None:
         print(f"  → empty-arena : {n_affected}/{len(validity_df)} sessions "
               f"affectées, {total_empty} frames au total ({mode_txt})")
 
+    # ------------------------------------------------------------------
+    # Résolution des axes de comparaison
+    # ------------------------------------------------------------------
+    # Toute colonne de l'Excel est candidate (sync_from_excel les recopie
+    # dans metadata.yaml, build_dataframe les recopie dans le DataFrame).
+    # --cross fabrique des facteurs composites, --group-by restreint la
+    # liste, sinon on détecte automatiquement ce qui est exploitable.
+    cross_names = []
+    for combo in (args.cross or []):
+        missing = [c for c in combo if c not in df.columns]
+        if missing:
+            print(f"❌ --cross {' '.join(combo)} : colonne(s) inconnue(s) "
+                  f"{missing}. Lance --list-columns pour voir les colonnes "
+                  f"disponibles.", file=sys.stderr)
+            sys.exit(1)
+        cross_names.append(make_cross_column(df, combo))
+        print(f"  → facteur croisé '{cross_names[-1]}' : "
+              f"{df[cross_names[-1]].nunique()} groupes")
+
+    # `group4` historique : équivaut à --cross condition captopril. Conservé
+    # tel quel pour ne pas casser les analyses déjà produites.
+    available = usable_group_columns(df)
+    available_names = [c for c, _, _ in available]
+
+    if args.list_columns:
+        print(f"\nColonnes exploitables comme axe de comparaison "
+              f"({len(available)}) :\n")
+        for col, n, vals in available:
+            counts = (df.drop_duplicates("session_full")[col]
+                      .value_counts(dropna=True))
+            detail = ", ".join(f"{v} ({counts.get(v, 0)} sessions)"
+                                for v in counts.index[:6])
+            if len(counts) > 6:
+                detail += ", …"
+            print(f"  {col:<24} {n} groupes : {detail}")
+        print("\nExemples :")
+        if available_names:
+            print(f"  python scripts/analyze_vame.py --group-by "
+                  f"{available_names[0]}")
+        if len(available_names) >= 2:
+            print(f"  python scripts/analyze_vame.py --cross "
+                  f"{available_names[0]} {available_names[1]}")
+        print("\nUne colonne absente d'ici a soit une seule valeur (rien à "
+              "comparer),\nsoit plus de 12 (c'est un identifiant, pas un "
+              "facteur expérimental).")
+        sys.exit(0)
+
+    if args.group_by:
+        unknown = [c for c in args.group_by if c not in df.columns]
+        if unknown:
+            print(f"❌ Colonne(s) inconnue(s) : {unknown}\n"
+                  f"   Disponibles : {', '.join(available_names)}\n"
+                  f"   (ou lance --list-columns pour le détail)",
+                  file=sys.stderr)
+            sys.exit(1)
+        group_cols = list(args.group_by) + cross_names
+    else:
+        group_cols = available_names + [c for c in cross_names
+                                        if c not in available_names]
+
+    print(f"  → axes de comparaison : {', '.join(group_cols) or '(aucun)'}")
+
     out_dir = project / "analysis"
     out_dir.mkdir(exist_ok=True)
 
@@ -1169,9 +1369,7 @@ def main() -> None:
     # Chaque heatmap = sessions triées par groupe, bandeau couleur à gauche,
     # séparateurs entre groupes. Beaucoup plus lisible pour repérer les
     # motifs qui distinguent visuellement les groupes.
-    for col in ("condition", "captopril", "group4"):
-        if col not in df.columns:
-            continue
+    for col in group_cols:
         sub = df.dropna(subset=[col])
         if sub.empty or sub[col].nunique() < 2:
             continue
@@ -1179,23 +1377,14 @@ def main() -> None:
         plot_heatmap_grouped(sub, col, heat_path, labels)
         print(f"✓ Heatmap groupée par {col} : {heat_path.name}")
 
-    # Comparaisons par condition disponibles.
-    # Note : les colonnes non renseignées dans la metadata sont skippées auto
-    # (dropna + nunique >= 2), donc pas besoin de brancher topview/bottomview.
-    for col, title in [
-        ("condition", "Usage moyen par génotype (MCCiECKO vs MCCf/f)"),
-        ("captopril", "Usage moyen par traitement Captopril vs Control"),
-        ("group4",    "Usage moyen par génotype × Captopril (4 groupes)"),
-        ("timepoint", "Usage moyen par timepoint"),
-        ("stress",    "Usage moyen par stress"),
-        ("angii",     "Usage moyen par ANGII"),
-        ("sex",       "Usage moyen par sexe"),
-    ]:
-        if col not in df.columns:
-            continue
+    # Comparaisons par groupe : une série complète (barres + boxplots + stats)
+    # pour chaque axe. Les colonnes non renseignées dans la metadata sont
+    # skippées automatiquement (dropna + nunique >= 2).
+    for col in group_cols:
         sub = df.dropna(subset=[col])
         if sub.empty or sub[col].nunique() < 2:
             continue
+        title = group_title(col, sub[col].nunique())
         plot_path = out_dir / f"mean_by_{col}.png"
         plot_means_by_condition(sub, col, plot_path, title, labels)
         print(f"✓ Barres par {col} ({sub[col].nunique()} groupes) : {plot_path.name}")
@@ -1207,36 +1396,32 @@ def main() -> None:
             print(f"  → boxplots top motifs : {box_path.name} (motifs {top})")
 
         # Stats par motif : Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3)
-        # Appliqué à condition, captopril, group4 (les 3 breakdowns bottomview).
-        if col in {"condition", "captopril", "group4"}:
-            stats_df = stats_by_motif(sub, col)
-            if not stats_df.empty:
-                stats_path = out_dir / f"stats_by_motif_{col}.csv"
-                stats_df.to_csv(stats_path, index=False)
-                n_sig = int(stats_df["significant_0.05"].sum())
-                test_name = ("Kruskal-Wallis" if sub[col].nunique() > 2
-                             else "Mann-Whitney")
-                print(f"✓ Stats {test_name} (BH-corrected) : {stats_path.name}  "
-                      f"({n_sig}/{len(stats_df)} motifs significatifs à q<0.05)")
+        stats_df = stats_by_motif(sub, col)
+        if not stats_df.empty:
+            stats_path = out_dir / f"stats_by_motif_{col}.csv"
+            stats_df.to_csv(stats_path, index=False)
+            n_sig = int(stats_df["significant_0.05"].sum())
+            test_name = ("Kruskal-Wallis" if sub[col].nunique() > 2
+                         else "Mann-Whitney")
+            print(f"✓ Stats {test_name} (BH-corrected) : {stats_path.name}  "
+                  f"({n_sig}/{len(stats_df)} motifs significatifs à q<0.05)")
 
     # Agrégation par catégorie ETHOGRAM si des labels ont fourni des catégories
     has_categories = labels and any(
         isinstance(e, dict) and e.get("category") for e in labels.values()
     )
     if has_categories:
-        cat_df = aggregate_by_category(df)
+        cat_df = aggregate_by_category(df, extra_keys=group_cols)
         if not cat_df.empty:
             cat_path = out_dir / "usage_by_category.csv"
             cat_df.to_csv(cat_path, index=False)
             print(f"✓ Agrégation par catégorie : {cat_path.name}")
 
-            # Plots + stats par catégorie × {condition, captopril, group4}.
-            # Un fichier par breakdown ; le user compare visuellement les 3.
-            for grp_col, grp_title in [
-                ("condition", "génotype"),
-                ("captopril", "Captopril"),
-                ("group4",    "génotype × Captopril"),
-            ]:
+            # Plots + stats par catégorie × chaque axe de comparaison.
+            # Un fichier par axe ; l'utilisateur les compare visuellement.
+            for grp_col in group_cols:
+                grp_title = _COLUMN_TITLES.get(
+                    grp_col, grp_col.replace("_x_", " × ").replace("_", " "))
                 if grp_col not in cat_df.columns:
                     continue
                 sub_cat = cat_df.dropna(subset=[grp_col])
@@ -1347,12 +1532,23 @@ def main() -> None:
     # =========================================================================
     if args.extended:
         group_col = args.extended_by
+        if group_col not in df.columns:
+            print(f"❌ --extended-by {group_col} : colonne inconnue.\n"
+                  f"   Disponibles : {', '.join(available_names + cross_names)}",
+                  file=sys.stderr)
+            sys.exit(1)
         print(f"\n=== Analyses étendues (groupement : {group_col}) ===")
         n_motifs = df["motif"].nunique()
 
+        # La valeur du groupe est relue depuis le DataFrame (qui contient
+        # déjà toutes les colonnes de l'Excel + les facteurs croisés), donc
+        # --extended-by accepte n'importe quelle colonne sans branchement.
+        group_of_session = (
+            df.drop_duplicates("session_full")
+              .set_index("session_full")[group_col].to_dict()
+        )
+
         # Pré-charge labels-per-frame et groupe pour chaque session.
-        # `group_val` = la valeur qui servira pour tous les splits étendus
-        # (condition, captopril, ou group4 selon --extended-by).
         session_data = {}
         for f in seg_files:
             lpf = load_per_frame_labels(f)
@@ -1361,15 +1557,8 @@ def main() -> None:
             session_name = f.parent.parent.parent.name
             sid, arena = parse_session_name(session_name)
             meta = meta_index.get((sid, arena), {})
-            cond = meta.get("condition")
-            capto = _map_captopril(meta.get("captopril"))
-            if group_col == "condition":
-                group_val = cond
-            elif group_col == "captopril":
-                group_val = capto
-            elif group_col == "group4":
-                group_val = f"{cond}_{capto}" if (cond and capto) else None
-            else:
+            group_val = group_of_session.get(session_name)
+            if group_val is not None and pd.isna(group_val):
                 group_val = None
             session_data[session_name] = {
                 "labels_per_frame": lpf,
