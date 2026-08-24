@@ -19,17 +19,12 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from lib.config import DEFAULT_VAME_PROJECTS_ROOT, DEFAULT_PROJECTS_ROOT, current_project_name  # noqa: E402
+from lib.config import current_project_name  # noqa: E402
 from lib.icons import ACCENT, ACCENT_BG, ACCENT_HEX, lucide_data_uri  # noqa: E402
 from views import (  # noqa: E402
     about,
     configuration,
-    dashboard,
-    label_motifs,
-    results,
-    run_pipeline,
-    session_details,
-    sync_excel,
+    projet,
 )
 
 st.set_page_config(
@@ -41,30 +36,27 @@ st.set_page_config(
 # ============================================================
 # Init session state
 # ============================================================
-if "vame_projects_root" not in st.session_state:
-    st.session_state.vame_projects_root = str(DEFAULT_VAME_PROJECTS_ROOT)
-if "projects_root" not in st.session_state:
-    st.session_state.projects_root = str(DEFAULT_PROJECTS_ROOT)
 if "current_page" not in st.session_state:
-    st.session_state.current_page = "Tableau de bord"
+    st.session_state.current_page = "Projet"
 
 has_project = current_project_name() is not None
 
 # ============================================================
-# Pages — only Dashboard visible without a project
+# Pages
+#
+# Réduites aux trois pages fonctionnelles à ce stade du chantier : les
+# autres vues (Données, Détails session, Lancer pipeline, Labellisation
+# VAME, Résultats) reviendront une par une, chacune ajoutée par la tâche
+# qui l'adapte aux modules `lib/` actuels. Pour enregistrer une page ici :
+# l'ajouter à PAGES (ou PROJECT_PAGES si elle exige un projet ouvert), avec
+# une icône Lucide (voir lib/icons.ICONS) et une clé unique.
 # ============================================================
 PAGES: list[dict] = [
-    {"name": "Tableau de bord",    "icon": "layout-dashboard", "render": dashboard.render,      "key": "dashboard"},
+    {"name": "Projet",             "icon": "layout-dashboard", "render": projet.render,         "key": "projet"},
 ]
 
-# Pages requiring a project
-PROJECT_PAGES: list[dict] = [
-    {"name": "Données",            "icon": "database",         "render": sync_excel.render,     "key": "sync"},
-    {"name": "Détails session",    "icon": "search",           "render": session_details.render, "key": "details"},
-    {"name": "Lancer pipeline",    "icon": "play",             "render": run_pipeline.render,    "key": "pipeline"},
-    {"name": "Labellisation VAME", "icon": "tags",             "render": label_motifs.render,    "key": "labels"},
-    {"name": "Résultats",          "icon": "chart-column",     "render": results.render,         "key": "results"},
-]
+# Pages requiring a project (aucune pour l'instant)
+PROJECT_PAGES: list[dict] = []
 
 BOTTOM_PAGES: list[dict] = [
     {"name": "Configuration",      "icon": "settings",         "render": configuration.render,   "key": "config"},
@@ -79,9 +71,9 @@ else:
 
 _ALL_PAGES = {p["name"]: p for p in _visible_main + BOTTOM_PAGES}
 
-# If current page requires project but no project → redirect to dashboard
+# If current page requires project but no project → redirect to Projet
 if st.session_state.current_page not in _ALL_PAGES:
-    st.session_state.current_page = "Tableau de bord"
+    st.session_state.current_page = "Projet"
 
 # ============================================================
 # Per-button CSS rules

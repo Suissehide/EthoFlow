@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from lib.config import ROOT
+from lib.project import ROOT
 
 
 def render() -> None:
