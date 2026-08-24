@@ -25,8 +25,19 @@ def bouton_lancer(projet: Path, label: str, cmd, *, cle: str,
     affichant l'erreur plutôt que de laisser l'exception remonter.
     """
     occupe = runner.is_running(projet)
+    aide = help
+    if aide is None and occupe:
+        # Le verrou est par projet, pas par page : l'utilisateur peut être
+        # sur la page Pose pendant qu'un entraînement VAME lancé depuis une
+        # autre page tourne depuis trois heures. Sans nommer ce job ici, il
+        # n'a aucun moyen de savoir ce qui bloque le bouton (ruling R9.1).
+        en_cours = runner.current(projet)
+        if en_cours is not None:
+            aide = f"« {en_cours.label} » tourne déjà (démarré à {en_cours.started_at})."
+        else:
+            aide = "Un autre job tourne déjà."
     if st.button(label, key=cle, type=type, disabled=disabled or occupe,
-                 help=help or ("Un autre job tourne déjà." if occupe else None)):
+                 help=aide):
         try:
             runner.start(projet, cmd)
             st.rerun()
@@ -101,6 +112,10 @@ def historique(projet: Path, limite: int = 10) -> None:
         for job in jobs:
             icone, texte = _ETATS.get(job.state, ("•", job.state))
             st.markdown(f"{icone} **{job.label}** — {texte} · {job.started_at}")
-            with st.expander("log", expanded=False):
+            # Pas d'expander imbriqué (déconseillé par Streamlit) : la
+            # visibilité du log de CE job se pilote par une case à cocher,
+            # à plat dans l'expander parent — lisible même avec dix jobs.
+            if st.checkbox("Voir le log", key=f"voir_log_{job.job_id}"):
                 st.code(runner.read_log(projet, job.job_id, tail=200) or "(vide)",
                         language="text")
+            st.divider()
