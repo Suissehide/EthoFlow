@@ -223,12 +223,27 @@ def load_motif_labels(labels_path: Path | None) -> dict[int, dict]:
             str(v).strip() for v in df[cat_col]
         )
 
-        if not label_has_content and cat_has_content:
-            # Cas (a) : promeut category → label, laisse category vide
+        # `artifact` dans `category` n'est pas un label mal placé : c'est un
+        # marqueur d'exclusion (voir is_artifact_motif). Il ne doit donc ni
+        # déclencher la promotion du cas (a), ni être déplacé par elle —
+        # sinon un CSV où seuls des motifs de bruit sont marqués, avant
+        # toute labellisation, verrait ses marqueurs effacés et ses motifs
+        # comptés comme des comportements nommés « artifact ».
+        def _est_artifact(v) -> bool:
+            return str(v).strip().lower() == "artifact"
+
+        cat_a_des_labels = any(
+            str(v).strip() and not _est_artifact(v) for v in df[cat_col]
+        )
+
+        if not label_has_content and cat_a_des_labels:
+            # Cas (a) : promeut category → label, en laissant en place les
+            # marqueurs artifact.
             print(f"ℹ️  {labels_path.name} : colonne 'label' vide, "
                   f"utilisation de 'category' comme label.", file=sys.stderr)
-            df[label_col] = df[cat_col]
-            df[cat_col] = ""
+            a_promouvoir = ~df[cat_col].map(_est_artifact)
+            df.loc[a_promouvoir, label_col] = df.loc[a_promouvoir, cat_col]
+            df.loc[a_promouvoir, cat_col] = ""
         elif label_has_content and cat_has_content:
             # Cas (b) : vérifie si les colonnes sont inversées
             label_vals = [str(v).strip().lower() for v in df[label_col] if str(v).strip()]
