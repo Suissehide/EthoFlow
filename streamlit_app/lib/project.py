@@ -102,10 +102,74 @@ def dlc_config_path(project: Path) -> str | None:
     return str(value) if value else None
 
 
+def set_dlc_config(project: Path, dlc_config: str | Path) -> Path:
+    """Écrit `dlc_project_config` dans `pipeline_config.yaml`, sans y toucher au reste.
+
+    Même forme que `calibrate_scale.write_scale` pour `px_per_cm` : on lit
+    la config existante (dict vide si le fichier n'existe pas encore), on
+    ne modifie que la clé visée, on réécrit. Ne PAS repasser par
+    `create_project.py --force`, qui régénère `pipeline_config.yaml` en
+    entier (perd `default_arenes_coords`) et régénère aussi l'Excel de
+    démarrage même s'il a déjà été rempli par le chercheur (ruling R10.2).
+    """
+    cfg_path = _paths.pipeline_config_path(Path(project))
+    cfg = read_pipeline_config(project)
+    cfg["dlc_project_config"] = str(dlc_config)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(
+        yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return cfg_path
+
+
+def _session_a_des_arenes(project: Path) -> bool:
+    """Une metadata.yaml de session a-t-elle une liste `arenes` non vide ?
+
+    Vérité de terrain après un sync : c'est exactement ce que consultent
+    `crop_arenes.py` et `assign_arenas.py`. Pas d'import de `lib.sessions`
+    ici (il importe déjà `lib.project` : ce serait un cycle) — lecture
+    directe, minimale, de la même forme.
+    """
+    rd = _paths.raw_dir(Path(project))
+    if not rd.is_dir():
+        return False
+    for session_dir in rd.iterdir():
+        if not session_dir.is_dir() or session_dir.name.startswith("."):
+            continue
+        meta_path = session_dir / "metadata.yaml"
+        if not meta_path.is_file():
+            continue
+        try:
+            meta = yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            continue
+        if meta.get("arenes"):
+            return True
+    return False
+
+
 def project_kind(project: Path) -> str:
-    """'single' ou 'multi'. 'single' par défaut : pas d'arena splitting."""
-    kind = read_pipeline_config(project).get("kind")
-    return kind if kind in ("single", "multi") else "single"
+    """'single' ou 'multi' — déduit, pas lu, car `create_project.py`
+    n'écrit jamais de clé `kind` dans `pipeline_config.yaml` (`{}` pour
+    single, seulement `default_arenes_coords` pour multi — ruling R10.1).
+
+    Ordre de préférence :
+    1. clé `kind` explicite si un jour présente (pérennité) ;
+    2. sinon 'multi' si `default_arenes_coords` est renseigné ;
+    3. sinon 'multi' si une session a une liste `arenes` non vide dans sa
+       metadata (vérité de terrain après sync, cf. `_session_a_des_arenes`) ;
+    4. sinon 'single'.
+    """
+    cfg = read_pipeline_config(project)
+    kind = cfg.get("kind")
+    if kind in ("single", "multi"):
+        return kind
+    if cfg.get("default_arenes_coords"):
+        return "multi"
+    if _session_a_des_arenes(project):
+        return "multi"
+    return "single"
 
 
 def px_per_cm(project: Path) -> float | None:

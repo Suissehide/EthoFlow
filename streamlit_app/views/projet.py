@@ -12,6 +12,7 @@ from pathlib import Path
 import streamlit as st
 
 import lib.pipeline as PL
+from lib import runner
 from lib.config import (
     current_project,
     dlc_config_path,
@@ -21,6 +22,7 @@ from lib.config import (
     project_kind,
     projects_root,
     set_current_project,
+    set_dlc_config,
 )
 from lib.icons import lucide_title
 from lib.sessions import list_sessions
@@ -59,7 +61,25 @@ def _section_ouverture() -> None:
         set_current_project(chemin_choisi)
         st.rerun()
 
-    if st.button("Supprimer ce projet", key="btn_supprimer_projet"):
+    # Un job (inférence DLC, entraînement VAME...) peut écrire dans l'arbre
+    # de CE projet précis (ruling R10.4) : supprimer pendant qu'il tourne
+    # corromprait ses sorties en plus des données déjà présentes. Le
+    # verrou est par projet (comme pour bouton_lancer), donc on vérifie
+    # `chemin_choisi`, pas la racine des projets.
+    occupe = runner.is_running(chemin_choisi)
+    aide_suppression = None
+    if occupe:
+        en_cours = runner.current(chemin_choisi)
+        if en_cours is not None:
+            aide_suppression = (
+                f"« {en_cours.label} » tourne déjà (démarré à {en_cours.started_at}) "
+                "— attends la fin avant de supprimer."
+            )
+        else:
+            aide_suppression = "Un job tourne déjà sur ce projet — attends la fin avant de supprimer."
+
+    if st.button("Supprimer ce projet", key="btn_supprimer_projet",
+                 disabled=occupe, help=aide_suppression):
         st.session_state["_confirmer_suppression"] = nom_choisi
 
     if st.session_state.get("_confirmer_suppression"):
@@ -76,12 +96,21 @@ def _section_ouverture() -> None:
         with col_confirmer:
             if st.button("Oui, supprimer", key="btn_confirmer_suppression", type="primary"):
                 chemin_a_supprimer = projects_root() / a_supprimer
-                if chemin_a_supprimer.exists():
-                    shutil.rmtree(chemin_a_supprimer)
-                if courant and courant.name == a_supprimer:
-                    set_current_project(None)
+                # Recontrôle juste avant le rmtree : un job a pu démarrer
+                # entre l'affichage du bouton et ce clic (même course que
+                # JobBusy dans bouton_lancer).
+                if runner.is_running(chemin_a_supprimer):
+                    st.error(
+                        "Un job a démarré entre-temps sur ce projet — "
+                        "suppression annulée."
+                    )
+                else:
+                    if chemin_a_supprimer.exists():
+                        shutil.rmtree(chemin_a_supprimer)
+                    if courant and courant.name == a_supprimer:
+                        set_current_project(None)
+                    st.toast(f"Projet « {a_supprimer} » supprimé")
                 st.session_state.pop("_confirmer_suppression", None)
-                st.toast(f"Projet « {a_supprimer} » supprimé")
                 st.rerun()
 
 
@@ -113,21 +142,24 @@ def _section_creation() -> None:
     if cible is None:
         return
 
-    # `cible` peut exister sur disque pour deux raisons bien différentes :
-    # un projet du même nom existait déjà avant qu'on clique (à refuser), ou
-    # c'est le nôtre, tout juste créé par le job lancé plus bas (à ouvrir).
-    # `_creation_en_cours` distingue les deux : posé juste avant de lancer
-    # le job, il n'est vrai que pour LA cible qu'on vient de soumettre.
+    # Le succès ou l'échec se lisent sur l'ÉTAT DU JOB (runner.current),
+    # jamais sur le système de fichiers (ruling R10.3) : create_project.py
+    # crée data/ avant d'écrire pipeline_config.yaml, donc un test sur la
+    # présence de data/ affiche « créé avec succès » même quand le script a
+    # planté juste après (ex : configs/ pas accessible en écriture) alors
+    # que le panneau de job juste en dessous dit « ❌ Échec ».
     #
-    # « Créé » se juge par présence dans list_projects() (dossier `data/`
-    # présent), pas par le contenu de pipeline_config.yaml : pour un projet
-    # `single` sans modèle DLC, ce fichier est légitimement `{}` — un dict
-    # vide est toujours faux en Python, donc un test sur son contenu ne
-    # verrait jamais ce cas comme un succès.
-    notre_creation = st.session_state.get("_creation_en_cours") == str(cible)
-    deja_creee = cible in list_projects(projects_root())
+    # `_creation_en_cours` distingue « ce job concerne CETTE cible, on
+    # vient de le lancer » de « un job antérieur (autre projet) traîne
+    # encore dans l'historique de la racine » : posé juste avant de lancer
+    # le job, il n'est vrai que pour la cible qu'on vient de soumettre.
+    job = runner.current(cible.parent)
+    notre_job = job if (job is not None and
+                        st.session_state.get("_creation_en_cours") == str(cible)) else None
 
-    if deja_creee and notre_creation:
+    afficher_bouton = True
+    if notre_job is not None and notre_job.state == "succeeded":
+        afficher_bouton = False
         if current_project() != cible:
             # Rerun immédiat pour que la sélection prenne effet avant
             # d'afficher le succès — sinon le sélecteur de gauche, déjà
@@ -135,11 +167,22 @@ def _section_creation() -> None:
             # prochain rafraîchissement.
             set_current_project(cible)
             st.rerun()
-        st.session_state.pop("_creation_en_cours", None)
         st.success(f"Projet **{cible.name}** créé avec succès.")
+    elif notre_job is not None and notre_job.state == "failed":
+        st.error(
+            f"Échec de la création de `{cible.name}` "
+            f"(code de retour {notre_job.returncode}). Voir le log ci-dessous."
+        )
+    elif notre_job is not None and notre_job.state in ("cancelled", "interrupted"):
+        mot = "annulée" if notre_job.state == "cancelled" else "interrompue"
+        st.warning(f"Création de `{cible.name}` {mot}.")
+    elif notre_job is not None and notre_job.state == "running":
+        pass  # rien à afficher en plus du panneau de job ci-dessous
     elif cible.exists():
         st.error(f"`{cible}` existe déjà.")
-    else:
+        afficher_bouton = False
+
+    if afficher_bouton:
         cmd = PL.create_project(
             cible, kind=kind,
             dlc_config=None if choix.startswith("(") else choix,
@@ -182,12 +225,17 @@ def _section_modele_dlc(projet: Path) -> None:
     libre = st.text_input("…ou un chemin de config.yaml", value="")
     chemin = libre.strip() or choisi
     if chemin:
-        _job.bouton_lancer(
-            projet, "Utiliser ce modèle",
-            PL.create_project(projet, kind=project_kind(projet),
-                              dlc_config=chemin, force=True),
-            cle="btn_modele",
-        )
+        # Écriture locale instantanée, pas un job : `set_dlc_config` ne
+        # touche qu'à la clé `dlc_project_config` et préserve le reste
+        # (`default_arenes_coords`, `px_per_cm`...). Passer par
+        # `create_project.py --force` — ce que faisait la première version
+        # — régénère pipeline_config.yaml en entier (arènes perdues) ET
+        # regénère l'Excel de démarrage même déjà rempli par le chercheur
+        # (ruling R10.2, Critical 1+2 de la revue).
+        if st.button("Utiliser ce modèle", key="btn_modele", type="primary"):
+            set_dlc_config(projet, chemin)
+            st.toast(f"Modèle DLC configuré : {chemin}")
+            st.rerun()
 
     col1, col2 = st.columns(2)
     with col1:
