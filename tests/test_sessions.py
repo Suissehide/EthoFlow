@@ -65,3 +65,51 @@ def test_arenes_dataframe_affiche_toutes_les_cles(project, session_factory):
 
 def test_arenes_dataframe_sans_arenes():
     assert S.arenes_dataframe({}).empty
+
+
+def test_colonne_video_en_tant_que_facteur(project):
+    """Une colonne 'video' nommée par l'utilisateur survit : elle n'est pas en dur.
+
+    session_factory(`video=True/False`) crée un fichier, mais si l'Excel contient
+    une colonne `video` scalaire, elle doit être un facteur expérimental valide.
+    Écrit le metadata.yaml directement pour éviter la collision avec le paramètre.
+    """
+    import yaml
+    sdir = project / "data" / "raw" / "S1"
+    sdir.mkdir(parents=True)
+    meta = {"id": "S1", "video": "HD", "source_video": "/tmp/video.mp4"}
+    (sdir / "metadata.yaml").write_text(
+        yaml.safe_dump(meta, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    champs = S.metadata_fields(S.load_metadata(project, "S1"))
+    assert "video" in champs
+    assert champs["video"] == "HD"
+
+
+def test_arenes_et_camera_exclues_par_type(project):
+    """Après suppression de 'arenes' et 'camera' de _NON_FACTEURS, le filtre isinstance()
+    les exclut encore. C'est une régression : le type check doit suffire.
+    """
+    import yaml
+    sdir = project / "data" / "raw" / "S1"
+    sdir.mkdir(parents=True)
+    meta = {
+        "id": "S1",
+        "arenes": [{"id": "A1"}],
+        "camera": {"fps": 30, "resolution": "1080p"},
+        "source_video": "/tmp/video.mp4",
+        "temperature": 22.5,
+    }
+    (sdir / "metadata.yaml").write_text(
+        yaml.safe_dump(meta, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    champs = S.metadata_fields(S.load_metadata(project, "S1"))
+    # Structurées (dicts, listes) exclues par isinstance
+    assert "arenes" not in champs
+    assert "camera" not in champs
+    # source_video exclu explicitement
+    assert "source_video" not in champs
+    # Scalaire reste
+    assert champs["temperature"] == 22.5

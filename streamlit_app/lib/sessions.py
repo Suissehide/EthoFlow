@@ -20,8 +20,9 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 from paths import cleaned_h5_path, dlc_output_dir, raw_dir  # noqa: E402
 
-# Clés de metadata qui ne sont pas des facteurs expérimentaux.
-_NON_FACTEURS = {"source_video", "arenes", "camera", "video"}
+# Clé de metadata qui n'est pas un facteur expérimental : chemin de vidéo, pas une donnée mesurée.
+# Les structures imbriquées (dicts, listes) sont filtrées par isinstance(), pas ici.
+_NON_FACTEURS = {"source_video"}
 
 
 def session_ids(project: Path) -> list[str]:
