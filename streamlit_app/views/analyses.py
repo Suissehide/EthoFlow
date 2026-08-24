@@ -229,8 +229,7 @@ def _section_options_avancees(projet: Path) -> dict:
     }
 
 
-def _tab_lancer(projet: Path) -> None:
-    axes = _axes_disponibles(projet)
+def _tab_lancer(projet: Path, axes: list[dict]) -> None:
     _section_decouverte(projet, axes)
 
     if not axes:
@@ -297,7 +296,28 @@ def _affiche_fichiers(fichiers: list[Path]) -> None:
         _apercu_csv(p)
 
 
-def _tab_resultats(projet: Path) -> None:
+def _affiche_autres(fichiers: list[Path]) -> None:
+    """Fichiers qu'aucune règle n'a su rattacher à un axe.
+
+    Généraliste à dessein (contrairement à `_affiche_fichiers`) : un
+    fichier qui atterrit ici peut être n'importe quel type — mieux vaut un
+    simple lien de téléchargement qu'une disparition silencieuse (ruling
+    R17.1).
+    """
+    for p in fichiers:
+        col_nom, col_dl = st.columns([4, 1])
+        col_nom.caption(f"`{p.name}`")
+        try:
+            contenu = p.read_bytes()
+        except OSError:
+            continue
+        col_dl.download_button(
+            "Télécharger", data=contenu, file_name=p.name,
+            key=f"analyses_dl_autre_{p.name}",
+        )
+
+
+def _tab_resultats(projet: Path, axes: list[dict]) -> None:
     analysis_dir = VA.analysis_dir(projet)
     if not analysis_dir.is_dir():
         st.info(
@@ -311,7 +331,11 @@ def _tab_resultats(projet: Path) -> None:
         st.info("`analysis/` existe mais est vide.")
         return
 
-    globaux, par_axe = group_analysis_files(fichiers)
+    # Axes réellement découverts (--list-columns) : plus fiables que toute
+    # règle inférée du nom de fichier pour lever les ambiguïtés (ruling
+    # R17.1) — passés à group_analysis_files quand disponibles.
+    axes_connus = [axe["nom"] for axe in axes] or None
+    globaux, par_axe, autres = group_analysis_files(fichiers, axes_connus)
 
     if globaux:
         st.subheader("Général")
@@ -321,6 +345,15 @@ def _tab_resultats(projet: Path) -> None:
         with st.expander(f"Axe : {axe} ({len(fichiers_axe)} fichier(s))",
                          expanded=len(par_axe) == 1):
             _affiche_fichiers(fichiers_axe)
+
+    if autres:
+        with st.expander(f"Autres ({len(autres)} fichier(s) non rattachés "
+                         "à un axe)", expanded=False):
+            st.caption(
+                "Aucun axe connu ni motif de nom reconnu — présents ici "
+                "pour ne pas disparaître, pas forcément à ignorer."
+            )
+            _affiche_autres(autres)
 
 
 # ============================================================
@@ -339,11 +372,16 @@ def render() -> None:
 
     _job.panneau(projet)
 
+    # Calculé une seule fois : sert à la fois aux cases --group-by et à
+    # désambiguïser le regroupement des fichiers dans l'onglet Résultats
+    # (ruling R17.1).
+    axes = _axes_disponibles(projet)
+
     onglet_lancer, onglet_resultats = st.tabs(["Lancer une analyse", "Résultats"])
     with onglet_lancer:
-        _tab_lancer(projet)
+        _tab_lancer(projet, axes)
     with onglet_resultats:
-        _tab_resultats(projet)
+        _tab_resultats(projet, axes)
 
     st.divider()
     _job.historique(projet)
