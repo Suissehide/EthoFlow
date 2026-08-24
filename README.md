@@ -25,12 +25,13 @@ Le pipeline part d'une acquisition brute (vidéo + Excel des souris) et produit 
 2. [Prérequis machine](#prérequis-machine)
 3. [Installation](#installation-first-time)
 4. [Environnements conda](#environnements-conda)
-5. [Parcours pipeline](#parcours-pipeline)
+5. [Lancer l'interface](#lancer-linterface)
+6. [Parcours pipeline](#parcours-pipeline)
    - [Étape 0 — bifurcation modèle DLC](#étape-0--bifurcation-modèle-dlc)
    - [Étapes 1-9 — pipeline principal](#étape-1--créer-un-projet-ethoflow)
-6. [Structure d'un projet](#structure-dun-projet)
-7. [Index des scripts](#index-des-scripts)
-8. [Troubleshooting](#troubleshooting)
+7. [Structure d'un projet](#structure-dun-projet)
+8. [Index des scripts](#index-des-scripts)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -102,9 +103,43 @@ python -c "import vame; print(vame.__version__)"
 
 | Env | À quoi ça sert |
 |---|---|
-| `ethoflow` (env-pipeline) | Sert principalement à faire tourner l'app Streamlit (`streamlit run streamlit_app/app.py`) et l'orchestrateur `run_pipeline.py` |
+| `ethoflow` (env-pipeline) | Sert principalement à faire tourner l'app Streamlit (voir ci-dessous) et l'orchestrateur `run_pipeline.py` |
 | `dlc` (env-dlc) | DeepLabCut 3.x + PyTorch — inférence, entraînement, GUI de labellisation |
 | `vame` (env-vame) | VAME + scipy/matplotlib/UMAP — setup/train/segment VAME, analyses, visualisations |
+
+---
+
+## Lancer l'interface
+
+Depuis la racine du dépôt, **sans activer d'environnement au préalable** :
+
+```cmd
+:: Windows
+ethoflow
+```
+
+```bash
+# Linux / macOS
+./ethoflow
+```
+
+Le lanceur trouve lui-même le `streamlit` de l'env `ethoflow` ; si l'env
+n'existe pas, il affiche la commande pour le créer. Tout argument
+supplémentaire est transmis à `streamlit run` :
+
+```bash
+./ethoflow --server.address=0.0.0.0   # accessible depuis le LAN
+```
+
+Sous Linux et macOS, le script peut être lié dans un dossier du `PATH` pour
+être appelé de n'importe où — les liens symboliques sont résolus :
+
+```bash
+ln -s "$PWD/ethoflow" ~/.local/bin/ethoflow
+```
+
+L'interface couvre les étapes 1 à 9 ci-dessous. Le [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc)
+(entraînement d'un modèle DLC) reste en ligne de commande.
 
 ---
 
