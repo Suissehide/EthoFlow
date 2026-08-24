@@ -28,6 +28,7 @@ from lib.config import (
     require_project,
 )
 from lib.icons import lucide_title
+from lib import sessions as S
 from views import _job, _widgets
 
 # Ligne "[i/n] session_id" imprimée avant chaque session traitée.
@@ -315,12 +316,8 @@ def _section_resume(projet: Path) -> None:
                     "de 10-15 % du README, le modèle DLC est en bon état."
                 )
 
-    st.caption(
-        "La galerie avant/après (`data/dlc-output/_qc_trajectories/`, un "
-        "`.png` par session et par `--qc-bodypart`) arrive sur cette même "
-        "page avec la visualisation détaillée — les images sont déjà "
-        "produites par ce script, seul l'affichage manque encore ici."
-    )
+    st.divider()
+    _section_galerie_qc(projet)
 
     st.divider()
     st.caption(
@@ -333,6 +330,185 @@ def _section_resume(projet: Path) -> None:
         projet, "Inspecter la qualité", cmd,
         cle="btn_nettoyage_inspect", type="secondary",
     )
+
+
+# ============================================================
+# Section 3bis : galerie QC des trajectoires (Task 21)
+# ============================================================
+
+def _dernier_job_nettoyage(projet: Path):
+    """Dernier job `prepare_vame_input_custom.py` réussi, courant ou passé.
+
+    `runner.current` seul ne suffit pas : si l'utilisateur a lancé
+    `inspect_session.py` (juste en dessous sur cette page) après le
+    nettoyage, ce dernier n'est plus le job « courant » mais reste bien
+    celui dont les seuils doivent servir à la régénération.
+    """
+    from lib import runner
+
+    for job in [runner.current(projet), *runner.history(projet, limit=20)]:
+        if job is not None and job.script == "prepare_vame_input_custom.py" and job.state == "succeeded":
+            return job
+    return None
+
+
+def _section_regenerer_keypoint(projet: Path, keypoints_existants: list[str]) -> None:
+    st.markdown(
+        lucide_title("brush-cleaning", "Régénérer sur un autre keypoint"),
+        unsafe_allow_html=True,
+    )
+
+    job = _dernier_job_nettoyage(projet)
+    if job is None:
+        st.caption(
+            "Aucun nettoyage réussi dans l'historique de ce projet — lance "
+            "d'abord un nettoyage dans la section ci-dessus avant de "
+            "pouvoir régénérer sur un autre keypoint."
+        )
+        return
+
+    kwargs = PL.parse_prepare_vame_input_args(job.argv)
+    if kwargs is None:
+        st.warning(
+            "Les seuils du dernier nettoyage réussi n'ont pas pu être "
+            "relus depuis sa commande enregistrée. Régénérer ici avec des "
+            "seuils devinés produirait des graphes qui ne seraient plus "
+            "comparables aux précédents — relance plutôt un nettoyage "
+            "complet dans la section ci-dessus, avec les seuils voulus."
+        )
+        return
+
+    st.caption(
+        "Rejoue le dernier nettoyage réussi (« "
+        f"{job.label} », {job.started_at}) avec **exactement les mêmes "
+        "seuils et les mêmes sessions** — seul le keypoint change. Le nom "
+        "de fichier du graphe porte le keypoint, donc les graphes "
+        "**coexistent** : régénérer sur un nouveau keypoint n'efface "
+        "jamais ceux déjà produits pour un autre."
+    )
+    st.caption(
+        "`--skip-existing` n'est **pas** repris tel quel : il ferait "
+        "sauter toutes les sessions déjà nettoyées — précisément celles "
+        "pour lesquelles on veut un nouveau graphe — et ne produirait "
+        "donc aucun graphe du tout."
+    )
+
+    nouveau_kp = st.text_input(
+        "`--qc-bodypart`", value="tail_base", key="nettoyage_qc_regen_bodypart",
+    )
+    if nouveau_kp and nouveau_kp in keypoints_existants:
+        st.caption(
+            f"Un graphe existe déjà pour `{nouveau_kp}` — il sera "
+            "remplacé pour les sessions traitées (même keypoint = même "
+            "nom de fichier)."
+        )
+
+    kwargs = dict(kwargs)
+    kwargs.pop("qc_plot", None)
+    kwargs.pop("skip_existing", None)
+    cmd = PL.prepare_vame_input(
+        projet, qc_bodypart=nouveau_kp or "tail_base",
+        qc_plot=True, skip_existing=False, **kwargs,
+    )
+    _job.bouton_lancer(
+        projet, f"Régénérer les graphes pour `{nouveau_kp or 'tail_base'}`", cmd,
+        cle="btn_nettoyage_qc_regen", type="secondary",
+        disabled=not nouveau_kp.strip(),
+        help=None if nouveau_kp.strip() else "Renseigne un keypoint.",
+    )
+
+
+def _section_brut_vs_nettoye(projet: Path, galerie: dict[str, dict[str, Path]], keypoint: str) -> None:
+    st.markdown(lucide_title("video", "Brut vs nettoyé"), unsafe_allow_html=True)
+    st.caption(
+        "Le `_labeled.mp4` de DLC (poses brutes, avant nettoyage) à côté "
+        "du graphe de trajectoire du keypoint choisi ci-dessus (poses "
+        "nettoyées), pour la même session."
+    )
+
+    sessions_dispo = sorted(galerie.get(keypoint, {}))
+    session_id = st.selectbox(
+        "Session", options=sessions_dispo, key="nettoyage_qc_brut_session",
+    )
+
+    col_video, col_plot = st.columns(2)
+    with col_video:
+        st.caption("`_labeled.mp4` (DLC, brut)")
+        session_dir = dlc_output_dir(projet) / session_id
+        # Recherche récursive (rglob, pas glob) : en mode single-animal,
+        # run_superanimal_cropped écrit ses _labeled.mp4 dans le
+        # sous-dossier scratch cropped-raw/, pas directement dans
+        # dlc-output/<session>/ (même piège que Task 12, ruling R12.2). En
+        # mode custom, l'analyze_videos de DLC n'écrit JAMAIS de
+        # _labeled.mp4 : une liste vide dans ce mode est normale, pas un
+        # signe de problème — le message ci-dessous reste donc neutre,
+        # jamais un `st.warning`/`st.error`.
+        candidats = sorted(session_dir.rglob("*_labeled.mp4")) if session_dir.is_dir() else []
+        if candidats:
+            st.video(str(candidats[0]))
+        else:
+            st.caption(
+                "Aucun `_labeled.mp4` pour cette session. Normal en mode "
+                "`custom` (DLC n'en produit jamais dans ce mode) ; en "
+                "mode `superanimal`/`single-animal`, vérifie plutôt que "
+                "l'inférence DLC a bien tourné pour cette session (page "
+                "**Pose (DLC)**)."
+            )
+    with col_plot:
+        st.caption(f"Trajectoire nettoyée — `{keypoint}`")
+        chemin_plot = galerie.get(keypoint, {}).get(session_id)
+        if chemin_plot:
+            st.image(str(chemin_plot), use_container_width=True)
+        else:
+            st.caption(f"Pas de graphe QC pour `{session_id}` / `{keypoint}`.")
+
+
+def _section_galerie_qc(projet: Path) -> None:
+    st.markdown(
+        lucide_title("chart-column", "Galerie QC des trajectoires"),
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "Critère de l'équipe VAME/LIN : tracer la trajectoire d'un "
+        "keypoint sur toute la vidéo ne doit montrer **aucun saut "
+        "anormal de position** — et ce **sans avoir eu à jeter de "
+        "points**, ce qui cause beaucoup de problèmes en aval (VAME "
+        "segmente mal des trous). Un graphe par session et par "
+        "`--qc-bodypart`, sous `data/dlc-output/_qc_trajectories/`."
+    )
+
+    galerie = S.list_qc_trajectories(projet)
+    if not galerie:
+        st.caption(
+            "Aucun graphe de contrôle trouvé sous `_qc_trajectories/` — "
+            "lance un nettoyage avec « Graphes de contrôle » coché dans la "
+            "section ci-dessus pour les produire."
+        )
+        return
+
+    keypoints = sorted(galerie)
+    defaut_kp = st.session_state.get("nettoyage_qc_bodypart") or "tail_base"
+    index_defaut = keypoints.index(defaut_kp) if defaut_kp in keypoints else 0
+    keypoint = st.selectbox(
+        "Keypoint affiché", options=keypoints, index=index_defaut,
+        key="nettoyage_qc_galerie_keypoint",
+    )
+    st.caption(
+        "Le nom de fichier porte le keypoint : les graphes de plusieurs "
+        "keypoints **coexistent** sans jamais s'écraser entre eux."
+    )
+
+    sessions_du_keypoint = galerie[keypoint]
+    colonnes = st.columns(3)
+    for i, (session_id, chemin) in enumerate(sorted(sessions_du_keypoint.items())):
+        with colonnes[i % 3]:
+            st.image(str(chemin), caption=session_id, use_container_width=True)
+
+    st.divider()
+    _section_regenerer_keypoint(projet, keypoints)
+
+    st.divider()
+    _section_brut_vs_nettoye(projet, galerie, keypoint)
 
 
 # ============================================================

@@ -165,3 +165,71 @@ def test_script_inconnu_refuse():
     """Un script absent de SCRIPT_ENVS doit échouer bruyamment, pas silencieusement."""
     with pytest.raises(KeyError):
         PL.to_argv(PL.Command("ethoflow", "inexistant.py", [], "x"))
+
+
+# ============================================================
+# Task 21 — reconstruction des kwargs depuis l'argv d'un job passé
+# ============================================================
+
+def test_parse_prepare_vame_input_args_aller_retour(project):
+    """argv produit par prepare_vame_input -> même commande une fois
+    reconstruite (hormis qc_bodypart, volontairement omis)."""
+    cmd = PL.prepare_vame_input(
+        project, likelihood_threshold=0.7, max_speed=4.0, px_per_cm=12.5,
+        sessions=["S1", "S2"], sticky_detection=False, qc_plot=False,
+        qc_bodypart="paw_front_left", interp_limit=30, window_length=7,
+        skip_existing=True,
+    )
+    argv = PL.to_argv(cmd)
+    kwargs = PL.parse_prepare_vame_input_args(argv)
+    assert kwargs == {
+        "likelihood_threshold": 0.7,
+        "max_speed": 4.0,
+        "interp_limit": 30,
+        "window_length": 7,
+        "px_per_cm": 12.5,
+        "sticky_detection": False,
+        "qc_plot": False,
+        "skip_existing": True,
+        "sessions": ["S1", "S2"],
+    }
+    # qc_bodypart n'est jamais repris : c'est justement ce que le bouton
+    # « régénérer sur un autre keypoint » va changer.
+    assert "qc_bodypart" not in kwargs
+
+
+def test_parse_prepare_vame_input_args_toutes_les_sessions(project):
+    """Aucune session positionnelle (checkbox « Toutes ») -> pas de clé
+    `sessions` (équivalent à sessions=None, « toutes » côté script)."""
+    cmd = PL.prepare_vame_input(project, likelihood_threshold=0.7, max_speed=5.0)
+    kwargs = PL.parse_prepare_vame_input_args(PL.to_argv(cmd))
+    assert "sessions" not in kwargs
+
+
+def test_parse_prepare_vame_input_args_flags_optionnels_absents_par_defaut(project):
+    """Réglages par défaut (pas de --no-sticky-detection, --no-qc-plot,
+    --skip-existing, --px-per-cm) -> absents des kwargs reconstruits."""
+    cmd = PL.prepare_vame_input(project, likelihood_threshold=0.7, max_speed=5.0)
+    kwargs = PL.parse_prepare_vame_input_args(PL.to_argv(cmd))
+    assert "px_per_cm" not in kwargs
+    assert "sticky_detection" not in kwargs
+    assert "qc_plot" not in kwargs
+    assert "skip_existing" not in kwargs
+
+
+def test_parse_prepare_vame_input_args_script_different_refuse():
+    """argv d'un autre script : None, jamais une reconstruction hasardeuse."""
+    assert PL.parse_prepare_vame_input_args(
+        ["conda", "run", "-n", "ethoflow", "python", "/x/inspect_session.py",
+         "--project-dir", "/p", "--no-prompt", "--all"],
+    ) is None
+
+
+def test_parse_prepare_vame_input_args_seuils_manquants_refuse():
+    """argv tronqué (pas de --likelihood-threshold/--max-speed) : None,
+    jamais une valeur par défaut devinée qui rendrait les graphes
+    incomparables."""
+    assert PL.parse_prepare_vame_input_args(
+        ["conda", "run", "-n", "dlc", "python",
+         "/x/prepare_vame_input_custom.py", "--project-dir", "/p", "--no-prompt"],
+    ) is None

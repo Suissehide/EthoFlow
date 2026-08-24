@@ -7,6 +7,7 @@ littéral et relatif sur ce runner macOS).
 """
 from __future__ import annotations
 
+import base64
 from pathlib import Path
 
 import yaml
@@ -16,6 +17,14 @@ from lib import project as P
 
 REPO = Path(__file__).resolve().parent.parent
 APP_PY = str(REPO / "streamlit_app" / "app.py")
+
+# PNG 1x1 valide minimal — st.image() doit pouvoir l'ouvrir réellement,
+# un fichier vide ferait planter le rendu plutôt que de tester la logique
+# de la galerie.
+_PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk"
+    "+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
 
 
 def _projet(tmp_path: Path, *, kind: str = "single",
@@ -100,3 +109,63 @@ def test_expander_outils_avances_replie_par_defaut(tmp_path, monkeypatch):
     expanders = [e for e in at.expander if "Outils avancés" in (e.label or "")]
     assert len(expanders) == 1
     assert expanders[0].proto.expanded is False
+
+
+# ============================================================
+# Task 21 — galerie QC des trajectoires
+# ============================================================
+
+def test_galerie_qc_avec_plots_offre_le_selecteur_de_keypoint_et_la_grille(tmp_path, monkeypatch):
+    projet = _projet(tmp_path, kind="single", px_per_cm=12.5)
+    qc_dir = projet / "data" / "dlc-output" / "_qc_trajectories"
+    qc_dir.mkdir(parents=True)
+    (qc_dir / "S1_tail_base.png").write_bytes(_PNG_1X1)
+    (qc_dir / "S1_paw_front_left.png").write_bytes(_PNG_1X1)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    selectbox = {s.key: s for s in at.selectbox}
+    assert "nettoyage_qc_galerie_keypoint" in selectbox, list(selectbox)
+    assert set(selectbox["nettoyage_qc_galerie_keypoint"].options) == {
+        "tail_base", "paw_front_left",
+    }
+    # La grille affiche bien l'image de la session pour le keypoint par défaut
+    # (st.image n'est pas modélisé comme un type d'élément dédié par AppTest ;
+    # il apparaît comme un UnknownElement de type "imgs", un par appel).
+    captions = [
+        img.caption for e in at.get("imgs") for img in e.proto.imgs
+    ]
+    assert any("S1" in c for c in captions), captions
+
+
+def test_galerie_qc_sans_dossier_dit_qu_il_n_y_a_rien_plutot_que_planter(tmp_path, monkeypatch):
+    projet = _projet(tmp_path, kind="single", px_per_cm=12.5)
+    # Pas de data/dlc-output/_qc_trajectories/ du tout.
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    assert not at.exception, at.exception
+    assert any("Aucun graphe de contrôle trouvé" in c.value for c in at.caption), \
+        [c.value for c in at.caption]
+    assert "nettoyage_qc_galerie_keypoint" not in {s.key for s in at.selectbox}
+
+
+def test_galerie_qc_sans_labeled_mp4_est_presente_comme_normale(tmp_path, monkeypatch):
+    """Aucun `_labeled.mp4` (typique du mode DLC `custom`, qui n'en produit
+    jamais) : un simple message informatif, jamais un st.warning/st.error."""
+    projet = _projet(tmp_path, kind="single", px_per_cm=12.5)
+    qc_dir = projet / "data" / "dlc-output" / "_qc_trajectories"
+    qc_dir.mkdir(parents=True)
+    (qc_dir / "S1_tail_base.png").write_bytes(_PNG_1X1)
+    # data/dlc-output/S1/ n'existe même pas — aucune inférence DLC ici.
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    assert not at.exception, at.exception
+    assert any(
+        "Aucun `_labeled.mp4`" in c.value and "custom" in c.value
+        for c in at.caption
+    ), [c.value for c in at.caption]
+    assert not any("_labeled.mp4" in w.value for w in at.warning), \
+        [w.value for w in at.warning]
+    assert not any("_labeled.mp4" in e.value for e in at.error), \
+        [e.value for e in at.error]

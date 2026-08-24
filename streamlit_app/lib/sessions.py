@@ -86,6 +86,65 @@ def list_sessions(project: Path) -> pd.DataFrame:
     return pd.DataFrame(lignes, columns=colonnes)
 
 
+def qc_trajectories_dir(project: Path) -> Path:
+    """Dossier des graphes de trajectoire produits par `prepare_vame_input_custom.py`.
+
+    Un `.png` par (session, keypoint) — voir `parse_qc_trajectory_filename`.
+    """
+    return dlc_output_dir(Path(project)) / "_qc_trajectories"
+
+
+def parse_qc_trajectory_filename(filename: str, known_session_ids: list[str]) -> tuple[str, str] | None:
+    """`<session_id>_<keypoint>.png` -> `(session_id, keypoint)`, ou `None`.
+
+    Un split naïf sur `_` est faux dans les deux sens : un `session_id` peut
+    lui-même contenir des `_` (arène séparée, ex. `BV-970_A1`), et un
+    keypoint aussi (`paw_front_left`). La seule frontière fiable est de
+    reconnaître le préfixe parmi les `session_id` déjà connus du projet
+    (`session_ids(project)`) — jamais une position de caractère devinée.
+    Si plusieurs `session_id` connus préfixent le nom (ex. `BV-970` et
+    `BV-970_A1` coexistent), le plus long l'emporte : c'est la
+    correspondance la plus spécifique.
+
+    `None` si aucun `session_id` connu ne préfixe le nom (fichier orphelin,
+    projet dont les sessions ont changé depuis) — jamais une supposition.
+    """
+    stem = Path(filename).stem
+    candidats = [
+        sid for sid in known_session_ids
+        if stem == sid or stem.startswith(sid + "_")
+    ]
+    if not candidats:
+        return None
+    session_id = max(candidats, key=len)
+    keypoint = stem[len(session_id) + 1:]
+    if not keypoint:
+        return None
+    return session_id, keypoint
+
+
+def list_qc_trajectories(project: Path) -> dict[str, dict[str, Path]]:
+    """`{keypoint: {session_id: chemin_png}}` pour tous les `.png` reconnus.
+
+    Ne liste que les fichiers dont le `session_id` est reconnu parmi
+    `session_ids(project)` — un fichier orphelin (projet renommé, session
+    supprimée depuis) est silencieusement ignoré plutôt que mal découpé.
+    """
+    project = Path(project)
+    d = qc_trajectories_dir(project)
+    if not d.is_dir():
+        return {}
+    connus = session_ids(project)
+    resultat: dict[str, dict[str, Path]] = {}
+    for f in sorted(d.glob("*.png")):
+        parsed = parse_qc_trajectory_filename(f.name, connus)
+        if parsed is None:
+            continue
+        session_id, keypoint = parsed
+        resultat.setdefault(keypoint, {})[session_id] = f
+    return resultat
+
+
 def arenes_dataframe(meta: dict | None) -> pd.DataFrame:
     """Toutes les clés présentes dans les arènes, sans en présupposer aucune.
 

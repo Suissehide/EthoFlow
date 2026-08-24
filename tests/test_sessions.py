@@ -129,3 +129,70 @@ def test_arenes_et_camera_exclues_par_type(project):
     assert "source_video" not in champs
     # Scalaire reste
     assert champs["temperature"] == 22.5
+
+
+# ============================================================
+# Task 21 — galerie QC : parsing des noms de fichiers _qc_trajectories/
+# ============================================================
+
+def test_parse_qc_trajectory_filename_session_simple():
+    """Cas de base : session_id sans underscore, keypoint sans underscore."""
+    assert S.parse_qc_trajectory_filename(
+        "BV-970_tail_base.png", ["BV-970"],
+    ) == ("BV-970", "tail_base")
+
+
+def test_parse_qc_trajectory_filename_session_id_avec_underscore():
+    """Session éclatée par arène (BV-970_A1) : un split naïf sur `_`
+    couperait après `BV-970`, pas après `BV-970_A1`."""
+    assert S.parse_qc_trajectory_filename(
+        "BV-970_A1_tail_base.png", ["BV-970_A1"],
+    ) == ("BV-970_A1", "tail_base")
+
+
+def test_parse_qc_trajectory_filename_session_id_avec_underscore_prefere_le_plus_long():
+    """Si BV-970 ET BV-970_A1 sont tous deux des session_id connus, le
+    préfixe le plus long et le plus spécifique l'emporte."""
+    connus = ["BV-970", "BV-970_A1"]
+    assert S.parse_qc_trajectory_filename(
+        "BV-970_A1_tail_base.png", connus,
+    ) == ("BV-970_A1", "tail_base")
+    assert S.parse_qc_trajectory_filename(
+        "BV-970_tail_base.png", connus,
+    ) == ("BV-970", "tail_base")
+
+
+def test_parse_qc_trajectory_filename_keypoint_avec_underscores():
+    """Keypoint lui-même composé (paw_front_left) : tout ce qui suit le
+    session_id connu est le keypoint, quel que soit son nombre de `_`."""
+    assert S.parse_qc_trajectory_filename(
+        "BV-970_paw_front_left.png", ["BV-970"],
+    ) == ("BV-970", "paw_front_left")
+
+
+def test_parse_qc_trajectory_filename_session_inconnue():
+    """Aucun session_id connu ne préfixe le nom : None, jamais une supposition."""
+    assert S.parse_qc_trajectory_filename(
+        "XYZ-999_tail_base.png", ["BV-970"],
+    ) is None
+
+
+def test_list_qc_trajectories(project, session_factory, tmp_path):
+    session_factory("BV-970")
+    session_factory("BV-970_A1")
+    qc_dir = S.qc_trajectories_dir(project)
+    qc_dir.mkdir(parents=True)
+    (qc_dir / "BV-970_tail_base.png").write_bytes(b"\x00")
+    (qc_dir / "BV-970_A1_tail_base.png").write_bytes(b"\x00")
+    (qc_dir / "BV-970_paw_front_left.png").write_bytes(b"\x00")
+    (qc_dir / "orpheline_tail_base.png").write_bytes(b"\x00")  # session inconnue
+
+    galerie = S.list_qc_trajectories(project)
+    assert set(galerie) == {"tail_base", "paw_front_left"}
+    assert set(galerie["tail_base"]) == {"BV-970", "BV-970_A1"}
+    assert galerie["tail_base"]["BV-970"] == qc_dir / "BV-970_tail_base.png"
+    assert set(galerie["paw_front_left"]) == {"BV-970"}
+
+
+def test_list_qc_trajectories_dossier_absent(project):
+    assert S.list_qc_trajectories(project) == {}

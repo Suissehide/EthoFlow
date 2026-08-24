@@ -180,6 +180,89 @@ def prepare_vame_input(project: Path, *, likelihood_threshold: float,
     return _cmd("prepare_vame_input_custom.py", args, "Nettoyage des poses")
 
 
+def parse_prepare_vame_input_args(argv: list[str]) -> dict | None:
+    """Reconstruit les kwargs de `prepare_vame_input` depuis l'`argv` d'un job déjà lancé.
+
+    Sert au bouton « régénérer sur un autre keypoint » de la galerie QC
+    (page Nettoyage, Task 21) : les graphes ne sont comparables entre eux
+    que si les seuils et les sessions sont *identiques* à ceux du run
+    d'origine — seul `--qc-bodypart` doit changer. `argv` (persisté par
+    `lib.runner` dans le JSON du job, sur disque) est la seule source qui
+    survit à une navigation, un rafraîchissement de page ou un redémarrage
+    de l'app ; les widgets du formulaire (`session_state`), eux, ne
+    survivent à rien de tout ça et peuvent avoir été modifiés depuis.
+
+    Retourne `None` si `argv` ne vient pas d'un run de
+    `prepare_vame_input_custom.py`, ou s'il lui manque un des deux réglages
+    que le script exige toujours (`--likelihood-threshold`/`--max-speed`,
+    jamais absents d'une commande construite par `prepare_vame_input`) —
+    signe d'un format inattendu qu'il vaut mieux refuser plutôt que de
+    deviner une valeur par défaut qui rendrait les graphes incomparables.
+    """
+    args = list(argv)
+    try:
+        i_script = next(
+            i for i, a in enumerate(args) if a.endswith("prepare_vame_input_custom.py")
+        )
+    except StopIteration:
+        return None
+
+    rest = args[i_script + 1:]
+    kwargs: dict = {}
+    sessions: list[str] = []
+    i = 0
+    while i < len(rest):
+        tok = rest[i]
+        if tok in ("--project-dir", "--likelihood-threshold", "--max-speed",
+                   "--interp-limit", "--window-length", "--qc-bodypart",
+                   "--px-per-cm"):
+            valeur = rest[i + 1] if i + 1 < len(rest) else None
+            if tok == "--likelihood-threshold" and valeur is not None:
+                kwargs["likelihood_threshold"] = float(valeur)
+            elif tok == "--max-speed" and valeur is not None:
+                kwargs["max_speed"] = float(valeur)
+            elif tok == "--interp-limit" and valeur is not None:
+                kwargs["interp_limit"] = int(valeur)
+            elif tok == "--window-length" and valeur is not None:
+                kwargs["window_length"] = int(valeur)
+            elif tok == "--px-per-cm" and valeur is not None:
+                kwargs["px_per_cm"] = float(valeur)
+            # --project-dir et --qc-bodypart : lus mais ignorés (le premier
+            # est fourni par l'appelant, le second est justement ce qu'on
+            # s'apprête à changer).
+            i += 2
+            continue
+        if tok == "--no-prompt":
+            i += 1
+            continue
+        if tok == "--no-sticky-detection":
+            kwargs["sticky_detection"] = False
+            i += 1
+            continue
+        if tok == "--no-qc-plot":
+            kwargs["qc_plot"] = False
+            i += 1
+            continue
+        if tok == "--skip-existing":
+            kwargs["skip_existing"] = True
+            i += 1
+            continue
+        if tok.startswith("--"):
+            # Flag inconnu (format futur du script) : ignoré plutôt que de
+            # faire planter le parsing pour un réglage qu'on ne reconnaît
+            # pas encore.
+            i += 1
+            continue
+        sessions.append(tok)
+        i += 1
+
+    if "likelihood_threshold" not in kwargs or "max_speed" not in kwargs:
+        return None
+    if sessions:
+        kwargs["sessions"] = sessions
+    return kwargs
+
+
 def assign_arenas(project: Path, *, sessions: list[str] | None = None,
                   all_sessions: bool = False, all_new: bool = False,
                   likelihood_threshold: float = 0.6,
