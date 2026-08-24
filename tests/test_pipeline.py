@@ -55,6 +55,18 @@ def test_vame_stage_project_dir_avant_la_sous_commande(project):
     assert args[args.index("segment") + 1:] == ["--n-clusters", "25"]
 
 
+def test_vame_stage_setup_avec_options_extra(project):
+    """Reflète la page VAME (Task 15) : `setup` passe ses flags par `extra`,
+    et --project-dir doit toujours précéder la sous-commande argparse."""
+    extra = ["--pose-confidence", "0.6", "--copy-videos", "--force"]
+    cmd = PL.vame_stage(project, "setup", extra=extra)
+    args = cmd.args
+    assert args.index("--project-dir") < args.index("setup")
+    assert args[args.index("setup") + 1:] == extra
+    assert cmd.env == "vame"
+    assert cmd.script == "run_vame.py"
+
+
 def test_create_project_ne_prend_pas_le_projet_courant(tmp_path):
     """Le projet n'existe pas encore : --project-dir est la cible à créer."""
     cible = tmp_path / "nouveau"

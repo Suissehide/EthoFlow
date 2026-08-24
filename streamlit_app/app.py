@@ -28,6 +28,7 @@ from views import (  # noqa: E402
     nettoyage,
     pose,
     projet,
+    vame_page,
 )
 
 st.set_page_config(
@@ -71,6 +72,7 @@ PROJECT_PAGES: list[dict] = [
     {"name": "Données",            "icon": "file-spreadsheet", "render": donnees.render,        "key": "donnees"},
     {"name": "Pose (DLC)",         "icon": "scan-line",        "render": pose.render,            "key": "pose"},
     {"name": "Nettoyage",          "icon": "brush-cleaning",   "render": nettoyage.render,       "key": "nettoyage"},
+    {"name": "VAME",               "icon": "waypoints",        "render": vame_page.render,       "key": "vame"},
 ]
 
 BOTTOM_PAGES: list[dict] = [
