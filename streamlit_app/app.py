@@ -23,6 +23,7 @@ from lib.config import current_project_name  # noqa: E402
 from lib.icons import ACCENT, ACCENT_BG, ACCENT_HEX, lucide_data_uri  # noqa: E402
 from views import (  # noqa: E402
     about,
+    analyses,
     configuration,
     donnees,
     motifs,
@@ -75,6 +76,7 @@ PROJECT_PAGES: list[dict] = [
     {"name": "Nettoyage",          "icon": "brush-cleaning",   "render": nettoyage.render,       "key": "nettoyage"},
     {"name": "VAME",               "icon": "waypoints",        "render": vame_page.render,       "key": "vame"},
     {"name": "Motifs",             "icon": "tags",             "render": motifs.render,          "key": "motifs"},
+    {"name": "Analyses",           "icon": "chart-column",     "render": analyses.render,        "key": "analyses"},
 ]
 
 BOTTOM_PAGES: list[dict] = [
