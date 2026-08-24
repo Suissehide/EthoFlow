@@ -225,6 +225,18 @@ def test_parse_prepare_vame_input_args_script_different_refuse():
     ) is None
 
 
+def test_parse_prepare_vame_input_args_flag_inconnu_avec_valeur_refuse():
+    """Ruling R21.1 : un flag inconnu invalide tout le parse, même s'il
+    prend une valeur — sinon cette valeur retombe dans la branche
+    positionnelle et pollue silencieusement `sessions` (ex. '--fps 30'
+    ferait apparaître '30' comme un session_id)."""
+    assert PL.parse_prepare_vame_input_args(
+        ["conda", "run", "-n", "dlc", "python",
+         "/x/prepare_vame_input_custom.py", "--project-dir", "/p", "--no-prompt",
+         "--fps", "30", "--likelihood-threshold", "0.7", "--max-speed", "5.0"],
+    ) is None
+
+
 def test_parse_prepare_vame_input_args_seuils_manquants_refuse():
     """argv tronqué (pas de --likelihood-threshold/--max-speed) : None,
     jamais une valeur par défaut devinée qui rendrait les graphes

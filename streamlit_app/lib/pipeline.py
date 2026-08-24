@@ -193,11 +193,15 @@ def parse_prepare_vame_input_args(argv: list[str]) -> dict | None:
     survivent à rien de tout ça et peuvent avoir été modifiés depuis.
 
     Retourne `None` si `argv` ne vient pas d'un run de
-    `prepare_vame_input_custom.py`, ou s'il lui manque un des deux réglages
+    `prepare_vame_input_custom.py`, s'il lui manque un des deux réglages
     que le script exige toujours (`--likelihood-threshold`/`--max-speed`,
-    jamais absents d'une commande construite par `prepare_vame_input`) —
-    signe d'un format inattendu qu'il vaut mieux refuser plutôt que de
-    deviner une valeur par défaut qui rendrait les graphes incomparables.
+    jamais absents d'une commande construite par `prepare_vame_input`), ou
+    s'il contient un flag `--xxx` non reconnu (ruling R21.1 : un format
+    futur du script, potentiellement avec une valeur associée qu'on ne
+    saurait pas distinguer d'un `session_id` positionnel) — dans tous les
+    cas, refuser plutôt que de deviner une valeur par défaut ou de risquer
+    de faire passer une valeur de flag pour une session, ce qui rendrait
+    les graphes incomparables ou ciblerait une session inexistante.
     """
     args = list(argv)
     try:
@@ -248,11 +252,16 @@ def parse_prepare_vame_input_args(argv: list[str]) -> dict | None:
             i += 1
             continue
         if tok.startswith("--"):
-            # Flag inconnu (format futur du script) : ignoré plutôt que de
-            # faire planter le parsing pour un réglage qu'on ne reconnaît
-            # pas encore.
-            i += 1
-            continue
+            # Ruling R21.1 : un flag inconnu (format futur du script)
+            # invalide tout le parse plutôt que d'être juste sauté — s'il
+            # prend une valeur, cette valeur retomberait sinon dans la
+            # branche positionnelle et polluerait silencieusement
+            # `sessions` (ex. « --fps 30 » ferait apparaître « 30 » comme
+            # un session_id). Refuser est le choix sûr : l'appelant sait
+            # déjà désactiver le bouton avec une explication quand ceci
+            # renvoie `None`, une hypothèse fausse sur la présence ou non
+            # d'une valeur associée ne l'est pas.
+            return None
         sessions.append(tok)
         i += 1
 
