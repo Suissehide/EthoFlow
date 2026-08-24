@@ -36,8 +36,27 @@ _CLE = "current_project_path"
 
 
 def current_project() -> Path | None:
+    """Projet actuellement ouvert, ou `None` s'il n'y en a pas — ou plus.
+
+    Auto-guérison délibérée (ruling R10.6b) : si le chemin mémorisé ne
+    pointe plus vers un dossier (projet supprimé entre-temps, par exemple
+    via la page Projet elle-même), on nettoie le `session_state` ici même
+    plutôt que de laisser le reste de l'app agir sur un projet fantôme.
+    Un getter avec effet de bord n'est pas anodin, mais l'alternative —
+    laisser `current_project_path` pointer vers du vide — est ce qui
+    permettait à un projet supprimé de « revivre » (ruling R10.6, Critical
+    « projet ressuscité »). Coût accepté : un projet sur un disque
+    temporairement démonté se lira comme fermé, ce qui vaut mieux qu'un
+    projet supprimé à moitié vivant.
+    """
     valeur = st.session_state.get(_CLE)
-    return Path(valeur) if valeur else None
+    if not valeur:
+        return None
+    chemin = Path(valeur)
+    if not chemin.is_dir():
+        st.session_state.pop(_CLE, None)
+        return None
+    return chemin
 
 
 def current_project_name() -> str | None:

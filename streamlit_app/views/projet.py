@@ -120,7 +120,17 @@ def _section_ouverture() -> None:
 
 def _section_creation() -> None:
     st.subheader("Créer un projet")
-    nom = st.text_input("Nom du projet", placeholder="ex : bottomview-MCC-2026-06")
+    # Clés explicites : sans elles, Streamlit dérive la clé du widget de sa
+    # position dans le script. `_section_ouverture()`, rendue juste avant,
+    # dessine un nombre de widgets différent selon qu'il existe ou non des
+    # projets à lister — dès que ce nombre change (typiquement : le tout
+    # premier projet vient d'apparaître), la clé implicite de "Nom du
+    # projet" change avec, et Streamlit lui redonne sa valeur par défaut
+    # (vide) au lieu de garder ce que l'utilisateur venait de taper. Avec
+    # une clé stable, ce champ garde sa valeur quoi qu'il se passe ailleurs
+    # sur la page.
+    nom = st.text_input("Nom du projet", placeholder="ex : bottomview-MCC-2026-06",
+                        key="creation_nom")
     kind = st.radio(
         "Nombre d'animaux par vidéo",
         ["single", "multi"],
@@ -130,6 +140,7 @@ def _section_creation() -> None:
         }[k],
         help="Choisis selon le nombre d'animaux, pas selon l'angle caméra. "
              "'multi' active le split par arène et écrit des coordonnées par défaut.",
+        key="creation_kind",
     )
     modeles = list_dlc_models(models_root())
     choix = st.selectbox(
@@ -137,6 +148,7 @@ def _section_creation() -> None:
         options=["(choisir plus tard)"] + [str(m / "config.yaml") for m in modeles],
         help="Le modèle reste où il est, il n'est jamais copié dans le projet. "
              "Tu peux le désigner plus tard.",
+        key="creation_modele",
     )
     cible = projects_root() / nom.strip().replace(" ", "-") if nom.strip() else None
     if cible is None:
@@ -150,9 +162,21 @@ def _section_creation() -> None:
     # que le panneau de job juste en dessous dit « ❌ Échec ».
     #
     # `_creation_en_cours` distingue « ce job concerne CETTE cible, on
-    # vient de le lancer » de « un job antérieur (autre projet) traîne
-    # encore dans l'historique de la racine » : posé juste avant de lancer
-    # le job, il n'est vrai que pour la cible qu'on vient de soumettre.
+    # vient de le lancer » de « un job antérieur (autre projet, ou même nom
+    # supprimé puis retapé) traîne encore dans l'historique de la racine » :
+    # posé juste avant de lancer le job, il n'est vrai que pour la cible
+    # qu'on vient de soumettre.
+    #
+    # Il est effacé dès qu'un état TERMINAL (succeeded/failed/cancelled/
+    # interrupted) a été affiché une fois (ruling R10.6a) — sinon, en
+    # créant X, en le supprimant via le flux guardé de `_section_ouverture`,
+    # puis en retapant le même nom X, ce job resterait « le nôtre » pour
+    # toujours : la bannière « créé avec succès » revient sur un projet qui
+    # n'existe plus, et le bouton « Créer le projet » disparaît pour de bon
+    # (branché sur `succeeded` => `afficher_bouton = False`) — la cible ne
+    # peut alors plus jamais être recréée pour ce nom. `running` reste seul
+    # à ne PAS effacer le drapeau : le job n'est pas fini, il faut encore
+    # le reconnaître comme nôtre au prochain rendu.
     job = runner.current(cible.parent)
     notre_job = job if (job is not None and
                         st.session_state.get("_creation_en_cours") == str(cible)) else None
@@ -164,16 +188,21 @@ def _section_creation() -> None:
             # Rerun immédiat pour que la sélection prenne effet avant
             # d'afficher le succès — sinon le sélecteur de gauche, déjà
             # rendu ce tour-ci, resterait sur l'ancien projet jusqu'au
-            # prochain rafraîchissement.
+            # prochain rafraîchissement. Le drapeau n'est PAS encore
+            # effacé ici : ce rerun doit encore reconnaître ce job comme
+            # nôtre pour afficher le succès une fois arrivé à destination.
             set_current_project(cible)
             st.rerun()
+        st.session_state.pop("_creation_en_cours", None)
         st.success(f"Projet **{cible.name}** créé avec succès.")
     elif notre_job is not None and notre_job.state == "failed":
+        st.session_state.pop("_creation_en_cours", None)
         st.error(
             f"Échec de la création de `{cible.name}` "
             f"(code de retour {notre_job.returncode}). Voir le log ci-dessous."
         )
     elif notre_job is not None and notre_job.state in ("cancelled", "interrupted"):
+        st.session_state.pop("_creation_en_cours", None)
         mot = "annulée" if notre_job.state == "cancelled" else "interrompue"
         st.warning(f"Création de `{cible.name}` {mot}.")
     elif notre_job is not None and notre_job.state == "running":
@@ -221,8 +250,9 @@ def _section_modele_dlc(projet: Path) -> None:
 
     modeles = list_dlc_models(models_root())
     options = [str(m / "config.yaml") for m in modeles]
-    choisi = st.selectbox("Modèles trouvés", options=options) if options else None
-    libre = st.text_input("…ou un chemin de config.yaml", value="")
+    choisi = (st.selectbox("Modèles trouvés", options=options, key="modele_dlc_trouve")
+              if options else None)
+    libre = st.text_input("…ou un chemin de config.yaml", value="", key="modele_dlc_libre")
     chemin = libre.strip() or choisi
     if chemin:
         # Écriture locale instantanée, pas un job : `set_dlc_config` ne

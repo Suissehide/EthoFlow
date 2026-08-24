@@ -1,4 +1,5 @@
 import os
+import shutil
 import signal
 import threading
 import time
@@ -306,3 +307,38 @@ def test_kwargs_popen_selon_la_plateforme(project, monkeypatch):
 
     kwargs_windows = R._popen_kwargs_pour_plateforme(is_windows=True)
     assert kwargs_windows == {"creationflags": creation_flag}
+
+
+def test_lectures_ne_ressuscitent_pas_un_projet_supprime(tmp_path):
+    """Régression du projet zombie (ruling R10.6c) : avant ce ruling,
+    `jobs_dir()` faisait `mkdir(parents=True, exist_ok=True)` sur CHAQUE
+    appel, y compris depuis des lectures pures (`current`, `history`,
+    `is_running`). Consulter le panneau de job d'un projet qu'on vient de
+    supprimer recréait donc silencieusement `<projet>/.ethoflow/jobs/` —
+    un squelette de projet ressuscité par un simple rafraîchissement de
+    page. Ces trois fonctions ne doivent plus jamais créer quoi que ce
+    soit sur un projet absent."""
+    projet = tmp_path / "projet-supprime"
+    (projet / "data").mkdir(parents=True)
+    shutil.rmtree(projet)
+    assert not projet.exists()
+
+    assert R.current(projet) is None
+    assert not projet.exists()
+
+    assert R.history(projet) == []
+    assert not projet.exists()
+
+    assert R.is_running(projet) is False
+    assert not projet.exists()
+
+
+def test_start_cree_ethoflow_jobs_si_absent(project):
+    """`start()` reste le seul point d'écriture autorisé à créer
+    `.ethoflow/jobs/` : il doit donc marcher même quand ce dossier n'existe
+    pas encore — premier job du projet, ou projet tout juste recréé."""
+    assert not (project / ".ethoflow").exists()
+    R.start(project, _echo("premier-job"))
+    assert (project / ".ethoflow" / "jobs").is_dir()
+    job = _attendre_fin(project)
+    assert job.state == "succeeded"

@@ -54,27 +54,38 @@ class Job:
 
 
 # ------------------------------------------------------------------- chemins
+#
+# `create` par défaut à False partout ici (ruling R10.6c) : ce module sert
+# aussi bien des lectures pures (current(), history(), is_running(),
+# read_log() — appelées à chaque rendu de page, y compris sur un projet
+# qu'on vient de supprimer) que des écritures (start()). Avant ce ruling,
+# `jobs_dir()` faisait systématiquement `mkdir(parents=True, exist_ok=True)`
+# : consulter le panneau de job d'un projet supprimé recréait
+# silencieusement `<projet>/.ethoflow/jobs/` — un squelette de projet
+# ressuscité par un simple rafraîchissement de page. Seuls les appelants
+# qui vont réellement écrire dedans passent `create=True`.
 
-def jobs_dir(project: Path) -> Path:
+def jobs_dir(project: Path, *, create: bool = False) -> Path:
     d = Path(project) / ".ethoflow" / "jobs"
-    d.mkdir(parents=True, exist_ok=True)
+    if create:
+        d.mkdir(parents=True, exist_ok=True)
     return d
 
 
-def _job_json(project: Path, job_id: str) -> Path:
-    return jobs_dir(project) / f"{job_id}.json"
+def _job_json(project: Path, job_id: str, *, create: bool = False) -> Path:
+    return jobs_dir(project, create=create) / f"{job_id}.json"
 
 
-def _job_log(project: Path, job_id: str) -> Path:
-    return jobs_dir(project) / f"{job_id}.log"
+def _job_log(project: Path, job_id: str, *, create: bool = False) -> Path:
+    return jobs_dir(project, create=create) / f"{job_id}.log"
 
 
-def _lock(project: Path) -> Path:
-    return jobs_dir(project) / "current.lock"
+def _lock(project: Path, *, create: bool = False) -> Path:
+    return jobs_dir(project, create=create) / "current.lock"
 
 
 def _write_job(project: Path, job: Job) -> None:
-    _job_json(project, job.job_id).write_text(
+    _job_json(project, job.job_id, create=True).write_text(
         json.dumps(asdict(job), indent=2), encoding="utf-8")
 
 
@@ -184,9 +195,17 @@ def is_running(project: Path) -> bool:
 
 
 def history(project: Path, limit: int = 20) -> list[Job]:
-    """Du plus récent au plus ancien. Les job_id sont horodatés donc triables."""
+    """Du plus récent au plus ancien. Les job_id sont horodatés donc triables.
+
+    Lecture pure : ne crée jamais `.ethoflow/jobs/` (ruling R10.6c). Un
+    projet qui n'a jamais eu de job — ou qui vient d'être supprimé — n'a
+    juste pas de dossier, ce n'est pas une erreur.
+    """
+    d = jobs_dir(project)
+    if not d.is_dir():
+        return []
     jobs = []
-    for path in sorted(jobs_dir(project).glob("*.json"), reverse=True):
+    for path in sorted(d.glob("*.json"), reverse=True):
         job = _read_job(project, path.stem)
         if job:
             jobs.append(_reconcilier(project, job))
@@ -260,7 +279,10 @@ def start(project: Path, cmd: Command) -> Job:
     horodatage = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     job_id = f"{horodatage}-{Path(cmd.script).stem}"
     argv = _argv(cmd)
-    log_path = _job_log(project, job_id)
+    # Seul point d'écriture qui doit faire exister `.ethoflow/jobs/` s'il
+    # n'existe pas encore (premier job du projet, ou projet tout juste
+    # recréé) — voir le commentaire sur `jobs_dir` (ruling R10.6c).
+    log_path = _job_log(project, job_id, create=True)
 
     env = dict(os.environ)
     # Sans ça Python tamponne sa sortie quand elle n'est pas un terminal,
@@ -287,7 +309,7 @@ def start(project: Path, cmd: Command) -> Job:
         pid=proc.pid, state="running", owner_pid=os.getpid(),
     )
     _write_job(project, job)
-    _lock(project).write_text(job_id, encoding="utf-8")
+    _lock(project, create=True).write_text(job_id, encoding="utf-8")
 
     def _surveiller() -> None:
         # Seul ce thread sait quand le process est VRAIMENT mort
