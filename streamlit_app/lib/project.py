@@ -25,6 +25,7 @@ from interactive import (  # noqa: E402
     DEFAULT_MODELS_ROOT,
     DEFAULT_PROJECTS_ROOT,
 )
+from sync_from_excel import find_project_excel as _find_project_excel  # noqa: E402
 
 # Préférences d'interface uniquement (racines, dernier projet ouvert).
 # Jamais lues par les scripts CLI.
@@ -179,3 +180,14 @@ def px_per_cm(project: Path) -> float | None:
 
 def arena_coords(project: Path) -> dict[str, list[int]]:
     return read_pipeline_config(project).get("default_arenes_coords") or {}
+
+
+def excel_path(project: Path) -> Path | None:
+    """Classeur Excel maître à la racine du projet, ou `None` s'il n'y en a pas.
+
+    Délègue à `sync_from_excel.find_project_excel` (même glob que le
+    script : `*_sessions.xlsx` en priorité, sinon un unique `*.xlsx`) pour
+    que la localisation du classeur n'ait qu'une seule implémentation,
+    partagée entre le CLI et l'app.
+    """
+    return _find_project_excel(Path(project))

@@ -39,6 +39,19 @@ def test_lecture_pipeline_config(project):
     assert P.arena_coords(project) == {"A1": [0, 0, 512, 540]}
 
 
+def test_excel_path_trouve_le_classeur_du_projet(project):
+    """`excel_path()` délègue à `sync_from_excel.find_project_excel` — même
+    convention de nommage que `create_project.py` (`<nom_du_projet>_sessions.xlsx`)."""
+    cible = project / f"{project.name}_sessions.xlsx"
+    cible.write_bytes(b"contenu xlsx factice")
+    assert P.excel_path(project) == cible
+
+
+def test_excel_path_none_sans_classeur(project):
+    """Aucun Excel à la racine : `None`, pas d'exception (ruling R11.1)."""
+    assert P.excel_path(project) is None
+
+
 def test_projet_sans_config_ne_leve_pas(tmp_path):
     """Un projet fraîchement créé n'a pas encore de pipeline_config.yaml."""
     vide = tmp_path / "vide"

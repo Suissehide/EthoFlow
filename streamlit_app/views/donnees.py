@@ -7,25 +7,21 @@
 Aucune lecture d'Excel ici : le script est la seule autorité sur le
 format (feuille `Sessions` ou `Subjects`/`Trials_Videos`/`Arena_Mapping`,
 détection automatique du schéma). La page se contente de localiser le
-fichier (même fonction que le script, `find_project_excel`), de l'offrir
-au téléchargement/dépôt, et de construire les commandes via `lib.pipeline`.
+fichier (`lib.config.excel_path`, qui délègue à la même fonction que le
+script), de l'offrir au téléchargement/dépôt, et de construire les
+commandes via `lib.pipeline`.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import streamlit as st
 
 import lib.pipeline as PL
-from lib.config import SCRIPTS_DIR, project_kind, require_project
+from lib.config import excel_path, project_kind, require_project
 from lib.icons import lucide_title
 from lib.sessions import list_sessions
 from views import _job
-
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-from sync_from_excel import find_project_excel  # noqa: E402
 
 
 # ============================================================
@@ -60,20 +56,20 @@ def _section_excel(projet: Path) -> Path | None:
             "tout seul, la page n'a pas à le demander."
         )
 
-    excel_path = find_project_excel(projet)
+    chemin_excel = excel_path(projet)
 
-    if excel_path is None:
+    if chemin_excel is None:
         st.warning(
             f"Aucun Excel trouvé à la racine de `{projet.name}`. Il devrait "
             f"s'appeler `{projet.name}_sessions.xlsx` — relance "
             "`create_project.py` si besoin."
         )
     else:
-        st.success(f"Excel trouvé : `{excel_path.name}`")
+        st.success(f"Excel trouvé : `{chemin_excel.name}`")
         st.download_button(
             "Télécharger",
-            data=excel_path.read_bytes(),
-            file_name=excel_path.name,
+            data=chemin_excel.read_bytes(),
+            file_name=chemin_excel.name,
             key="btn_telecharger_excel",
         )
 
@@ -95,7 +91,7 @@ def _section_excel(projet: Path) -> Path | None:
     )
 
     if upload is not None:
-        cible = excel_path or (projet / f"{projet.name}_sessions.xlsx")
+        cible = chemin_excel or (projet / f"{projet.name}_sessions.xlsx")
         st.warning(
             f"Écraser `{cible.name}` avec `{upload.name}` ? "
             "Cette action est irréversible."
@@ -112,14 +108,14 @@ def _section_excel(projet: Path) -> Path | None:
                 st.toast(f"`{cible.name}` remplacé")
                 st.rerun()
 
-    return excel_path
+    return chemin_excel
 
 
 # ============================================================
 # Section 2 : Sync avec aperçu
 # ============================================================
 
-def _section_sync(projet: Path, excel_path: Path | None) -> None:
+def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
     st.markdown(lucide_title("play", "Synchroniser"), unsafe_allow_html=True)
     st.caption(
         "Transforme chaque ligne de l'Excel en `data/raw/<session>/metadata.yaml`. "
@@ -152,7 +148,7 @@ def _section_sync(projet: Path, excel_path: Path | None) -> None:
     col_apercu, col_reel = st.columns(2)
     with col_apercu:
         cmd_apercu = PL.sync_from_excel(
-            projet, videos_dir=videos_dir, excel=excel_path,
+            projet, videos_dir=videos_dir, excel=chemin_excel,
             video_ext=ext or "mp4", dry_run=True,
         )
         _job.bouton_lancer(
@@ -162,7 +158,7 @@ def _section_sync(projet: Path, excel_path: Path | None) -> None:
         )
     with col_reel:
         cmd_reel = PL.sync_from_excel(
-            projet, videos_dir=videos_dir, excel=excel_path,
+            projet, videos_dir=videos_dir, excel=chemin_excel,
             video_ext=ext or "mp4", overwrite=overwrite,
         )
         _job.bouton_lancer(
@@ -220,8 +216,8 @@ def render() -> None:
         "les metadata.yaml des sessions."
     )
 
-    excel_path = _section_excel(projet)
+    chemin_excel = _section_excel(projet)
     st.divider()
-    _section_sync(projet, excel_path)
+    _section_sync(projet, chemin_excel)
     st.divider()
     _section_sessions(projet)
