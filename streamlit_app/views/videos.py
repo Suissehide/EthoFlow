@@ -519,9 +519,22 @@ def _onglet_calibration_arenes(projet: Path) -> None:
         if premier is None:
             st.session_state["calib_arenes_premier_clic"] = point
         else:
-            rects.append(V.rect_from_two_points(premier, point))
-            st.session_state["calib_arenes_premier_clic"] = None
-            st.rerun()  # redessine immédiatement avec le rectangle qui vient d'être posé
+            rect = V.rect_from_two_points(premier, point)
+            if rect[2] == 0 or rect[3] == 0:
+                # Ruling R20.1 : paire dégénérée — même pixel, ou même x/y
+                # seul — refusée à la source. Élargir min_value=1 → 0 sur le
+                # number_input d'ajustement laisserait enregistrer une arène
+                # d'aire nulle ; le premier clic reste enregistré, pas besoin
+                # de tout recommencer l'arène.
+                st.error(
+                    f"Les deux clics de l'arène **{_LABELS_ARENES[len(rects)]}** "
+                    "définissent un rectangle de largeur ou hauteur nulle "
+                    "— reclique un coin opposé à un autre endroit."
+                )
+            else:
+                rects.append(rect)
+                st.session_state["calib_arenes_premier_clic"] = None
+                st.rerun()  # redessine immédiatement avec le rectangle qui vient d'être posé
 
     if st.button("Recommencer les clics", key="calib_arenes_recommencer", disabled=not rects):
         _reset_arenes_clics()
@@ -639,18 +652,33 @@ def _onglet_echelle(projet: Path) -> None:
         if len(points) == 2:
             distance_px = V.distance_from_two_points(points[0], points[1])
             st.write(f"Distance mesurée : **{distance_px:.1f} px**")
-            known_cm = st.number_input(
-                "Distance réelle entre les deux points cliqués (cm)",
-                min_value=0.01, value=10.0, step=0.5, key="echelle_known_cm",
-            )
-            valeur_calculee = distance_px / known_cm
-            st.write(
-                f"Échelle calculée : **{valeur_calculee:.3f} px/cm** "
-                f"(1 px = {10 / valeur_calculee:.2f} mm)."
-            )
-            if st.button("Enregistrer cette échelle", key="echelle_enregistrer_clics", type="primary"):
-                set_px_per_cm(projet, valeur_calculee)
-                st.toast(f"px_per_cm = {valeur_calculee:.3f} enregistré dans pipeline_config.yaml.")
+            if distance_px <= 0:
+                # Même racine que R20.1 côté arènes : deux clics au même
+                # pixel donnent une distance nulle, donc un px_per_cm nul —
+                # silencieux dans pipeline_config.yaml, il casserait sans
+                # message le filtre de vitesses aberrantes du nettoyage
+                # VAME. Refusé avant tout calcul, pas seulement avant
+                # l'enregistrement (une division par une échelle nulle
+                # plante déjà l'affichage « 1 px = X mm » juste en dessous).
+                st.error(
+                    "Les deux clics sont au même endroit — distance nulle, "
+                    "impossible d'en tirer une échelle. Reclique deux "
+                    "points distincts (bouton « Recommencer les clics » "
+                    "ci-dessus)."
+                )
+            else:
+                known_cm = st.number_input(
+                    "Distance réelle entre les deux points cliqués (cm)",
+                    min_value=0.01, value=10.0, step=0.5, key="echelle_known_cm",
+                )
+                valeur_calculee = distance_px / known_cm
+                st.write(
+                    f"Échelle calculée : **{valeur_calculee:.3f} px/cm** "
+                    f"(1 px = {10 / valeur_calculee:.2f} mm)."
+                )
+                if st.button("Enregistrer cette échelle", key="echelle_enregistrer_clics", type="primary"):
+                    set_px_per_cm(projet, valeur_calculee)
+                    st.toast(f"px_per_cm = {valeur_calculee:.3f} enregistré dans pipeline_config.yaml.")
     else:
         st.caption(
             "Choisis une source d'image ci-dessus pour calibrer par les "

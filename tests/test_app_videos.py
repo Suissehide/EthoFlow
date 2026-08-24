@@ -420,6 +420,78 @@ def test_calibration_arenes_bouton_enregistrer_absent_avant_quatre_arenes(
     assert _pipeline_config(projet).get("default_arenes_coords") in (None, {})
 
 
+# ------------------------------------------------------------
+# Ruling R20.1 (fix round 1/5) — paire de clics dégénérée sur les arènes.
+#
+# Avant le correctif : deux clics au même endroit produisent un rectangle
+# [x, y, 0, 0] qui est ajouté à `calib_arenes_rects` tel quel. Le rendu
+# suivant de l'ajustement fin appelle `number_input("largeur", value=0,
+# min_value=1, ...)` → `StreamlitValueBelowMinError` non rattrapée, qui fait
+# planter toute la page, pas seulement ce widget. Le correctif refuse la
+# paire à la source (avant qu'elle n'entre dans `rects`) plutôt que
+# d'élargir `min_value`, ce qui laisserait enregistrer une arène d'aire
+# nulle.
+# ------------------------------------------------------------
+
+def test_calibration_arenes_clics_identiques_refuses_sans_crash(
+    tmp_path, monkeypatch, video_reelle,
+):
+    projet = _projet(tmp_path, kind="multi")
+    video = video_reelle(tmp_path / "videos", fps=10.0, n=20, w=64, h=48)
+    _ecrire_session(projet, "S1", source_video=video)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    cle_clic = _cle_clic_arenes(video, 10)
+
+    at.session_state[cle_clic] = {"x": 10, "y": 10, "unix_time": 1.0}
+    at.run()
+    assert not at.exception, at.exception
+    at.session_state[cle_clic] = {"x": 10, "y": 10, "unix_time": 2.0}  # même pixel
+    at.run()
+    assert not at.exception, at.exception  # ne doit plus planter la page
+
+    # Aucun rectangle dégénéré enregistré, aucune écriture de config...
+    assert at.session_state["calib_arenes_rects"] == []
+    assert _pipeline_config(projet).get("default_arenes_coords") in (None, {})
+    # ... et le premier clic reste enregistré : pas besoin de tout recommencer.
+    assert at.session_state["calib_arenes_premier_clic"] == (10, 10)
+    erreurs = [e.value for e in at.error]
+    assert erreurs, "un message explicite doit signaler le clic refusé"
+
+    # La reprise fonctionne : un second clic distinct complète bien A1.
+    at.session_state[cle_clic] = {"x": 20, "y": 20, "unix_time": 3.0}
+    at.run()
+    assert not at.exception, at.exception
+    assert at.session_state["calib_arenes_rects"] == [[10, 10, 10, 10]]
+
+
+def test_calibration_arenes_clics_identiques_sur_un_seul_axe_refuses(
+    tmp_path, monkeypatch, video_reelle,
+):
+    """Une paire qui ne diverge que sur un axe (même x, y différent, ou
+    l'inverse) donne une largeur ou une hauteur nulle — tout aussi inutile
+    qu'une paire totalement identique ; même garde attendue."""
+    projet = _projet(tmp_path, kind="multi")
+    video = video_reelle(tmp_path / "videos", fps=10.0, n=20, w=64, h=48)
+    _ecrire_session(projet, "S1", source_video=video)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    cle_clic = _cle_clic_arenes(video, 10)
+
+    at.session_state[cle_clic] = {"x": 10, "y": 10, "unix_time": 1.0}
+    at.run()
+    assert not at.exception, at.exception
+    at.session_state[cle_clic] = {"x": 10, "y": 25, "unix_time": 2.0}  # même x → largeur nulle
+    at.run()
+    assert not at.exception, at.exception
+
+    assert at.session_state["calib_arenes_rects"] == []
+    assert at.session_state["calib_arenes_premier_clic"] == (10, 10)
+    erreurs = [e.value for e in at.error]
+    assert erreurs, "un message explicite doit signaler le clic refusé"
+    assert _pipeline_config(projet).get("default_arenes_coords") in (None, {})
+
+
 def test_echelle_deux_clics_calcule_et_enregistre_px_per_cm(
     tmp_path, monkeypatch, video_reelle,
 ):
@@ -456,6 +528,39 @@ def test_echelle_deux_clics_calcule_et_enregistre_px_per_cm(
     assert not at.exception, at.exception
 
     assert _pipeline_config(projet)["px_per_cm"] == pytest.approx(2.0)
+
+
+def test_echelle_clics_identiques_narrete_pas_le_bouton_enregistrer(
+    tmp_path, monkeypatch, video_reelle,
+):
+    """Ruling R20.1 (fix round 1/5), volet mineur : deux clics au même
+    endroit donnent une distance nulle donc `px_per_cm = 0.0`. Avant le
+    correctif, rien n'empêchait d'enregistrer cette valeur — un zéro
+    silencieux dans `pipeline_config.yaml` casserait le filtre de vitesses
+    aberrantes du nettoyage VAME sans aucun message. Le bouton d'enregistrement
+    ne doit plus exister dans ce cas, avec une explication à la place."""
+    projet = _projet(tmp_path, kind="single")
+    video = video_reelle(tmp_path / "videos", fps=10.0, n=20, w=64, h=48)
+    _ecrire_session(projet, "S1", source_video=video)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    radios = {r.key: r for r in at.radio}
+    radios["echelle_source_mode"].set_value("Frame d'une vidéo de session").run()
+    assert not at.exception, at.exception
+
+    cle_clic = _cle_clic_echelle_video(video, 10)
+    at.session_state[cle_clic] = {"x": 10, "y": 10, "unix_time": 1.0}
+    at.run()
+    at.session_state[cle_clic] = {"x": 10, "y": 10, "unix_time": 2.0}  # même pixel
+    at.run()
+    assert not at.exception, at.exception
+
+    boutons = {b.key: b for b in at.button}
+    assert "echelle_enregistrer_clics" not in boutons, list(boutons)
+    erreurs = [e.value for e in at.error]
+    assert erreurs, "un message explicite doit signaler la distance nulle"
+    assert _pipeline_config(projet).get("px_per_cm") in (None,)
 
 
 def test_echelle_photo_importee_comme_source_alternative(tmp_path, monkeypatch):
