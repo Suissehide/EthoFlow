@@ -1,152 +1,67 @@
-"""Constantes globales et configuration de l'app EthoFlow Streamlit.
+"""Branchement du projet courant sur `lib/project.py`, et vocabulaire.
 
-Les chemins de données sont dynamiques : ils dépendent du projet courant
-stocké dans `st.session_state.current_project_path`.
-
-La résolution structurelle (mapping `<project>/data/raw/` etc.) vient du
-module partagé `scripts/paths.py` — source unique de vérité commune entre
-les CLI et cette app Streamlit. Les wrappers ci-dessous se contentent de
-lire `current_project_path` dans le `session_state` puis de déléguer à
-`paths.<fn>(project)`.
+Seul module de `lib/` autorisé à importer Streamlit : il lit le projet
+courant dans le `session_state`. Toute la logique testable vit dans
+`lib/project.py`.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import streamlit as st
 
+from lib.motif_labels import categories  # noqa: F401  (ré-export)
+from lib.project import (  # noqa: F401  (ré-exports pour les vues)
+    SCRIPTS_DIR,
+    arena_coords,
+    dlc_config_path,
+    list_dlc_models,
+    list_projects,
+    load_prefs,
+    models_root,
+    project_kind,
+    projects_root,
+    px_per_cm,
+    read_pipeline_config,
+    save_prefs,
+)
 
-# ============================================================
-# Chemins statiques du repo
-# ============================================================
-ROOT = Path(__file__).resolve().parent.parent.parent
-SCRIPTS_DIR = ROOT / "scripts"
-CONFIG_POINTER = ROOT / ".vame_config_path"
-
-# Import du module partagé paths.py qui vit dans scripts/
-# (pas un package — on insère son dossier dans sys.path)
-if str(SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(SCRIPTS_DIR))
-import paths as _paths  # noqa: E402
-
-# Racine par défaut des projets EthoFlow
-DEFAULT_PROJECTS_ROOT = Path.home() / "ethoflow" / "projects"
-
-# Racine par défaut des projets VAME (legacy, utilisé si pas de projet)
-DEFAULT_VAME_PROJECTS_ROOT = Path.home() / "Inserm" / "vame-projects"
-
-# Mapping logique → nom d'environnement conda
-CONDA_ENVS: dict[str, str] = {
-    "dlc": "dlc",
-    "vame": "vame",
-    "ethoflow": "ethoflow",
-}
+_CLE = "current_project_path"
 
 
-# ============================================================
-# Chemins dynamiques — basés sur le projet courant
-# ============================================================
+def current_project() -> Path | None:
+    valeur = st.session_state.get(_CLE)
+    return Path(valeur) if valeur else None
 
-def _current_project() -> Path:
-    """Racine du projet courant, fallback legacy ROOT si rien n'est sélectionné."""
-    p = st.session_state.get("current_project_path")
-    if p:
-        return Path(p)
-    # Fallback legacy (si pas de projet sélectionné)
-    return ROOT
-
-
-def data_root() -> Path:
-    return _paths.data_dir(_current_project())
-
-def raw_dir() -> Path:
-    return _paths.raw_dir(_current_project())
-
-def cropped_dir() -> Path:
-    return _paths.cropped_dir(_current_project())
-
-def dlc_output_dir() -> Path:
-    return _paths.dlc_output_dir(_current_project())
-
-def vame_dir() -> Path:
-    return _paths.vame_dir(_current_project())
-
-def cleaned_h5_path(session_id: str) -> Path:
-    return _paths.cleaned_h5_path(_current_project(), session_id)
-
-def results_dir() -> Path:
-    return _paths.results_dir(_current_project())
-
-def pipeline_config_path() -> Path:
-    return _paths.pipeline_config_path(_current_project())
 
 def current_project_name() -> str | None:
-    """Nom du projet courant, ou None."""
-    p = st.session_state.get("current_project_path")
-    if p:
-        return Path(p).name
-    return None
+    projet = current_project()
+    return projet.name if projet else None
 
 
-# Aliases pour rétrocompatibilité (lecture seule, évaluées à l'import).
-# IMPORTANT: utiliser les fonctions ci-dessus dans le nouveau code — ces
-# constantes ne suivent pas le projet courant et restent figées sur la
-# racine legacy.
-DATA_ROOT = _paths.data_dir(ROOT)
-RAW_DIR = _paths.raw_dir(ROOT)
-CROPPED_DIR = _paths.cropped_dir(ROOT)
-DLC_OUTPUT_DIR = _paths.dlc_output_dir(ROOT)
-VAME_DIR = _paths.vame_dir(ROOT)
+def set_current_project(path: Path | str | None) -> None:
+    if path is None:
+        st.session_state.pop(_CLE, None)
+        return
+    st.session_state[_CLE] = str(Path(path))
+    prefs = load_prefs()
+    prefs["last_project"] = str(Path(path))
+    save_prefs(prefs)
 
 
-# ============================================================
-# Projets EthoFlow
-# ============================================================
-
-def projects_root() -> Path:
-    """Racine des projets, lue depuis session_state avec fallback."""
-    return Path(
-        st.session_state.get("projects_root", str(DEFAULT_PROJECTS_ROOT))
-    )
+def require_project() -> Path:
+    """À appeler en tête de toute vue qui a besoin d'un projet."""
+    projet = current_project()
+    if projet is None:
+        st.warning("Ouvre un projet depuis la page **Projet**.")
+        st.stop()
+    return projet
 
 
-def list_projects() -> list[Path]:
-    """Liste les dossiers de projets existants."""
-    root = projects_root()
-    if not root.exists():
-        return []
-    return sorted(
-        d for d in root.iterdir()
-        if d.is_dir() and (d / "data").is_dir()
-    )
-
-
-def create_project(name: str) -> Path:
-    """Crée un nouveau projet avec la structure de dossiers standard."""
-    project_dir = projects_root() / name
-    subdirs = ["raw", "cropped", "dlc-output", "vame"]
-    for sub in subdirs:
-        (project_dir / "data" / sub).mkdir(parents=True, exist_ok=True)
-    return project_dir
-
-
-# ============================================================
-# VAME projects root
-# ============================================================
-
-def vame_projects_root() -> Path:
-    """Racine des projets VAME, lue depuis `st.session_state` avec fallback."""
-    return Path(
-        st.session_state.get("vame_projects_root", str(DEFAULT_VAME_PROJECTS_ROOT))
-    )
-
-
-# ============================================================
-# Vocabulaire éthologique (référence ETHOFLOW.md §6.7)
-# ============================================================
-
-ETHOGRAM: dict[str, list[str]] = {
+# Exemples pour aider à remplir le champ `label`, qui est libre. À ne pas
+# confondre avec `categories()` : liste fermée écrite dans `category` et
+# utilisée par les analyses pour grouper.
+VOCABULAIRE_SUGGERE: dict[str, list[str]] = {
     "Locomotion": [
         "locomotion", "slow locomotion", "fast locomotion", "running",
         "pivoting", "turning", "walking", "trotting", "darting", "circling",
