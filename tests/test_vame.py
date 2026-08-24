@@ -51,6 +51,26 @@ def test_stage_status_progression(project, vame_project):
     assert etat["train"] is False       # pas de model/
 
 
-def test_stage_status_train(project, vame_project):
+def test_stage_status_train_not_started(project, vame_project):
+    """Répertoire vide ne compte pas comme entraîné."""
     (vame_project / "model" / "best_model").mkdir(parents=True)
+    assert V.stage_status(project)["train"] is False
+
+
+def test_stage_status_train_complete(project, vame_project):
+    """Modèle sauvegardé marque l'entraînement comme fait."""
+    (vame_project / "model" / "best_model").mkdir(parents=True)
+    (vame_project / "model" / "best_model" / "rnn_vae_test_project.pkl").write_text("mock")
     assert V.stage_status(project)["train"] is True
+
+
+def test_stage_status_align_no_project(project):
+    """Projet sans VAME ne marque pas align comme fait."""
+    assert V.stage_status(project)["align"] is False
+
+
+def test_stage_status_align_complete(project, vame_project):
+    """Fichier processed marque align comme fait."""
+    (vame_project / "data" / "processed").mkdir(parents=True)
+    (vame_project / "data" / "processed" / "S1_processed.nc").write_text("mock")
+    assert V.stage_status(project)["align"] is True

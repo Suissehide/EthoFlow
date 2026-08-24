@@ -119,8 +119,8 @@ def stage_status(project: Path) -> dict[str, bool]:
     vp = vame_project(project)
     return {
         "setup": is_initialised(project),
-        "align": any(vp.glob("data/*/*-PE-seq.npy")),
+        "align": any(vp.glob("data/processed/*_processed.nc")),
         "trainset": (vp / "data" / "train" / "train_seq.npy").exists(),
-        "train": (vp / "model").is_dir() and any((vp / "model").iterdir()),
+        "train": any((vp / "model" / "best_model").glob("*.pkl")),
         "segment": any(vp.glob("results/*/*/*/*_label_*.npy")),
     }
