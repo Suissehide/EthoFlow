@@ -1,4 +1,6 @@
 import os
+import signal
+import threading
 import time
 
 import pytest
@@ -59,9 +61,92 @@ def test_un_seul_job_a_la_fois(project):
 def test_annulation(project):
     R.start(project, PL.Command("ethoflow", "__test__",
                                 ["python", "-c", "import time; time.sleep(30)"], "long"))
-    R.cancel(project, R.current(project).job_id)
+    job_avant = R.current(project)
+    R.cancel(project, job_avant.job_id)
     job = _attendre_fin(project)
     assert job.state == "cancelled"
+    # Ne pas se contenter de l'étiquette : la fonction dont le seul rôle
+    # est d'arrêter des runs GPU de plusieurs heures doit prouver que le
+    # process est vraiment mort, pas juste que le JSON dit "cancelled".
+    assert not R._pid_vivant(job.pid)
+
+
+def test_start_bloque_pendant_que_le_job_annule_est_encore_vivant(project):
+    """Régression Critical 1 : un process lent à honorer SIGTERM (ex :
+    fermeture de contexte CUDA) doit continuer à bloquer un second
+    `start()` tant qu'il est réellement vivant, même si `cancel()` a déjà
+    été appelé et que l'intention d'annulation est posée."""
+    R.start(project, PL.Command(
+        "ethoflow", "__test__",
+        ["python", "-c",
+         "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+         "time.sleep(3)"],
+        "ignore-sigterm"))
+    job_a = R.current(project)
+
+    # Laisse le child installer son handler avant d'envoyer SIGTERM, sinon
+    # le signal peut arriver avant `signal.signal(...)` et le tuer pour de
+    # vrai — ce serait un artefact du test, pas la preuve qu'on cherche.
+    time.sleep(0.3)
+    R.cancel(project, job_a.job_id)
+
+    time.sleep(0.3)   # laisse cancel() envoyer le signal, sans attendre la mort
+    assert R._pid_vivant(job_a.pid), "le process ignore SIGTERM : il doit être encore vivant"
+
+    with pytest.raises(R.JobBusy):
+        R.start(project, _echo())
+
+    os.kill(job_a.pid, signal.SIGKILL)   # nettoyage : SIGTERM est ignoré
+    _attendre_fin(project)
+
+
+def test_watcher_tardif_ne_vole_pas_le_verrou_dun_job_plus_recent(project, monkeypatch):
+    """Régression Critical 2 : entre le moment où le watcher de A a réclamé
+    son process (`proc.wait()` a renvoyé -> pid réellement mort et réputé
+    disponible par `is_running()`) et le moment où il libère effectivement
+    le verrou, un job B a le temps de démarrer légitimement. Le nettoyage
+    tardif de A ne doit pas emporter le verrou de B.
+    """
+    peut_continuer = threading.Event()
+    a_atteint_le_nettoyage = threading.Event()
+    vrai_liberer = R._liberer_verrou_si_proprietaire
+
+    def liberer_retardee(project, job_id):
+        a_atteint_le_nettoyage.set()
+        peut_continuer.wait(timeout=5.0)
+        vrai_liberer(project, job_id)
+
+    monkeypatch.setattr(R, "_liberer_verrou_si_proprietaire", liberer_retardee)
+
+    R.start(project, _echo("A"))
+    job_a = R.current(project)
+
+    # Le watcher de A a fini `proc.wait()` (le process est réclamé) et
+    # s'apprête à libérer son verrou, mais on le bloque juste avant.
+    assert a_atteint_le_nettoyage.wait(timeout=5.0)
+    assert not R._pid_vivant(job_a.pid)     # réclamé : plus dans la table des process
+
+    # Le pid de A est mort et réclamé : `is_running()` le sait déjà, alors
+    # même que le nettoyage (écriture finale + libération du verrou) de A
+    # n'est pas terminé. B peut donc démarrer légitimement.
+    assert not R.is_running(project)
+    # B doit être encore en cours au moment où on vérifie son verrou : la
+    # même fonction `_liberer_verrou_si_proprietaire` étant patchée pour
+    # tout le monde, B écho-instantané se terminerait et libérerait déjà
+    # (légitimement) son propre verrou avant qu'on ait pu vérifier quoi
+    # que ce soit.
+    R.start(project, PL.Command(
+        "ethoflow", "__test__", ["python", "-c", "import time; time.sleep(1)"], "B"))
+    job_b = R.current(project)
+    assert job_b.job_id != job_a.job_id
+
+    # Le nettoyage tardif de A se termine enfin : il ne doit pas emporter
+    # le verrou, désormais celui de B (toujours en cours).
+    peut_continuer.set()
+    time.sleep(0.3)   # laisse le thread de A terminer son appel débloqué
+    assert R._lock(project).read_text(encoding="utf-8").strip() == job_b.job_id
+
+    _attendre_fin(project)
 
 
 def test_verrou_libere_apres_la_fin(project):

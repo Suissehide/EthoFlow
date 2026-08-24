@@ -43,6 +43,9 @@ class Job:
     returncode: int | None = None
     pid: int | None = None
     state: str = "running"     # running|succeeded|failed|cancelled|interrupted
+    cancel_requested: bool = False   # posé par cancel() ; l'état terminal
+                                      # est décidé par le watcher, seul à
+                                      # savoir quand le process meurt vraiment
 
 
 # ------------------------------------------------------------------- chemins
@@ -95,6 +98,20 @@ def _pid_vivant(pid: int | None) -> bool:
     return True
 
 
+def _liberer_verrou_si_proprietaire(project: Path, job_id: str) -> None:
+    """Supprime le verrou seulement s'il désigne encore CE job.
+
+    Un job qui se termine en retard (watcher lent à observer la vraie mort
+    du process, ex : SIGTERM ignoré pendant une fermeture de contexte CUDA)
+    ne doit jamais emporter le verrou d'un job plus récent démarré entre-
+    temps — sinon ce job plus récent se retrouve considéré comme arrêté
+    alors qu'il tourne toujours.
+    """
+    lock = _lock(project)
+    if lock.exists() and lock.read_text(encoding="utf-8").strip() == job_id:
+        lock.unlink(missing_ok=True)
+
+
 def _reconcilier(project: Path, job: Job) -> Job:
     """Un job `running` dont le process a disparu = app tuée en cours de route."""
     if job.state != "running" or _pid_vivant(job.pid):
@@ -102,7 +119,7 @@ def _reconcilier(project: Path, job: Job) -> Job:
     job = replace(job, state="interrupted",
                   ended_at=datetime.now().isoformat(timespec="seconds"))
     _write_job(project, job)
-    _lock(project).unlink(missing_ok=True)
+    _liberer_verrou_si_proprietaire(project, job.job_id)
     return job
 
 
@@ -119,8 +136,18 @@ def current(project: Path) -> Job | None:
 
 
 def is_running(project: Path) -> bool:
-    job = current(project)
-    return bool(job and job.state == "running")
+    """Autorité : verrou présent ET pid réellement vivant.
+
+    Pas l'état JSON — un job peut y être `cancelled` alors que le process
+    résiste encore au signal (fermeture de contexte CUDA, par exemple). Il
+    occupe le GPU tant que son pid existe, donc c'est le pid qui décide,
+    pas l'étiquette posée par `cancel()`.
+    """
+    lock = _lock(project)
+    if not lock.exists():
+        return False
+    job = _read_job(project, lock.read_text(encoding="utf-8").strip())
+    return bool(job and _pid_vivant(job.pid))
 
 
 def history(project: Path, limit: int = 20) -> list[Job]:
@@ -208,12 +235,18 @@ def start(project: Path, cmd: Command) -> Job:
     env["PYTHONUNBUFFERED"] = "1"
 
     log_file = open(log_path, "w", encoding="utf-8", buffering=1)
-    proc = subprocess.Popen(
-        argv,
-        stdout=log_file, stderr=subprocess.STDOUT,
-        env=env, cwd=str(project), text=True,
-        **_popen_kwargs_pour_plateforme(os.name == "nt"),   # groupe de process propre, pour l'annulation
-    )
+    try:
+        proc = subprocess.Popen(
+            argv,
+            stdout=log_file, stderr=subprocess.STDOUT,
+            env=env, cwd=str(project), text=True,
+            **_popen_kwargs_pour_plateforme(os.name == "nt"),   # groupe de process propre, pour l'annulation
+        )
+    except Exception:
+        # Popen a échoué (ex : binaire introuvable) : le descripteur ne
+        # doit pas fuir, rien d'autre n'a encore été écrit sur disque.
+        log_file.close()
+        raise
 
     job = Job(
         job_id=job_id, script=cmd.script, env=cmd.env, label=cmd.label,
@@ -224,25 +257,35 @@ def start(project: Path, cmd: Command) -> Job:
     _lock(project).write_text(job_id, encoding="utf-8")
 
     def _surveiller() -> None:
+        # Seul ce thread sait quand le process est VRAIMENT mort
+        # (`proc.wait()` bloque jusque-là) : c'est donc lui, et lui seul,
+        # qui décide de l'état terminal. `cancel()` ne fait que poser
+        # l'intention (`cancel_requested`) et envoyer le signal — sinon un
+        # process lent à mourir serait déclaré arrêté alors qu'il tourne
+        # encore et retient le GPU.
         code = proc.wait()
         log_file.close()
         courant = _read_job(project, job_id) or job
-        if courant.state == "cancelled":
-            etat = "cancelled"
-        else:
-            etat = "succeeded" if code == 0 else "failed"
+        etat = "cancelled" if courant.cancel_requested else (
+            "succeeded" if code == 0 else "failed")
         _write_job(project, replace(
             courant, state=etat, returncode=code,
             ended_at=datetime.now().isoformat(timespec="seconds"),
         ))
-        _lock(project).unlink(missing_ok=True)
+        _liberer_verrou_si_proprietaire(project, job_id)
 
     threading.Thread(target=_surveiller, daemon=True).start()
     return job
 
 
 def cancel(project: Path, job_id: str) -> None:
-    """Tue le groupe de process.
+    """Demande l'annulation et tue le groupe de process.
+
+    N'écrit PAS d'état terminal : le process peut mettre du temps à
+    mourir (fermeture de contexte CUDA, SIGTERM ignoré...), et tant qu'il
+    est vivant il occupe encore le GPU. C'est le watcher de `start()`, qui
+    observe la vraie fin du process via `proc.wait()`, qui décide de
+    l'état terminal — `cancelled` ici puisque `cancel_requested` est posé.
 
     Le process visible est `conda run`, pas le Python qui travaille : il
     faut descendre au groupe entier, sinon l'enfant survit à son parent.
@@ -250,5 +293,5 @@ def cancel(project: Path, job_id: str) -> None:
     job = _read_job(project, job_id)
     if not job or job.state != "running" or not job.pid:
         return
-    _write_job(project, replace(job, state="cancelled"))
+    _write_job(project, replace(job, cancel_requested=True))
     _tuer_groupe_de_process(job.pid, os.name == "nt")
