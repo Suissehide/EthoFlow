@@ -24,6 +24,7 @@ from lib.icons import ACCENT, ACCENT_BG, ACCENT_HEX, lucide_data_uri  # noqa: E4
 from views import (  # noqa: E402
     about,
     configuration,
+    donnees,
     projet,
 )
 
@@ -44,10 +45,10 @@ has_project = current_project_name() is not None
 # ============================================================
 # Pages
 #
-# Réduites aux trois pages fonctionnelles à ce stade du chantier : les
-# autres vues (Données, Détails session, Lancer pipeline, Labellisation
-# VAME, Résultats) reviendront une par une, chacune ajoutée par la tâche
-# qui l'adapte aux modules `lib/` actuels. Pour enregistrer une page ici :
+# Réduites aux trois pages fonctionnelles au début de ce chantier : les
+# autres vues (Détails session, Lancer pipeline, Labellisation VAME,
+# Résultats) reviennent une par une, chacune ajoutée par la tâche qui
+# l'adapte aux modules `lib/` actuels. Pour enregistrer une page ici :
 # l'ajouter à PAGES (ou PROJECT_PAGES si elle exige un projet ouvert), avec
 # une icône Lucide (voir lib/icons.ICONS) et une clé unique.
 # ============================================================
@@ -55,8 +56,10 @@ PAGES: list[dict] = [
     {"name": "Projet",             "icon": "layout-dashboard", "render": projet.render,         "key": "projet"},
 ]
 
-# Pages requiring a project (aucune pour l'instant)
-PROJECT_PAGES: list[dict] = []
+# Pages requiring a project
+PROJECT_PAGES: list[dict] = [
+    {"name": "Données",            "icon": "file-spreadsheet", "render": donnees.render,        "key": "donnees"},
+]
 
 BOTTOM_PAGES: list[dict] = [
     {"name": "Configuration",      "icon": "settings",         "render": configuration.render,   "key": "config"},
