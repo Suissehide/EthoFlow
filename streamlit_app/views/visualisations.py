@@ -163,6 +163,16 @@ def _tab_motif_gif(projet: Path, sessions: list[str]) -> None:
             duration = st.number_input("`--duration` (s)", min_value=0.1, value=30.0,
                                        step=1.0, key="visu_motif_duration")
 
+    if not limiter:
+        st.caption(
+            "Sans `--duration`, `motif_gif.py` n'inscrit pas `--start` dans "
+            "le nom de fichier (`<session>_annotated.mp4`, toujours le "
+            "même) : ce rendu **remplacera** un précédent rendu de la même "
+            "session, quel que soit son `--start`. Renseigne aussi une "
+            "durée si tu veux garder plusieurs rendus distincts pour "
+            "comparer."
+        )
+
     output_format = st.radio(
         "`--output-format`", options=["mp4", "gif"], horizontal=True,
         key="visu_motif_format",

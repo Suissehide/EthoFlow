@@ -190,7 +190,7 @@ def test_match_render_associe_le_job_dont_la_fenetre_contient_le_fichier(project
     fichier = RD.motif_gif_dir(project) / "S1_annotated_0s_30s.mp4"
     _toucher(fichier, debut + timedelta(minutes=2))
 
-    rendu = RD.match_render(fichier, [job], RD.parse_motif_gif_args)
+    rendu = RD.match_render(fichier, [job], RD.parse_motif_gif_args, RD.valide_motif_gif)
     assert rendu.job is job
     assert rendu.params["session"] == "S1"
     assert rendu.params["duration"] == 30.0
@@ -209,10 +209,103 @@ def test_match_render_aucun_job_dans_la_fenetre(project):
     fichier = RD.motif_gif_dir(project) / "S1_annotated.mp4"
     _toucher(fichier, debut - timedelta(hours=3))   # bien avant le job
 
-    rendu = RD.match_render(fichier, [job], RD.parse_motif_gif_args)
+    rendu = RD.match_render(fichier, [job], RD.parse_motif_gif_args, RD.valide_motif_gif)
     assert rendu.job is None
     assert rendu.params is None
     assert rendu.path == fichier
+
+
+# ============================================================
+# R22.1 : deux jobs du même script rapprochés dans le temps ne doivent
+# jamais faire étiqueter un fichier avec les paramètres de l'AUTRE job.
+# ============================================================
+
+def test_match_render_ne_mislabel_pas_avec_un_job_voisin_motif_gif(project):
+    """Job A (S1) très rapide, puis Job B (S2) démarre 2 s après sa fin.
+    La fenêtre élargie (±2s) de B recouvre la mtime du fichier de A — sans
+    la validation R22.1, le job le plus récent (B, itéré en premier)
+    aurait gagné et légendé le fichier de S1 avec la session S2."""
+    from lib.runner import Job
+
+    debut_a = datetime(2026, 1, 1, 10, 0, 0)
+    fin_a = datetime(2026, 1, 1, 10, 0, 1)
+    job_a = Job(job_id="a", script="motif_gif.py", env="ethoflow", label="x",
+               argv=PL.to_argv(PL.motif_gif(project, session="S1")),
+               started_at=debut_a.isoformat(timespec="seconds"),
+               ended_at=fin_a.isoformat(timespec="seconds"),
+               returncode=0, pid=None, state="succeeded")
+
+    debut_b = datetime(2026, 1, 1, 10, 0, 2)
+    fin_b = datetime(2026, 1, 1, 10, 0, 3)
+    job_b = Job(job_id="b", script="motif_gif.py", env="ethoflow", label="x",
+               argv=PL.to_argv(PL.motif_gif(project, session="S2")),
+               started_at=debut_b.isoformat(timespec="seconds"),
+               ended_at=fin_b.isoformat(timespec="seconds"),
+               returncode=0, pid=None, state="succeeded")
+
+    fichier_a = RD.motif_gif_dir(project) / "S1_annotated.mp4"
+    _toucher(fichier_a, fin_a)   # mtime = 10:00:01, dans la fenêtre élargie de B aussi
+
+    # jobs passés newest-first, comme le fait lib.runner.history()
+    rendu = RD.match_render(fichier_a, [job_b, job_a], RD.parse_motif_gif_args,
+                            RD.valide_motif_gif)
+    assert rendu.job is job_a, "le fichier S1 ne doit jamais être associé au job S2"
+    assert rendu.params["session"] == "S1"
+
+
+def test_match_render_sans_producteur_recouvrable_reste_sans_legende(project):
+    """Si le job qui a VRAIMENT produit le fichier n'est pas dans la liste
+    (log purgé, historique tronqué...), mais qu'un job voisin d'un AUTRE
+    fichier tombe dans la fenêtre élargie, le fichier doit rester sans
+    légende plutôt que d'hériter des paramètres du voisin."""
+    from lib.runner import Job
+
+    debut_b = datetime(2026, 1, 1, 10, 0, 2)
+    fin_b = datetime(2026, 1, 1, 10, 0, 3)
+    job_b = Job(job_id="b", script="motif_gif.py", env="ethoflow", label="x",
+               argv=PL.to_argv(PL.motif_gif(project, session="S2")),
+               started_at=debut_b.isoformat(timespec="seconds"),
+               ended_at=fin_b.isoformat(timespec="seconds"),
+               returncode=0, pid=None, state="succeeded")
+
+    fichier_a = RD.motif_gif_dir(project) / "S1_annotated.mp4"
+    _toucher(fichier_a, datetime(2026, 1, 1, 10, 0, 1))   # job producteur absent de la liste
+
+    rendu = RD.match_render(fichier_a, [job_b], RD.parse_motif_gif_args, RD.valide_motif_gif)
+    assert rendu.job is None
+    assert rendu.params is None
+
+
+def test_match_render_ne_mislabel_pas_avec_un_job_voisin_dendrogram(project):
+    """Même scénario que motif_gif, pour un script rapide (mentionné par
+    la revue) : deux `community_dendrogram.py` sur deux groupes différents,
+    lancés à quelques secondes d'écart."""
+    from lib.runner import Job
+
+    debut_a = datetime(2026, 1, 1, 10, 0, 0)
+    fin_a = datetime(2026, 1, 1, 10, 0, 1)
+    job_a = Job(job_id="a", script="community_dendrogram.py", env="vame", label="x",
+               argv=PL.to_argv(PL.community_dendrogram(project, group="GroupeA")),
+               started_at=debut_a.isoformat(timespec="seconds"),
+               ended_at=fin_a.isoformat(timespec="seconds"),
+               returncode=0, pid=None, state="succeeded")
+
+    debut_b = datetime(2026, 1, 1, 10, 0, 2)
+    fin_b = datetime(2026, 1, 1, 10, 0, 3)
+    job_b = Job(job_id="b", script="community_dendrogram.py", env="vame", label="x",
+               argv=PL.to_argv(PL.community_dendrogram(project, group="GroupeB")),
+               started_at=debut_b.isoformat(timespec="seconds"),
+               ended_at=fin_b.isoformat(timespec="seconds"),
+               returncode=0, pid=None, state="succeeded")
+
+    from lib.vame import vame_project
+    fichier_a = vame_project(project) / "analysis" / "community_dendrogram_GroupeA.png"
+    _toucher(fichier_a, fin_a)
+
+    rendu = RD.match_render(fichier_a, [job_b, job_a], RD.parse_community_dendrogram_args,
+                            RD.valide_dendrogram)
+    assert rendu.job is job_a
+    assert rendu.params["group"] == "GroupeA"
 
 
 # ============================================================

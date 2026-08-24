@@ -25,6 +25,21 @@ Même refus de deviner que `lib.pipeline.parse_prepare_vame_input_args`
 (Task 21, ruling R21.1) : un flag inconnu dans l'`argv` d'un job invalide
 tout le parse plutôt que d'être ignoré ou de faire passer sa valeur pour
 autre chose.
+
+Ruling R22.1 (revue Task 22, tour 1) : la fenêtre temporelle seule ne
+suffit pas. Deux jobs du même script lancés à quelques secondes d'écart
+(un `community_dendrogram.py` rapide, ou deux `motif_gif` coup sur coup)
+ont des fenêtres `[started_at ± 2s, ended_at ± 2s]` qui se chevauchent —
+`match_render`, qui parcourt les jobs du plus récent au plus ancien,
+associait alors le fichier de l'ANCIEN job aux paramètres du NOUVEAU. Une
+figure légendée avec de faux paramètres est pire qu'une figure sans
+légende : le chercheur la croit. `valide_motif_gif` / `valide_manifold` /
+`valide_dendrogram` recoupent donc chaque appariement candidat avec ce que
+le script encode *réellement* dans le nom de fichier (la session en
+préfixe pour les deux premiers, le `--group` en suffixe pour le
+dendrogramme) avant de l'accepter ; un appariement qui contredit le nom de
+fichier est rejeté et `match_render` continue sur le job suivant plutôt
+que d'accepter le premier candidat venu.
 """
 from __future__ import annotations
 
@@ -211,13 +226,75 @@ def _fenetre(job: Job) -> tuple[float, float] | None:
     return debut, fin
 
 
+# ============================================================
+# Validation croisée nom de fichier <-> paramètres recouvrés (R22.1)
+# ============================================================
+#
+# Chaque validateur ne vérifie QUE ce que le script grave réellement dans
+# le nom de fichier (lu dans son code — voir le docstring du module) ; il
+# ne réinvente jamais le nom complet, pour ne pas retomber dans le piège
+# évité au design initial (`_sidebyside` conditionné à un succès runtime
+# que l'argv seul ne peut pas prédire).
+
+def valide_motif_gif(path: Path, params: dict) -> bool:
+    """`motif_gif.py` (ligne ~204) : `out_stem = f"{session}_annotated{suffix}"`."""
+    stem = path.stem
+    if not stem.startswith(f"{params['session']}_annotated"):
+        return False
+    if params.get("duration"):
+        attendu = f"_{params['start']:.0f}s_{params['duration']:.0f}s"
+        if attendu not in stem:
+            return False
+    return True
+
+
+def valide_manifold(path: Path, params: dict) -> bool:
+    """`behavior_structure_gif.py` (ligne ~717) :
+    `stem = f"{session}_manifold_{projection}{pool}{side}{suffix}"`, avec
+    `pool = "_pooled" if args.pool_all_sessions else ""` (déterministe,
+    entièrement recoupable) et `side = "_sidebyside" if video_cap is not
+    None else ""` (dépend du succès *runtime* de l'ouverture vidéo — sa
+    PRÉSENCE implique `--with-video`, mais son ABSENCE ne prouve rien :
+    `--with-video` a pu être demandé et échouer silencieusement)."""
+    stem = path.stem
+    if not stem.startswith(f"{params['session']}_manifold_{params['projection']}"):
+        return False
+    if ("_pooled" in stem) != bool(params.get("pool_all_sessions")):
+        return False
+    if "_sidebyside" in stem and not params.get("with_video"):
+        return False
+    return True
+
+
+def valide_dendrogram(path: Path, params: dict) -> bool:
+    """`community_dendrogram.py` (ligne ~294) :
+    `out_path = f"community_dendrogram{suffix}.png"`, avec
+    `suffix = f"_{group.replace('/', '-')}" if group else ""`."""
+    stem = path.stem
+    groupe = params.get("group")
+    if groupe:
+        return stem == f"community_dendrogram_{groupe.replace('/', '-')}"
+    return stem == "community_dendrogram"
+
+
 def match_render(path: Path, jobs: list[Job],
-                 parser: Callable[[list[str]], dict | None]) -> Render:
+                 parser: Callable[[list[str]], dict | None],
+                 validator: Callable[[Path, dict], bool]) -> Render:
     """Associe `path` au job (parmi `jobs`, déjà filtrés par script+succès)
     dont la fenêtre `[started_at, ended_at]` contient sa date de
-    modification. Marge de 2 s : `started_at`/`ended_at` sont horodatés à
-    la seconde (`timespec="seconds"`), le fichier peut être écrit
-    quelques centaines de ms avant/après cette frontière arrondie.
+    modification ET dont les paramètres recouvrés ne contredisent pas ce
+    que le nom de fichier encode réellement (`validator`, R22.1). Marge de
+    2 s sur la fenêtre : `started_at`/`ended_at` sont horodatés à la
+    seconde (`timespec="seconds"`), le fichier peut être écrit quelques
+    centaines de ms avant/après cette frontière arrondie.
+
+    Un candidat dont la fenêtre correspond mais dont les paramètres
+    contredisent le nom de fichier est écarté SANS retourner ce job : on
+    continue sur le job suivant (plus ancien) plutôt que d'accepter le
+    premier candidat temporel venu — deux jobs du même script rapprochés
+    peuvent tous les deux avoir une fenêtre qui contient la mtime. Si
+    aucun candidat ne valide, mieux vaut un rendu sans légende qu'un
+    rendu avec la mauvaise.
     """
     mtime = path.stat().st_mtime
     for job in jobs:
@@ -227,28 +304,29 @@ def match_render(path: Path, jobs: list[Job],
         debut, fin = fenetre
         if debut - 2 <= mtime <= fin + 2:
             params = parser(job.argv)
-            if params is not None:
+            if params is not None and validator(path, params):
                 return Render(path=path, job=job, params=params)
     return Render(path=path, job=None, params=None)
 
 
 def _renders(project: Path, files: list[Path], script: str,
-            parser: Callable[[list[str]], dict | None]) -> list[Render]:
+            parser: Callable[[list[str]], dict | None],
+            validator: Callable[[Path, dict], bool]) -> list[Render]:
     jobs = [j for j in runner.history(project, limit=200)
             if j.script == script and j.state == "succeeded"]
-    return [match_render(p, jobs, parser) for p in files]
+    return [match_render(p, jobs, parser, validator) for p in files]
 
 
 def motif_gif_renders(project: Path) -> list[Render]:
     return _renders(project, list_motif_gifs(project), "motif_gif.py",
-                    parse_motif_gif_args)
+                    parse_motif_gif_args, valide_motif_gif)
 
 
 def manifold_renders(project: Path) -> list[Render]:
     return _renders(project, list_manifolds(project), "behavior_structure_gif.py",
-                    parse_behavior_structure_gif_args)
+                    parse_behavior_structure_gif_args, valide_manifold)
 
 
 def dendrogram_renders(project: Path) -> list[Render]:
     return _renders(project, list_dendrograms(project), "community_dendrogram.py",
-                    parse_community_dendrogram_args)
+                    parse_community_dendrogram_args, valide_dendrogram)
