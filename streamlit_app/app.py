@@ -60,7 +60,7 @@ PAGES: list[dict] = [
 # Pages requiring a project
 PROJECT_PAGES: list[dict] = [
     {"name": "Données",            "icon": "file-spreadsheet", "render": donnees.render,        "key": "donnees"},
-    {"name": "Pose (DLC)",         "icon": "brain",            "render": pose.render,            "key": "pose"},
+    {"name": "Pose (DLC)",         "icon": "scan-line",        "render": pose.render,            "key": "pose"},
 ]
 
 BOTTOM_PAGES: list[dict] = [

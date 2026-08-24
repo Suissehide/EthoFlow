@@ -26,7 +26,7 @@ import streamlit as st
 import lib.pipeline as PL
 from lib.config import (
     cropped_videos_exist,
-    dlc_config_path,
+    dlc_config_status,
     dlc_output_dir,
     project_kind,
     require_project,
@@ -62,16 +62,20 @@ def _mode_par_defaut(projet: Path) -> str:
     """Le mode par défaut suit le projet, jamais une constante figée.
 
     Ordre de préférence :
-    1. `custom` si un modèle DLC est configuré (`dlc_project_config`) —
-       l'emporte toujours, même en `multi`, si le chercheur a pris la
-       peine de désigner un modèle.
+    1. `custom` si un modèle DLC configuré existe réellement sur disque
+       (`dlc_config_status` == "ok") — l'emporte toujours, même en `multi`,
+       si le chercheur a pris la peine de désigner un modèle valide. Un
+       modèle configuré mais introuvable (déplacé/supprimé) ne compte PAS
+       comme "ok" : proposer `custom` par défaut dans ce cas mènerait
+       droit à l'échec `--no-prompt` (ruling R12.1).
     2. `single-animal` si des vidéos croppées existent déjà (étape 4,
        voie B) : la suite logique est de les traiter, pas de relancer
        SuperAnimal sur la vidéo entière.
     3. `superanimal` sinon — fonctionne sans modèle custom, en single
        comme en multi-animal.
     """
-    if dlc_config_path(projet):
+    statut, _ = dlc_config_status(projet)
+    if statut == "ok":
         return "custom"
     if cropped_videos_exist(projet):
         return "single-animal"
@@ -95,14 +99,24 @@ def _section_mode(projet: Path) -> str:
     )
     st.caption(_EXPLICATIONS[mode])
 
-    if mode == "custom" and not dlc_config_path(projet):
-        st.warning(
-            "Aucun modèle DLC n'est configuré pour ce projet. Avec "
-            "`--no-prompt`, `run_dlc_inference.py --mode custom` échouerait "
-            "immédiatement au lieu de demander un modèle à l'invite — "
-            "désigne d'abord un modèle dans la section **Modèle DLC** de "
-            "la page **Projet**."
-        )
+    if mode == "custom":
+        statut, chemin = dlc_config_status(projet)
+        if statut == "absent":
+            st.warning(
+                "Aucun modèle DLC n'est configuré pour ce projet. Avec "
+                "`--no-prompt`, `run_dlc_inference.py --mode custom` "
+                "échouerait immédiatement au lieu de demander un modèle à "
+                "l'invite — désigne d'abord un modèle dans la section "
+                "**Modèle DLC** de la page **Projet**."
+            )
+        elif statut == "introuvable":
+            st.warning(
+                f"Le modèle configuré (`{chemin}`) est introuvable — déplacé "
+                "ou supprimé depuis. `run_dlc_inference.py --mode custom` "
+                "échouerait immédiatement en `--no-prompt`. Va dans "
+                "**Projet → Modèle DLC → Diagnostiquer** pour réparer, ou "
+                "redésigne un modèle valide."
+            )
 
     return mode
 
@@ -144,12 +158,16 @@ def _section_lancement(
     projet: Path, mode: str, choisies: list[str], tout: bool,
     skip_existing: bool, video_adapt: bool, video_adapt_batch_size: int,
 ) -> None:
-    modele_manquant = mode == "custom" and not dlc_config_path(projet)
+    # "absent" ET "introuvable" désactivent le bouton : dans les deux cas
+    # `--mode custom --no-prompt` échouerait à coup sûr (ruling R12.1),
+    # lancer un job qui va échouer n'aide personne.
+    statut, _ = dlc_config_status(projet)
+    modele_manquant = mode == "custom" and statut != "ok"
     pas_de_sessions = not tout and not choisies
 
     aide = None
     if modele_manquant:
-        aide = "Aucun modèle DLC configuré — voir l'avertissement ci-dessus."
+        aide = "Modèle DLC absent ou introuvable — voir l'avertissement ci-dessus."
     elif pas_de_sessions:
         aide = "Sélectionne au moins une session, ou coche « Toutes les sessions »."
 
@@ -189,8 +207,16 @@ def _section_artefacts(projet: Path) -> None:
     for session_dir in sorted(racine.iterdir()):
         if not session_dir.is_dir():
             continue
-        h5 = sorted(session_dir.glob("*.h5"))
-        labeled = sorted(session_dir.glob("*_labeled.mp4"))
+        # Récursif, pas un glob à plat : en mode single-animal,
+        # run_superanimal_cropped écrit ses _labeled.mp4 dans un sous-dossier
+        # scratch dlc-output/<session>/cropped-raw/, pas directement dans
+        # dlc-output/<session>/ — un glob() plat les raterait précisément
+        # dans le mode où le QC visuel compte le plus (ruling R12.2). En
+        # mode custom, DLC (`analyze_videos`) n'écrit jamais de
+        # _labeled.mp4 : une liste vide dans ce mode est normale, pas un
+        # signe de problème.
+        h5 = sorted(session_dir.rglob("*.h5"))
+        labeled = sorted(session_dir.rglob("*_labeled.mp4"))
         if not h5 and not labeled:
             continue
         trouve = True

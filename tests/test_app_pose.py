@@ -22,15 +22,26 @@ APP_PY = str(REPO / "streamlit_app" / "app.py")
 
 
 def _projet(tmp_path: Path, *, kind: str = "single",
-           dlc_config: str | None = None, avec_crop: bool = False) -> Path:
+           modele: str = "absent", avec_crop: bool = False) -> Path:
+    """`modele` : "absent" (pas de `dlc_project_config`), "introuvable"
+    (une valeur configurée mais aucun fichier à ce chemin — modèle déplacé
+    ou supprimé, ruling R12.1), ou "ok" (un vrai fichier existe)."""
     p = tmp_path / "projects" / "test-pose"
     for sub in ("raw", "cropped", "dlc-output", "vame", "results"):
         (p / "data" / sub).mkdir(parents=True)
     (p / "configs").mkdir(parents=True)
 
     cfg: dict = {"kind": kind}
-    if dlc_config:
-        cfg["dlc_project_config"] = dlc_config
+    if modele == "ok":
+        chemin_modele = tmp_path / "modeles" / "souris" / "config.yaml"
+        chemin_modele.parent.mkdir(parents=True, exist_ok=True)
+        chemin_modele.write_text("dummy: true", encoding="utf-8")
+        cfg["dlc_project_config"] = str(chemin_modele)
+    elif modele == "introuvable":
+        cfg["dlc_project_config"] = str(tmp_path / "modeles" / "disparu" / "config.yaml")
+    elif modele != "absent":
+        raise ValueError(modele)
+
     (p / "configs" / "pipeline_config.yaml").write_text(
         yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8",
     )
@@ -70,30 +81,42 @@ def _radio_mode(at: AppTest):
 
 
 def test_mode_par_defaut_custom_si_modele_configure(tmp_path, monkeypatch):
-    projet = _projet(tmp_path, kind="single", dlc_config="/fake/models/souris/config.yaml")
+    projet = _projet(tmp_path, kind="single", modele="ok")
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     assert _radio_mode(at).value == "custom"
-    # Modèle configuré : pas d'avertissement.
+    # Modèle configuré et présent sur disque : pas d'avertissement.
     assert not any("Aucun modèle DLC" in w.value for w in at.warning)
+    assert not any("introuvable" in w.value for w in at.warning)
 
 
 def test_mode_par_defaut_superanimal_si_multi_sans_modele(tmp_path, monkeypatch):
-    projet = _projet(tmp_path, kind="multi", dlc_config=None, avec_crop=False)
+    projet = _projet(tmp_path, kind="multi", modele="absent", avec_crop=False)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     assert _radio_mode(at).value == "superanimal"
 
 
 def test_mode_par_defaut_single_animal_si_videos_croppees(tmp_path, monkeypatch):
-    projet = _projet(tmp_path, kind="multi", dlc_config=None, avec_crop=True)
+    projet = _projet(tmp_path, kind="multi", modele="absent", avec_crop=True)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     assert _radio_mode(at).value == "single-animal"
 
 
+def test_modele_introuvable_ne_defaut_pas_sur_custom(tmp_path, monkeypatch):
+    """Régression R12.1 : un `dlc_project_config` qui pointe vers un fichier
+    disparu ne doit pas se comporter comme un modèle configuré — sinon la
+    page propose `custom` par défaut alors que le job échouerait à coup sûr
+    (--no-prompt). Sans crop, on retombe sur `superanimal`."""
+    projet = _projet(tmp_path, kind="single", modele="introuvable")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    assert _radio_mode(at).value == "superanimal"
+
+
 def test_custom_sans_modele_avertit_et_desactive_le_bouton(tmp_path, monkeypatch):
-    projet = _projet(tmp_path, kind="single", dlc_config=None)
+    projet = _projet(tmp_path, kind="single", modele="absent")
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     # Défaut single sans modèle -> superanimal ; on force custom.
@@ -107,8 +130,26 @@ def test_custom_sans_modele_avertit_et_desactive_le_bouton(tmp_path, monkeypatch
     assert boutons["btn_pose_lancer"].disabled
 
 
+def test_custom_avec_modele_introuvable_pointe_vers_diagnostiquer(tmp_path, monkeypatch):
+    """Message distinct de « absent » (ruling R12.1) : le modèle a été
+    déplacé/supprimé, on pointe vers Projet -> Modèle DLC -> Diagnostiquer,
+    pas vers « désigne un modèle » comme si rien n'avait jamais été fait."""
+    projet = _projet(tmp_path, kind="single", modele="introuvable")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    _radio_mode(at).set_value("custom").run()
+    assert not at.exception, at.exception
+
+    assert any("introuvable" in w.value and "Diagnostiquer" in w.value for w in at.warning), \
+        [w.value for w in at.warning]
+    assert not any("Aucun modèle DLC" in w.value for w in at.warning)
+
+    boutons = {b.key: b for b in at.button}
+    assert boutons["btn_pose_lancer"].disabled
+
+
 def test_batch_size_visible_seulement_si_video_adapt(tmp_path, monkeypatch):
-    projet = _projet(tmp_path, kind="single", dlc_config="/fake/models/souris/config.yaml")
+    projet = _projet(tmp_path, kind="single", modele="ok")
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     assert [n for n in at.number_input if n.key == "pose_video_adapt_batch_size"] == []
@@ -123,7 +164,7 @@ def test_batch_size_visible_seulement_si_video_adapt(tmp_path, monkeypatch):
 
 
 def test_toutes_sessions_coche_par_defaut_active_le_bouton(tmp_path, monkeypatch):
-    projet = _projet(tmp_path, kind="single", dlc_config="/fake/models/souris/config.yaml")
+    projet = _projet(tmp_path, kind="single", modele="ok")
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     boutons = {b.key: b for b in at.button}

@@ -63,6 +63,30 @@ def test_projet_sans_config_ne_leve_pas(tmp_path):
     assert P.project_kind(vide) == "single"
 
 
+def test_dlc_config_status_absent(project):
+    assert P.dlc_config_status(project) == ("absent", None)
+
+
+def test_dlc_config_status_introuvable(project):
+    """Un modèle configuré mais déplacé/supprimé ne doit PAS se présenter
+    comme utilisable (ruling R12.1) : `run_dlc_inference.py --mode custom`
+    fait le même test d'existence et échoue vite en --no-prompt."""
+    P.set_dlc_config(project, "/modeles/disparu/config.yaml")
+    statut, chemin = P.dlc_config_status(project)
+    assert statut == "introuvable"
+    assert chemin == "/modeles/disparu/config.yaml"
+
+
+def test_dlc_config_status_ok(project, tmp_path):
+    modele = tmp_path / "modeles" / "souris" / "config.yaml"
+    modele.parent.mkdir(parents=True)
+    modele.write_text("dummy: true")
+    P.set_dlc_config(project, modele)
+    statut, chemin = P.dlc_config_status(project)
+    assert statut == "ok"
+    assert chemin == str(modele)
+
+
 def test_set_dlc_config_preserve_le_reste(project):
     """Régression Critical 1+2 : désigner un modèle ne doit PAS repasser par
     create_project.py --force, qui régénère pipeline_config.yaml en entier

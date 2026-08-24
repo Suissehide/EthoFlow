@@ -103,6 +103,29 @@ def dlc_config_path(project: Path) -> str | None:
     return str(value) if value else None
 
 
+def dlc_config_status(project: Path) -> tuple[str, str | None]:
+    """Trois états pour le modèle DLC configuré, pas juste présent/absent.
+
+    `run_dlc_inference.py --mode custom` fait lui-même
+    `if dlc_cfg and Path(dlc_cfg).exists()` puis échoue vite (mais
+    silencieusement, sans dire pourquoi) en `--no-prompt` si le chemin
+    configuré n'existe plus — un modèle déplacé ou supprimé se comporte
+    alors exactement comme un modèle qui marche du point de vue de la
+    page, jusqu'au crash (ruling R12.1). D'où trois états au lieu de deux :
+
+    - `("absent", None)`       — pas de `dlc_project_config` du tout.
+    - `("introuvable", chemin)` — une valeur est configurée mais le fichier
+      n'existe plus sur disque (déplacé, disque externe débranché, etc.).
+    - `("ok", chemin)`         — le fichier existe, la commande peut tourner.
+    """
+    chemin = dlc_config_path(project)
+    if not chemin:
+        return "absent", None
+    if not Path(chemin).is_file():
+        return "introuvable", chemin
+    return "ok", chemin
+
+
 def set_dlc_config(project: Path, dlc_config: str | Path) -> Path:
     """Écrit `dlc_project_config` dans `pipeline_config.yaml`, sans y toucher au reste.
 

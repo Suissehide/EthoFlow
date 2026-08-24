@@ -32,11 +32,30 @@ ICONS: dict[str, str] = {
     "brain": '<path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/>',
     "clipboard-list": '<rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
     "save": '<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
+    # Noms utilisés par le schéma de navigation cible (Task 13, spec §8).
+    # Enregistrés à l'avance : Tasks 13-22 ajoutent des pages une par une, et
+    # `_make_svg` levait autrefois un KeyError sur un nom absent — un simple
+    # oubli d'enregistrement aurait fait planter TOUTE la sidebar (ruling
+    # R12.0). Voir aussi le fallback ci-dessous, qui rend ce genre d'oubli
+    # cosmétique plutôt que fatal.
+    "video": '<path d="m16 13 5.223 3.482a.5.5 0 0 0 .77-.416V7.87a.5.5 0 0 0-.77-.416L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/>',
+    "scan-line": '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>',
+    "waypoints": '<circle cx="12" cy="4.5" r="2.5"/><path d="m10.2 6.3-3.9 3.9"/><circle cx="4.5" cy="12" r="2.5"/><path d="M7 12h10"/><circle cx="19.5" cy="12" r="2.5"/><path d="m13.8 17.7 3.9-3.9"/><circle cx="12" cy="19.5" r="2.5"/>',
+    "clapperboard": '<path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+    # "brush-cleaning" (Task 13, page Nettoyage) délibérément absent : pas de
+    # rappel fiable du tracé exact de cette icône Lucide récente — mieux vaut
+    # le fallback ci-dessous qu'un glyphe inventé qui prétendrait être le bon.
 }
+
+# Glyphe neutre pour un nom absent de ICONS : un simple point plein. Ni une
+# exception (ruling R12.0 — une icône manquante est cosmétique, jamais
+# fatale à la navigation), ni un glyphe inventé qui se ferait passer pour le
+# bon dessin.
+_FALLBACK_ICON = '<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>'
 
 
 def _make_svg(name: str, size: int, color: str) -> str:
-    inner = ICONS[name]
+    inner = ICONS.get(name, _FALLBACK_ICON)
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" '
         f'viewBox="0 0 24 24" fill="none" stroke="{color}" stroke-width="2" '

@@ -97,6 +97,17 @@ def test_video_adapt_batch_size_seulement_si_video_adapt(project):
     assert avec[avec.index("--video-adapt-batch-size") + 1] == "2"
 
 
+def test_video_adapt_batch_size_valeur_choisie_transmise_telle_quelle(project):
+    """Pas seulement le défaut 2 : une valeur différente (ex. 4 sur GPU 24 Go,
+    README §Étape 5) doit ressortir intacte dans l'argv, sans être écrasée
+    par le défaut du script (8) ni par le défaut de l'UI (2)."""
+    args = PL.run_dlc_inference(
+        project, mode="single-animal", all_sessions=True,
+        video_adapt=True, video_adapt_batch_size=4,
+    ).args
+    assert args[args.index("--video-adapt-batch-size") + 1] == "4"
+
+
 def test_prepare_vame_input_passe_les_seuils_explicitement(project):
     """Sans valeurs explicites le script les demande à l'invite."""
     args = PL.prepare_vame_input(
