@@ -42,9 +42,11 @@ ICONS: dict[str, str] = {
     "scan-line": '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/>',
     "waypoints": '<circle cx="12" cy="4.5" r="2.5"/><path d="m10.2 6.3-3.9 3.9"/><circle cx="4.5" cy="12" r="2.5"/><path d="M7 12h10"/><circle cx="19.5" cy="12" r="2.5"/><path d="m13.8 17.7 3.9-3.9"/><circle cx="12" cy="19.5" r="2.5"/>',
     "clapperboard": '<path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z"/><path d="m6.2 5.3 3.1 3.9"/><path d="m12.4 3.4 3.1 4"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
-    # "brush-cleaning" (Task 13, page Nettoyage) délibérément absent : pas de
-    # rappel fiable du tracé exact de cette icône Lucide récente — mieux vaut
-    # le fallback ci-dessous qu'un glyphe inventé qui prétendrait être le bon.
+    # "brush-cleaning" (page Nettoyage, Task 14) : tracé récupéré depuis le
+    # dépôt officiel lucide-icons/lucide (icons/brush-cleaning.svg) et
+    # recoupé avec le paquet npm lucide-static — pas inventé de mémoire
+    # (voir le commentaire qui l'excluait jusqu'ici, Task 13).
+    "brush-cleaning": '<path d="m16 22-1-4"/><path d="M19 14a1 1 0 0 0 1-1v-1a2 2 0 0 0-2-2h-3a1 1 0 0 1-1-1V4a2 2 0 0 0-4 0v5a1 1 0 0 1-1 1H6a2 2 0 0 0-2 2v1a1 1 0 0 0 1 1"/><path d="M19 14H5l-1.973 6.767A1 1 0 0 0 4 22h16a1 1 0 0 0 .973-1.233z"/><path d="m8 22 1-4"/>',
 }
 
 # Glyphe neutre pour un nom absent de ICONS : un simple point plein. Ni une

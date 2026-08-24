@@ -214,6 +214,48 @@ def inspect_session(project: Path, *, sessions: list[str] | None = None,
     return _cmd("inspect_session.py", args, "Inspection qualité")
 
 
+def filter_keypoints(*, input_dir: str | Path, output_dir: str | Path,
+                     keep: list[str] | None = None,
+                     drop: list[str] | None = None,
+                     min_validity: float | None = None,
+                     dry_run: bool = False) -> Command:
+    """Ne prend pas de `project` : ce script n'est pas projet-aware, les
+    chemins d'entrée/sortie sont à fournir explicitement (voir spec §5.2)."""
+    args = ["--input-dir", str(input_dir), "--output-dir", str(output_dir)]
+    if keep:
+        args += ["--keep", *keep]
+    if drop:
+        args += ["--drop", *drop]
+    if min_validity is not None:
+        args += ["--min-validity", str(min_validity)]
+    if dry_run:
+        args.append("--dry-run")
+    return _cmd("filter_keypoints.py", args, "Filtrer les keypoints")
+
+
+def fill_nan_h5(*, root: str | Path, output_dir: str | Path | None = None,
+                dry_run: bool = False) -> Command:
+    """Pas projet-aware non plus — `root` est un chemin explicite."""
+    args = ["--root", str(root)]
+    if output_dir:
+        args += ["--output-dir", str(output_dir)]
+    if dry_run:
+        args.append("--dry-run")
+    return _cmd("fill_nan_h5.py", args, "Combler les NaN résiduels")
+
+
+def trim_empty_arena(*, validity_csv: str | Path, h5_input: str | Path,
+                     h5_output: str | Path, video_input: str | Path,
+                     video_output: str | Path, dry_run: bool = False) -> Command:
+    """Pas projet-aware — les cinq chemins sont à fournir explicitement."""
+    args = ["--validity-csv", str(validity_csv),
+             "--h5-input", str(h5_input), "--h5-output", str(h5_output),
+             "--video-input", str(video_input), "--video-output", str(video_output)]
+    if dry_run:
+        args.append("--dry-run")
+    return _cmd("trim_empty_arena.py", args, "Tronquer les frames d'arène vide")
+
+
 def vame_stage(project: Path, stage: str, *,
                n_clusters: int | None = None,
                regen_labels: bool = False,
