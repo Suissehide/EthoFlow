@@ -25,6 +25,7 @@ from views import (  # noqa: E402
     about,
     configuration,
     donnees,
+    pose,
     projet,
 )
 
@@ -59,6 +60,7 @@ PAGES: list[dict] = [
 # Pages requiring a project
 PROJECT_PAGES: list[dict] = [
     {"name": "Données",            "icon": "file-spreadsheet", "render": donnees.render,        "key": "donnees"},
+    {"name": "Pose (DLC)",         "icon": "brain",            "render": pose.render,            "key": "pose"},
 ]
 
 BOTTOM_PAGES: list[dict] = [

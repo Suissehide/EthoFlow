@@ -191,3 +191,26 @@ def excel_path(project: Path) -> Path | None:
     partagée entre le CLI et l'app.
     """
     return _find_project_excel(Path(project))
+
+
+def cropped_dir(project: Path) -> Path:
+    """`<projet>/data/cropped/` — délègue à `scripts/paths.py`, source unique."""
+    return _paths.cropped_dir(Path(project))
+
+
+def dlc_output_dir(project: Path) -> Path:
+    """`<projet>/data/dlc-output/` — délègue à `scripts/paths.py`, source unique."""
+    return _paths.dlc_output_dir(Path(project))
+
+
+def cropped_videos_exist(project: Path) -> bool:
+    """Vrai si au moins une session a déjà des vidéos croppées (étape 4, voie B).
+
+    Sert à déduire le mode d'inférence DLC par défaut (page Pose) : si le
+    crop par arène a déjà été fait, la suite logique est `single-animal`
+    sur ces vidéos, pas `superanimal` sur la vidéo entière.
+    """
+    d = cropped_dir(project)
+    if not d.is_dir():
+        return False
+    return any(d.rglob("*.mp4"))
