@@ -39,6 +39,15 @@ def render() -> None:
           (`OpenField_trials_*.xlsx`)
         - Workflow : Excel → sync → metadata.yaml → DLC → post-DLC → VAME → analyse
 
+        ## Entraîner un nouveau modèle DeepLabCut
+
+        Pour entraîner un nouveau modèle DeepLabCut (Parcours B du README),
+        tu n'utilises pas cette interface : la formation se fait **au terminal**
+        via `scripts/dlc_model-training/`. L'app EthoFlow n'importe et utilise
+        que des modèles préalablement entraînés.
+
+        Consulte le [README](README.md) pour le détail complet du pipeline.
+
         ## Stack
 
         Python · Streamlit · OpenCV · DeepLabCut · VAME

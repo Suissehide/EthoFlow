@@ -41,6 +41,14 @@ st.set_page_config(
 if "current_page" not in st.session_state:
     st.session_state.current_page = "Projet"
 
+# Restore the last project at startup, if it still exists
+if "current_project_path" not in st.session_state:
+    from lib.project import load_prefs
+    dernier = load_prefs().get("last_project")
+    if dernier and Path(dernier).is_dir():
+        from lib.config import set_current_project
+        set_current_project(dernier)
+
 has_project = current_project_name() is not None
 
 # ============================================================
