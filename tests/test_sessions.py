@@ -67,6 +67,22 @@ def test_arenes_dataframe_sans_arenes():
     assert S.arenes_dataframe({}).empty
 
 
+def test_arenes_dataframe_colonnes_uniformement_typees(project, session_factory):
+    """Ruling R19.1 : une arène vide a un `mouse_id` légitimement `null`
+    (scripts/crop_arenes.py) — la colonne ne doit pas mélanger int et "" au
+    risque de casser la sérialisation Arrow de st.dataframe (reproduit sur
+    la page Vidéos & calibration, streamlit_app/views/videos.py:227)."""
+    meta = {"arenes": [
+        {"id": "A1", "mouse_id": 15, "condition": "MCC", "coords": [0, 0, 5, 5]},
+        {"id": "A2", "mouse_id": None, "condition": "vide", "coords": None},
+    ]}
+    df = S.arenes_dataframe(meta)
+    types_mouse_id = {type(v) for v in df["mouse_id"]}
+    assert types_mouse_id == {str}, types_mouse_id
+    assert df.loc[0, "mouse_id"] == "15"
+    assert df.loc[1, "mouse_id"] == ""
+
+
 def test_colonne_video_en_tant_que_facteur(project):
     """Une colonne 'video' nommée par l'utilisateur survit : elle n'est pas en dur.
 

@@ -87,7 +87,19 @@ def list_sessions(project: Path) -> pd.DataFrame:
 
 
 def arenes_dataframe(meta: dict | None) -> pd.DataFrame:
-    """Toutes les clés présentes dans les arènes, sans en présupposer aucune."""
+    """Toutes les clés présentes dans les arènes, sans en présupposer aucune.
+
+    Contrat « prêt à afficher » (ruling R19.1) : chaque colonne est
+    uniformément composée de chaînes. `mouse_id` est légitimement `null`
+    pour une arène vide (voir `scripts/crop_arenes.py`) — sans cette
+    normalisation, une colonne mélangeant un int (arène occupée) et `""`
+    (arène vide) fait échouer silencieusement la sérialisation Arrow d'un
+    `st.dataframe` en aval (Streamlit rattrape l'exception et reformate la
+    colonne à sa façon, sans le dire). Normaliser ici, une fois, protège
+    toute page qui affiche ce tableau plutôt que de compter sur chaque
+    appelant pour s'en souvenir. Absent -> chaîne vide `""` (sauf `coords`,
+    qui garde son `"(à définir)"` dédié).
+    """
     arenes = (meta or {}).get("arenes") or []
     if not arenes:
         return pd.DataFrame()
@@ -104,6 +116,6 @@ def arenes_dataframe(meta: dict | None) -> pd.DataFrame:
             if cle == "coords":
                 ligne[cle] = str(valeur) if valeur else "(à définir)"
             else:
-                ligne[cle] = "" if valeur is None else valeur
+                ligne[cle] = "" if valeur is None else str(valeur)
         lignes.append(ligne)
     return pd.DataFrame(lignes, columns=colonnes)

@@ -249,3 +249,51 @@ def test_repointage_bout_en_bout_ecrit_metadata_et_preserve_le_reste(
             continue
         assert meta_apres[cle] == valeur, cle
     assert set(meta_apres) == set(meta_avant)
+
+
+def test_repointage_preserve_accents_et_structures_imbriquees(
+    tmp_path, monkeypatch, video_reelle,
+):
+    """Le re-pointage est le seul chemin destructif de cette page (il
+    réécrit `metadata.yaml`) : on vérifie explicitement que des valeurs
+    accentuées et une structure `arenes` imbriquée le traversent intactes,
+    pas seulement des clés scalaires ASCII comme dans le test ci-dessus."""
+    projet = _projet(tmp_path, kind="multi")
+    chemin_mort = tmp_path / "D" / "ancien" / "chemin" / "OF-M1.mp4"
+    arenes = [
+        {"id": "A1", "mouse_id": 15, "condition": "SHAM", "coords": [0, 0, 5, 5]},
+        {"id": "A2", "mouse_id": None, "condition": "CUS+ANGII", "coords": None},
+    ]
+    _ecrire_session(
+        projet, "OF-M1", source_video=chemin_mort,
+        camera={"fps": 25, "width": 640, "height": 480},
+        extra={
+            "opérateur": "Léo Couffinhal",
+            "notes": "arène désinfectée à l'éthanol après chaque essai",
+            "arenes": arenes,
+        },
+    )
+    meta_avant = yaml.safe_load(
+        (projet / "data" / "raw" / "OF-M1" / "metadata.yaml").read_text())
+
+    nouveau_dossier = tmp_path / "videos-retrouvees"
+    video_reelle(nouveau_dossier, nom="OF-M1.mp4", fps=10.0, n=20, w=64, h=48)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert not at.exception, at.exception  # la page rend déjà le tableau des arènes ici
+
+    champs = {t.key: t for t in at.text_input}
+    champs["videos_relink_dossier"].set_value(str(nouveau_dossier)).run()
+    boutons = {b.key: b for b in at.button}
+    boutons["btn_relink_demander"].click().run()
+    boutons = {b.key: b for b in at.button}
+    boutons["btn_relink_confirmer"].click().run()
+    assert not at.exception, at.exception
+
+    meta_apres = yaml.safe_load(
+        (projet / "data" / "raw" / "OF-M1" / "metadata.yaml").read_text())
+    assert meta_apres["source_video"] == str(nouveau_dossier / "OF-M1.mp4")
+    assert meta_apres["opérateur"] == "Léo Couffinhal"
+    assert meta_apres["notes"] == meta_avant["notes"]
+    assert meta_apres["arenes"] == arenes          # structure imbriquée intacte
+    assert set(meta_apres) == set(meta_avant)
