@@ -16,7 +16,7 @@ dependencies:
   - ffmpeg
   - pytables                       # backend HDF5 pour pandas.read_hdf (sortie DLC)
   - pip:
-    - streamlit>=1.30
+    - streamlit>=1.33
     - opencv-python>=4.8
     - pandas>=2.0
     - numpy>=1.24
