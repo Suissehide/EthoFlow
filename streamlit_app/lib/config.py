@@ -3,6 +3,11 @@
 Seul module de `lib/` autorisé à importer Streamlit : il lit le projet
 courant dans le `session_state`. Toute la logique testable vit dans
 `lib/project.py`.
+
+Les 12 noms ré-exportés de `lib.project` (SCRIPTS_DIR, arena_coords, etc.)
+sont une commodité pour la couche vue : elle importe d'ici plutôt que d'avoir
+deux imports. `lib/project.py` en reste propriétaire et lieu de test — aucune
+modification ne doit leur être apportée ici.
 """
 from __future__ import annotations
 
@@ -50,7 +55,10 @@ def set_current_project(path: Path | str | None) -> None:
 
 
 def require_project() -> Path:
-    """À appeler en tête de toute vue qui a besoin d'un projet."""
+    """À appeler en tête de toute vue qui a besoin d'un projet.
+
+    N'a pas de retour si aucun projet n'est ouvert : st.stop() arrête le script.
+    """
     projet = current_project()
     if projet is None:
         st.warning("Ouvre un projet depuis la page **Projet**.")
