@@ -32,6 +32,7 @@ from views import (  # noqa: E402
     projet,
     vame_page,
     videos,
+    visualisations,
 )
 
 st.set_page_config(
@@ -79,6 +80,7 @@ PROJECT_PAGES: list[dict] = [
     {"name": "VAME",               "icon": "waypoints",        "render": vame_page.render,       "key": "vame"},
     {"name": "Motifs",             "icon": "tags",             "render": motifs.render,          "key": "motifs"},
     {"name": "Analyses",           "icon": "chart-column",     "render": analyses.render,        "key": "analyses"},
+    {"name": "Visualisations",     "icon": "clapperboard",     "render": visualisations.render,  "key": "visualisations"},
 ]
 
 BOTTOM_PAGES: list[dict] = [
