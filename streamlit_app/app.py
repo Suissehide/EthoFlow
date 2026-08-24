@@ -25,6 +25,7 @@ from views import (  # noqa: E402
     about,
     configuration,
     donnees,
+    motifs,
     nettoyage,
     pose,
     projet,
@@ -57,9 +58,9 @@ has_project = current_project_name() is not None
 # Pages
 #
 # Réduites aux trois pages fonctionnelles au début de ce chantier : les
-# autres vues (Détails session, Lancer pipeline, Labellisation VAME,
-# Résultats) reviennent une par une, chacune ajoutée par la tâche qui
-# l'adapte aux modules `lib/` actuels. Pour enregistrer une page ici :
+# autres vues (Détails session, Lancer pipeline, Résultats) reviennent une
+# par une, chacune ajoutée par la tâche qui l'adapte aux modules `lib/`
+# actuels. Pour enregistrer une page ici :
 # l'ajouter à PAGES (ou PROJECT_PAGES si elle exige un projet ouvert), avec
 # une icône Lucide (voir lib/icons.ICONS) et une clé unique.
 # ============================================================
@@ -73,6 +74,7 @@ PROJECT_PAGES: list[dict] = [
     {"name": "Pose (DLC)",         "icon": "scan-line",        "render": pose.render,            "key": "pose"},
     {"name": "Nettoyage",          "icon": "brush-cleaning",   "render": nettoyage.render,       "key": "nettoyage"},
     {"name": "VAME",               "icon": "waypoints",        "render": vame_page.render,       "key": "vame"},
+    {"name": "Motifs",             "icon": "tags",             "render": motifs.render,          "key": "motifs"},
 ]
 
 BOTTOM_PAGES: list[dict] = [
