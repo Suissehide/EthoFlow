@@ -4,7 +4,7 @@ Seul module de `lib/` autorisé à importer Streamlit : il lit le projet
 courant dans le `session_state`. Toute la logique testable vit dans
 `lib/project.py`.
 
-Les 20 noms ré-exportés de `lib.project` (SCRIPTS_DIR, arena_coords, etc.)
+Les 22 noms ré-exportés de `lib.project` (SCRIPTS_DIR, arena_coords, etc.)
 sont une commodité pour la couche vue : elle importe d'ici plutôt que d'avoir
 deux imports. `lib/project.py` en reste propriétaire et lieu de test — aucune
 modification ne doit leur être apportée ici.
@@ -17,6 +17,8 @@ import streamlit as st
 
 from lib.motif_labels import categories  # noqa: F401  (ré-export)
 from lib.project import (  # noqa: F401  (ré-exports pour les vues)
+    DEFAULT_MODELS_ROOT,
+    DEFAULT_PROJECTS_ROOT,
     SCRIPTS_DIR,
     arena_coords,
     cropped_dir,
