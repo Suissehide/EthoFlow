@@ -1,209 +1,316 @@
-"""Wrappers de lancement des scripts du pipeline via `conda run`.
+"""Construction des commandes du pipeline — sans exécution.
 
-Chaque script tourne dans son env conda (`dlc`, `vame`, `ethoflow`). L'app
-Streamlit elle-même tourne dans `ethoflow`. Tous les wrappers renvoient un
-`subprocess.CompletedProcess` que l'appelant peut afficher via `format_log_output`.
+Chaque fonction publique retourne un `Command` décrivant quoi lancer et
+dans quel env conda. C'est `lib/runner.py` qui exécute. Séparer les deux
+rend la construction testable sans conda, sans GPU et sans données.
+
+Trois règles valent pour toute commande (voir la spec §5.1) :
+  1. `--project-dir` toujours passé, sinon le script demande le projet à
+     l'invite et le subprocess se fige.
+  2. `--no-prompt` toujours passé, pour un échec franc au lieu d'une
+     attente silencieuse.
+  3. Tout paramètre que le script demanderait est fourni explicitement.
 """
 from __future__ import annotations
 
-import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 
-import streamlit as st
+from lib.project import SCRIPTS_DIR
 
-from lib.config import CONDA_ENVS, SCRIPTS_DIR
+# Mapping script -> env conda. Voir spec §5.2. Se tromper d'env produit un
+# ImportError après plusieurs minutes d'attente.
+SCRIPT_ENVS: dict[str, str] = {
+    # env ethoflow : pandas / yaml / openpyxl / cv2
+    "create_project.py": "ethoflow",
+    "excel_templates.py": "ethoflow",
+    "sync_from_excel.py": "ethoflow",
+    "crop_arenes.py": "ethoflow",
+    "assign_arenas.py": "ethoflow",
+    "inspect_session.py": "ethoflow",
+    "diagnose_dlc_model.py": "ethoflow",
+    "motif_gif.py": "ethoflow",
+    "post_process_cropped.py": "ethoflow",
+    "filter_keypoints.py": "ethoflow",
+    "fill_nan_h5.py": "ethoflow",
+    "trim_empty_arena.py": "ethoflow",
+    "rekey_h5.py": "ethoflow",
+    # env dlc : importe deeplabcut
+    "run_dlc_inference.py": "dlc",
+    "prepare_vame_input_custom.py": "dlc",   # dlc.filterpredictions
+    # env vame : vame, matplotlib, scipy, umap, sklearn
+    "run_vame.py": "vame",
+    "analyze_vame.py": "vame",               # matplotlib + scipy
+    "behavior_structure_gif.py": "vame",     # umap + sklearn
+    "community_dendrogram.py": "vame",       # scipy
+    "inspect_vame_project.py": "vame",
+    "reencode_vame_videos.py": "vame",
+}
 
 
-# ============================================================
-# Lanceur générique
-# ============================================================
+@dataclass(frozen=True)
+class Command:
+    env: str
+    script: str
+    args: list[str] = field(default_factory=list)
+    label: str = ""
 
-def run_in_env(
-    env: str,
-    script: str,
-    args: list[str] | None = None,
-    capture: bool = True,
-) -> subprocess.CompletedProcess:
-    """Lance `conda run -n <env_réel> python <SCRIPTS_DIR>/<script> <args>`.
 
-    `env` est la clé logique (`dlc`, `vame`, `ethoflow`) ; le mapping vers le
-    nom d'env conda réel passe par `CONDA_ENVS`.
+def to_argv(cmd: Command) -> list[str]:
+    """argv complet pour `subprocess.Popen`.
+
+    Pas de `--no-capture-output` : ce flag renvoie la sortie au terminal
+    au lieu du pipe, et c'est précisément le bug de l'ancienne version.
     """
-    real_env = CONDA_ENVS.get(env, env)
-    cmd: list[str] = [
-        "conda", "run", "-n", real_env, "--no-capture-output",
-        "python", str(SCRIPTS_DIR / script),
+    env = SCRIPT_ENVS[cmd.script]   # KeyError volontaire si script inconnu
+    return [
+        "conda", "run", "-n", env,
+        "python", str(SCRIPTS_DIR / cmd.script),
+        *cmd.args,
     ]
-    if args:
-        cmd.extend(str(a) for a in args)
-    return subprocess.run(
-        cmd,
-        capture_output=capture,
-        text=True,
-        shell=False,
-    )
+
+
+def _base(project: Path) -> list[str]:
+    return ["--project-dir", str(Path(project).resolve()), "--no-prompt"]
+
+
+def _cmd(script: str, args: list[str], label: str) -> Command:
+    return Command(env=SCRIPT_ENVS[script], script=script, args=args, label=label)
 
 
 # ============================================================
-# Wrappers spécifiques
+# Constructeurs
 # ============================================================
 
-def run_dlc_inference(
-    session_ids: list[str],
-    mode: str = "superanimal",
-    video_adapt: bool = False,
-    video_adapt_batch_size: int = 2,
-    skip_existing: bool = False,
-    all_sessions: bool = False,
-) -> subprocess.CompletedProcess:
-    """Lance `scripts/run_dlc_inference.py` dans l'env dlc."""
-    args: list[str] = []
+def create_project(project: Path, *, kind: str,
+                   dlc_config: str | None = None,
+                   force: bool = False) -> Command:
+    args = ["--project-dir", str(Path(project).resolve()), "--kind", kind]
+    if dlc_config:
+        args += ["--dlc-config", str(dlc_config)]
+    if force:
+        args.append("--force")
+    args.append("--no-prompt")
+    return _cmd("create_project.py", args, f"Créer le projet {Path(project).name}")
+
+
+def sync_from_excel(project: Path, *, videos_dir: str | Path,
+                    excel: str | Path | None = None,
+                    video_ext: str = "mp4",
+                    overwrite: bool = False,
+                    dry_run: bool = False) -> Command:
+    args = _base(project) + ["--videos-dir", str(videos_dir), "--video-ext", video_ext]
+    if excel:
+        args += ["--excel", str(excel)]
+    if overwrite:
+        args.append("--overwrite")
+    if dry_run:
+        args.append("--dry-run")
+    return _cmd("sync_from_excel.py", args,
+                "Aperçu du sync" if dry_run else "Sync depuis Excel")
+
+
+def crop_arenes(project: Path, *, sessions: list[str] | None = None,
+                all_sessions: bool = False, all_new: bool = False) -> Command:
+    args = _base(project)
+    if all_sessions:
+        args.append("--all")
+    elif all_new:
+        args.append("--all-new")
+    else:
+        args += list(sessions or [])
+    return _cmd("crop_arenes.py", args, "Crop des arènes")
+
+
+def run_dlc_inference(project: Path, *, mode: str,
+                      sessions: list[str] | None = None,
+                      all_sessions: bool = False,
+                      skip_existing: bool = True,
+                      video_adapt: bool = False,
+                      video_adapt_batch_size: int = 2) -> Command:
+    args = _base(project)
     if all_sessions:
         args.append("--all")
     else:
-        args.extend(session_ids)
-    args.extend(["--mode", mode])
-    if video_adapt:
-        args.append("--video-adapt")
-        args.extend(["--video-adapt-batch-size", str(video_adapt_batch_size)])
+        args += list(sessions or [])
+    args += ["--mode", mode]
     if skip_existing:
         args.append("--skip-existing")
-    return run_in_env("dlc", "run_dlc_inference.py", args)
+    if video_adapt:
+        args += ["--video-adapt",
+                 "--video-adapt-batch-size", str(video_adapt_batch_size)]
+    return _cmd("run_dlc_inference.py", args, f"Inférence DLC ({mode})")
 
 
-def run_filter_keypoints(
-    input_dir: str | Path,
-    output_dir: str | Path,
-    keep: list[str] | None = None,
-    drop: list[str] | None = None,
-    min_validity: float | None = None,
-    dry_run: bool = False,
-) -> subprocess.CompletedProcess:
-    """Lance `scripts/filter_keypoints.py` dans l'env ethoflow."""
-    args = ["--input-dir", str(input_dir), "--output-dir", str(output_dir)]
-    if keep:
-        args.append("--keep")
-        args.extend(keep)
-    if drop:
-        args.append("--drop")
-        args.extend(drop)
-    if min_validity is not None:
-        args.extend(["--min-validity", str(min_validity)])
-    if dry_run:
-        args.append("--dry-run")
-    return run_in_env("ethoflow", "filter_keypoints.py", args)
+def diagnose_dlc_model(project: Path, *, model_dir: str | Path | None = None,
+                       fix: bool = False) -> Command:
+    args = _base(project)
+    if model_dir:
+        args += ["--model-dir", str(model_dir)]
+    if fix:
+        args.append("--fix")
+    return _cmd("diagnose_dlc_model.py", args,
+                "Réparer le modèle DLC" if fix else "Diagnostiquer le modèle DLC")
 
 
-def run_fill_nan(
-    root: str | Path,
-    output_dir: str | Path | None = None,
-    dry_run: bool = False,
-) -> subprocess.CompletedProcess:
-    """Lance `scripts/fill_nan_h5.py` dans l'env ethoflow."""
-    args = ["--root", str(root)]
-    if output_dir:
-        args.extend(["--output-dir", str(output_dir)])
-    if dry_run:
-        args.append("--dry-run")
-    return run_in_env("ethoflow", "fill_nan_h5.py", args)
+def prepare_vame_input(project: Path, *, likelihood_threshold: float,
+                       max_speed: float,
+                       px_per_cm: float | None = None,
+                       sessions: list[str] | None = None,
+                       sticky_detection: bool = True,
+                       qc_plot: bool = True,
+                       qc_bodypart: str = "tail_base",
+                       interp_limit: int = 25,
+                       window_length: int = 5,
+                       skip_existing: bool = False) -> Command:
+    args = _base(project) + list(sessions or [])
+    args += ["--likelihood-threshold", str(likelihood_threshold),
+             "--max-speed", str(max_speed),
+             "--interp-limit", str(interp_limit),
+             "--window-length", str(window_length),
+             "--qc-bodypart", qc_bodypart]
+    if px_per_cm is not None:
+        args += ["--px-per-cm", str(px_per_cm)]
+    if not sticky_detection:
+        args.append("--no-sticky-detection")
+    if not qc_plot:
+        args.append("--no-qc-plot")
+    if skip_existing:
+        args.append("--skip-existing")
+    return _cmd("prepare_vame_input_custom.py", args, "Nettoyage des poses")
 
 
-def run_inspect_session(
-    session_ids: list[str] | None = None,
-    input_dir: str | Path | None = None,
-    fps: float | None = None,
-    all_sessions: bool = False,
-) -> subprocess.CompletedProcess:
-    """Lance `scripts/inspect_session.py` dans l'env ethoflow."""
-    args: list[str] = []
-    if all_sessions or not session_ids:
+def assign_arenas(project: Path, *, sessions: list[str] | None = None,
+                  all_sessions: bool = False, all_new: bool = False,
+                  likelihood_threshold: float = 0.6,
+                  interp_limit: int = 25, clean: bool = True) -> Command:
+    args = _base(project)
+    if all_sessions:
+        args.append("--all")
+    elif all_new:
+        args.append("--all-new")
+    else:
+        args += list(sessions or [])
+    args += ["--likelihood-threshold", str(likelihood_threshold),
+             "--interp-limit", str(interp_limit)]
+    if not clean:
+        args.append("--no-clean")
+    return _cmd("assign_arenas.py", args, "Split par arène")
+
+
+def inspect_session(project: Path, *, sessions: list[str] | None = None,
+                    all_sessions: bool = False,
+                    input_dir: str | Path | None = None,
+                    fps: float | None = None) -> Command:
+    args = _base(project)
+    if all_sessions or not sessions:
         args.append("--all")
     else:
-        args.extend(session_ids)
+        args += list(sessions)
     if input_dir:
-        args.extend(["--input-dir", str(input_dir)])
+        args += ["--input-dir", str(input_dir)]
     if fps is not None:
-        args.extend(["--fps", str(fps)])
-    return run_in_env("ethoflow", "inspect_session.py", args)
+        args += ["--fps", str(fps)]
+    return _cmd("inspect_session.py", args, "Inspection qualité")
 
 
-def run_trim_empty(
-    validity_csv: str | Path,
-    h5_input: str | Path,
-    h5_output: str | Path,
-    video_input: str | Path,
-    video_output: str | Path,
-    dry_run: bool = False,
-) -> subprocess.CompletedProcess:
-    """Lance `scripts/trim_empty_arena.py` dans l'env ethoflow."""
-    args = [
-        "--validity-csv", str(validity_csv),
-        "--h5-input", str(h5_input),
-        "--h5-output", str(h5_output),
-        "--video-input", str(video_input),
-        "--video-output", str(video_output),
-    ]
-    if dry_run:
-        args.append("--dry-run")
-    return run_in_env("ethoflow", "trim_empty_arena.py", args)
+def vame_stage(project: Path, stage: str, *,
+               n_clusters: int | None = None,
+               regen_labels: bool = False,
+               extra: list[str] | None = None) -> Command:
+    """`--project-dir` doit précéder la sous-commande (contrainte argparse)."""
+    args = _base(project) + [stage]
+    if stage == "segment" and n_clusters is not None:
+        args += ["--n-clusters", str(n_clusters)]
+    if stage in ("motif-videos", "motif-labels") and regen_labels:
+        args.append("--regen-labels")
+    args += list(extra or [])
+    return _cmd("run_vame.py", args, f"VAME {stage}")
 
 
-def run_vame_stage(
-    stage: str,
-    extra_args: list[str] | None = None,
-) -> subprocess.CompletedProcess:
-    """Lance une sous-commande de `scripts/run_vame.py` dans l'env vame.
-
-    `stage` ∈ {setup, align, trainset, train, evaluate, segment,
-               motif-videos, community, info, use, all}.
-    """
-    args: list[str] = [stage]
-    if extra_args:
-        args.extend(str(a) for a in extra_args)
-    return run_in_env("vame", "run_vame.py", args)
-
-
-def run_analyze_vame(
-    project: str | Path | None = None,
-    algo: str = "hmm",
-    n_clusters: int | None = None,
-    labels_path: str | Path | None = None,
-    validity_source: str | Path | None = None,
-    mask_empty: bool = False,
-    min_edge_frames: int | None = None,
-) -> subprocess.CompletedProcess:
-    """Lance `scripts/analyze_vame.py` dans l'env ethoflow."""
-    args: list[str] = ["--algo", algo]
-    if project:
-        args.extend(["--project", str(project)])
+def analyze_vame(project: Path, *, algo: str = "hmm",
+                 n_clusters: int | None = None,
+                 labels: str | Path | None = None,
+                 group_by: list[str] | None = None,
+                 cross: list[tuple[str, str]] | None = None,
+                 extended: bool = False,
+                 extended_by: str | None = None,
+                 mask_empty: bool = False,
+                 validity_source: str | Path | None = None,
+                 min_edge_frames: int = 25,
+                 fps: float = 30.0,
+                 list_columns: bool = False) -> Command:
+    args = _base(project)
+    if list_columns:
+        # Sort la liste des axes et rend la main : tout autre flag serait
+        # ignoré, autant ne pas les construire.
+        return _cmd("analyze_vame.py", args + ["--list-columns"],
+                    "Axes de comparaison disponibles")
+    args += ["--algo", algo, "--min-edge-frames", str(min_edge_frames),
+             "--fps", str(fps)]
     if n_clusters is not None:
-        args.extend(["--n-clusters", str(n_clusters)])
-    if labels_path:
-        args.extend(["--labels", str(labels_path)])
+        args += ["--n-clusters", str(n_clusters)]
+    if labels:
+        args += ["--labels", str(labels)]
+    if group_by:
+        args += ["--group-by", *group_by]
+    for pair in (cross or []):
+        args += ["--cross", pair[0], pair[1]]
+    if extended:
+        args.append("--extended")
+        if extended_by:
+            args += ["--extended-by", extended_by]
     if validity_source:
-        args.extend(["--validity-source", str(validity_source)])
-    if min_edge_frames is not None:
-        args.extend(["--min-edge-frames", str(min_edge_frames)])
+        args += ["--validity-source", str(validity_source)]
     if mask_empty:
         args.append("--mask-empty")
-    return run_in_env("ethoflow", "analyze_vame.py", args)
+    return _cmd("analyze_vame.py", args, "Analyses statistiques")
 
 
-# ============================================================
-# Affichage des logs
-# ============================================================
+def motif_gif(project: Path, *, session: str, algo: str = "hmm",
+              start: float = 0.0, duration: float | None = None,
+              output_format: str = "mp4",
+              labels: str | Path | None = None) -> Command:
+    args = _base(project) + ["--session", session, "--algo", algo,
+                             "--start", str(start),
+                             "--output-format", output_format]
+    if duration is not None:
+        args += ["--duration", str(duration)]
+    if labels:
+        args += ["--labels", str(labels)]
+    return _cmd("motif_gif.py", args, f"Bande de motifs — {session}")
 
-def format_log_output(result: subprocess.CompletedProcess) -> None:
-    """Affiche stdout/stderr d'un CompletedProcess dans Streamlit."""
-    if result.stdout:
-        st.code(result.stdout, language="text")
-    else:
-        st.code("(stdout silencieux)", language="text")
-    if result.returncode != 0:
-        st.error(f"Code de retour : {result.returncode}")
-        if result.stderr:
-            st.error(result.stderr)
-    elif result.stderr:
-        # stderr non vide mais returncode 0 : on garde en warning (logs informatifs)
-        with st.expander("stderr (returncode 0)", expanded=False):
-            st.code(result.stderr, language="text")
+
+def behavior_structure_gif(project: Path, *, session: str, algo: str = "hmm",
+                           projection: str = "umap",
+                           start: float = 0.0,
+                           duration: float | None = None,
+                           output_format: str = "gif",
+                           with_video: bool = False,
+                           pool_all_sessions: bool = False,
+                           labels: str | Path | None = None) -> Command:
+    args = _base(project) + ["--session", session, "--algo", algo,
+                             "--projection", projection,
+                             "--start", str(start),
+                             "--output-format", output_format]
+    if duration is not None:
+        args += ["--duration", str(duration)]
+    if with_video:
+        args.append("--with-video")
+    if pool_all_sessions:
+        args.append("--pool-all-sessions")
+    if labels:
+        args += ["--labels", str(labels)]
+    return _cmd("behavior_structure_gif.py", args, f"Manifold — {session}")
+
+
+def community_dendrogram(project: Path, *, algo: str = "hmm",
+                         group: str | None = None,
+                         linkage: str = "ward",
+                         labels: str | Path | None = None) -> Command:
+    args = _base(project) + ["--algo", algo, "--linkage", linkage]
+    if group:
+        args += ["--group", group]
+    if labels:
+        args += ["--labels", str(labels)]
+    return _cmd("community_dendrogram.py", args, "Dendrogramme des communautés")
