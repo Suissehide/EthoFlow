@@ -157,24 +157,56 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
         label_key = f"motifs_label_{motif_id}"
         cat_key = f"motifs_cat_{motif_id}"
         conf_key = f"motifs_conf_{motif_id}"
+        seed_key = f"motifs_seed_{motif_id}"
 
-        if label_key not in st.session_state:
-            st.session_state[label_key] = row.get("label", "") or ""
+        # `df` est rechargé depuis le disque à chaque rerun (voir
+        # render()) : si l'onglet Tableau a sauvegardé une édition pour ce
+        # motif entre-temps, `row` la reflète déjà. On ne réamorce les
+        # widgets que quand la valeur sur disque a changé depuis le
+        # dernier amorçage (premier passage sur ce motif, ou édition
+        # faite depuis l'autre onglet) — sinon on écraserait la saisie en
+        # cours de l'utilisateur ici même à chaque rerun.
+        valeurs_disque = (
+            row.get("label", "") or "",
+            (row.get("category") or "").strip(),
+            row.get("confidence", "") or "",
+        )
+        if st.session_state.get(seed_key) != valeurs_disque:
+            st.session_state[label_key] = valeurs_disque[0]
+            st.session_state[cat_key] = valeurs_disque[1] or None
+            st.session_state[conf_key] = valeurs_disque[2]
+            st.session_state[seed_key] = valeurs_disque
+
         st.text_input("Label (texte libre)", key=label_key)
 
-        if cat_key not in st.session_state:
-            actuelle = (row.get("category") or "").strip()
-            st.session_state[cat_key] = actuelle if actuelle in cats else None
+        # La valeur déjà dans le CSV peut être hors des 8 catégories
+        # fermées (typo, vocabulaire de labo, ou `artifact` comme le
+        # suggère par erreur le README — voir le module docstring). Si on
+        # ne présentait que `cats`, le selectbox afficherait cette valeur
+        # comme "non catégorisé" et un simple clic sur Enregistrer
+        # écrirait `category=""`, effaçant l'annotation sans avertir
+        # personne. On l'ajoute donc aux options pour qu'elle reste
+        # visible et sélectionnée, avec un avertissement explicite.
+        valeur_actuelle = st.session_state.get(cat_key)
+        hors_liste = bool(valeur_actuelle) and valeur_actuelle not in cats
+        options_cat = [*cats, valeur_actuelle] if hors_liste else cats
+        if hors_liste:
+            st.warning(
+                f"Catégorie « {valeur_actuelle} » hors de la liste fermée "
+                "des 8 valeurs ETHOGRAM : conservée telle quelle (rien "
+                "n'est perdu si tu enregistres sans y toucher), mais "
+                "`analyze_vame.py` ne la reconnaîtra pas pour grouper les "
+                "motifs. Choisis une des 8 valeurs pour corriger, sinon "
+                "laisse en l'état."
+            )
         st.selectbox(
-            "Catégorie", options=cats, key=cat_key,
+            "Catégorie", options=options_cat, key=cat_key,
             placeholder="— non catégorisé —",
             help="Liste fermée (8 valeurs ETHOGRAM), utilisée par "
                  "`analyze_vame.py` pour grouper les motifs. Une valeur "
                  "hors liste casse le regroupement.",
         )
 
-        if conf_key not in st.session_state:
-            st.session_state[conf_key] = row.get("confidence", "") or ""
         st.text_input(
             "Confiance", key=conf_key,
             help="Champ libre. Motif ininterprétable (bruit de tracking, "
@@ -211,7 +243,7 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
                 for i, terme in enumerate(termes):
                     if cols[i % 3].button(
                         terme, key=f"motifs_voc_{motif_id}_{groupe}_{terme}",
-                        use_container_width=True,
+                        width="stretch",
                     ):
                         st.session_state[label_key] = terme
                         st.rerun()
@@ -232,10 +264,21 @@ def _column_config(df: pd.DataFrame, cats: list[str]) -> dict:
         "label", help="Texte libre — voir le vocabulaire suggéré dans "
                       "l'onglet « Par motif ».",
     )
+    # Un `SelectboxColumn` rejette silencieusement toute valeur absente de
+    # `options` (elle s'affiche comme vide, et la moindre interaction avec
+    # le tableau la réécrirait à "" au prochain save — même bug que dans
+    # l'onglet « Par motif »). On complète donc les 8 catégories fermées
+    # avec les valeurs hors liste déjà présentes dans le fichier, pour ne
+    # jamais en perdre une.
+    valeurs_hors_liste = sorted({
+        v for v in df["category"].dropna().unique() if v and v not in cats
+    })
     config["category"] = st.column_config.SelectboxColumn(
-        "category", options=cats,
+        "category", options=[*cats, *valeurs_hors_liste],
         help="Liste fermée (8 valeurs ETHOGRAM), utilisée par "
-             "`analyze_vame.py` pour grouper les motifs.",
+             "`analyze_vame.py` pour grouper les motifs. Les valeurs hors "
+             "liste déjà présentes dans le fichier sont gardées ici pour "
+             "ne rien perdre, mais ne sont pas reconnues par les analyses.",
     )
     return config
 
@@ -252,13 +295,20 @@ def _tab_table(projet: Path, df: pd.DataFrame) -> None:
         df_affiche,
         column_config=_column_config(df_affiche, cats),
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         key="motifs_table_editor",
     )
 
     a_sauver = edited.copy()
     a_sauver["category"] = a_sauver["category"].fillna("")
-    if not a_sauver.equals(df):
+    # Le tableau est affiché trié par usage décroissant (cohérence avec
+    # l'onglet « Par motif »), mais le CSV doit rester dans l'ordre
+    # `motif_id` écrit par `run_vame` — sauvegarder l'ordre d'affichage
+    # réordonnerait pour de bon le fichier du chercheur à chaque édition.
+    par_motif_id = lambda s: pd.to_numeric(s, errors="coerce")  # noqa: E731
+    a_sauver = a_sauver.sort_values("motif_id", key=par_motif_id).reset_index(drop=True)
+    df_pour_comparaison = df.sort_values("motif_id", key=par_motif_id).reset_index(drop=True)
+    if not a_sauver.equals(df_pour_comparaison):
         ML.save(projet, a_sauver)
         st.toast("Tableau enregistré")
 

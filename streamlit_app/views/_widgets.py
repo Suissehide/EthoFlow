@@ -16,7 +16,7 @@ from lib import sessions
 def selecteur_sessions(projet: Path, *, cle: str) -> tuple[list[str], bool]:
     """Retourne (sessions choisies, drapeau --all).
 
-    Utilisé par les pages Pose, Nettoyage et Visualisations : chacune
+    Utilisé par les pages Pose, Nettoyage et Vidéos & calibration : chacune
     lance un script qui accepte soit `--all`, soit une liste de
     `session_id` en positionnel — jamais les deux à la fois (voir
     `lib.pipeline`, qui exclut les sessions dès que `all_sessions=True`).

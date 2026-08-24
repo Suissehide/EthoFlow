@@ -150,13 +150,13 @@ def render() -> None:
     st.title("Configuration")
     st.caption("Chemins de préférence et santé des environnements conda")
 
-    st.markdown("---")
+    st.divider()
     _section_racines()
 
-    st.markdown("---")
+    st.divider()
     _section_environnements()
 
     projet = current_project()
     if projet:
-        st.markdown("---")
+        st.divider()
         st.markdown(f"**Projet courant :** `{projet}`")

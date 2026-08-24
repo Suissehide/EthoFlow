@@ -132,6 +132,6 @@ VOCABULAIRE_SUGGERE: dict[str, list[str]] = {
         "body shake", "arched back", "hunched posture",
     ],
     "Catch-all": [
-        "transition", "ambiguous", "artifact", "immobility (imputed)",
+        "transition", "ambiguous", "immobility (imputed)",
     ],
 }

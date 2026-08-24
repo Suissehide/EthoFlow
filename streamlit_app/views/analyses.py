@@ -280,7 +280,7 @@ def _apercu_csv(path: Path) -> None:
         st.error(f"Lecture impossible : {e}")
         return
     st.caption(f"{len(df)} lignes × {len(df.columns)} colonnes")
-    st.dataframe(df.head(20), use_container_width=True, hide_index=True)
+    st.dataframe(df.head(20), width="stretch", hide_index=True)
     st.download_button(
         f"Télécharger {path.name}", data=path.read_bytes(),
         file_name=path.name, mime="text/csv", key=f"analyses_dl_{path.name}",
@@ -291,7 +291,7 @@ def _affiche_fichiers(fichiers: list[Path]) -> None:
     images = [p for p in fichiers if p.suffix.lower() == ".png"]
     csvs = [p for p in fichiers if p.suffix.lower() == ".csv"]
     for p in images:
-        st.image(str(p), caption=p.name, use_container_width=True)
+        st.image(str(p), caption=p.name, width="stretch")
     for p in csvs:
         _apercu_csv(p)
 

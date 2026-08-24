@@ -60,12 +60,13 @@ has_project = current_project_name() is not None
 # ============================================================
 # Pages
 #
-# Réduites aux trois pages fonctionnelles au début de ce chantier : les
-# autres vues (Détails session, Lancer pipeline, Résultats) reviennent une
-# par une, chacune ajoutée par la tâche qui l'adapte aux modules `lib/`
-# actuels. Pour enregistrer une page ici :
-# l'ajouter à PAGES (ou PROJECT_PAGES si elle exige un projet ouvert), avec
-# une icône Lucide (voir lib/icons.ICONS) et une clé unique.
+# Les neuf pages du pipeline sont toutes enregistrées : Projet (PAGES) puis
+# Données, Vidéos & calibration, Pose (DLC), Nettoyage, VAME, Motifs,
+# Analyses, Visualisations (PROJECT_PAGES, visibles seulement si un projet
+# est ouvert). Configuration et À propos sont des pages système
+# (BOTTOM_PAGES). Pour enregistrer une nouvelle page ici : l'ajouter à
+# PAGES (ou PROJECT_PAGES si elle exige un projet ouvert), avec une icône
+# Lucide (voir lib/icons.ICONS) et une clé unique.
 # ============================================================
 PAGES: list[dict] = [
     {"name": "Projet",             "icon": "layout-dashboard", "render": projet.render,         "key": "projet"},
@@ -280,7 +281,7 @@ st.sidebar.markdown('<p class="ef-section-label">Navigation</p>', unsafe_allow_h
 
 with st.sidebar.container(key="nav_main"):
     for page in _visible_main:
-        if st.button(page["name"], key=f"nav_{page['key']}", use_container_width=True):
+        if st.button(page["name"], key=f"nav_{page['key']}", width="stretch"):
             st.session_state.current_page = page["name"]
             st.rerun()
 
@@ -289,7 +290,7 @@ st.sidebar.markdown('<p class="ef-section-label">Système</p>', unsafe_allow_htm
 
 with st.sidebar.container(key="nav_bottom"):
     for page in BOTTOM_PAGES:
-        if st.button(page["name"], key=f"nav_{page['key']}", use_container_width=True):
+        if st.button(page["name"], key=f"nav_{page['key']}", width="stretch"):
             st.session_state.current_page = page["name"]
             st.rerun()
 

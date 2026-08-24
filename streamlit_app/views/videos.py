@@ -190,7 +190,7 @@ def _section_video_session(session_id: str, meta: dict) -> None:
             with col_vignette:
                 png = V.frame_png_bytes(chemin, index=0, max_width=400)
                 if png:
-                    st.image(png, caption="Première frame", use_container_width=True)
+                    st.image(png, caption="Première frame", width="stretch")
                 else:
                     st.caption("Vignette indisponible.")
             with col_lecteur:
@@ -215,7 +215,7 @@ def _section_video_session(session_id: str, meta: dict) -> None:
 
             st.dataframe(
                 _tableau_comparaison(meta, info),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
 
     st.markdown(lucide_title("clipboard-list", "Metadata de la session"), unsafe_allow_html=True)
@@ -227,7 +227,7 @@ def _section_video_session(session_id: str, meta: dict) -> None:
         # types varient d'une clé à l'autre (même piège que `_fmt` ci-dessus).
         st.dataframe(
             pd.DataFrame([{"Clé": k, "Valeur": _fmt(v)} for k, v in champs.items()]),
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )
     else:
         st.caption("Aucun champ de metadata scalaire pour cette session.")
@@ -241,7 +241,7 @@ def _section_arenes_session(projet: Path, meta: dict) -> None:
     if df_arenes.empty:
         st.caption("Aucune arène définie dans la metadata de cette session.")
     else:
-        st.dataframe(df_arenes, use_container_width=True, hide_index=True)
+        st.dataframe(df_arenes, width="stretch", hide_index=True)
 
 
 def _section_relink(projet: Path, sessions_manquantes: list[str]) -> None:
@@ -283,7 +283,7 @@ def _section_relink(projet: Path, sessions_manquantes: list[str]) -> None:
             {"Session": sid, "Vidéo retrouvée": str(chemin)}
             for sid, chemin in relinks
         ]),
-        use_container_width=True, hide_index=True,
+        width="stretch", hide_index=True,
     )
 
     if st.button(f"Re-pointer {len(relinks)} session(s)", key="btn_relink_demander"):

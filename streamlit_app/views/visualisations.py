@@ -75,7 +75,7 @@ def _affiche_rendu(rendu: RD.Render, *, cle: str) -> None:
             if chemin.suffix.lower() == ".mp4":
                 st.video(str(chemin))
             else:
-                st.image(str(chemin), use_container_width=True)
+                st.image(str(chemin), width="stretch")
         with col_info:
             st.caption(f"`{chemin.name}`")
             if rendu.params is not None:

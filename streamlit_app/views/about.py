@@ -11,33 +11,53 @@ def render() -> None:
     st.markdown(
         """
         **EthoFlow** est une interface web légère pour orchestrer l'analyse
-        comportementale de souris avec **DeepLabCut** et **VAME**.
+        comportementale de souris avec **DeepLabCut** et **VAME**. Elle pilote
+        les scripts de `scripts/` (chacun tournant dans son propre
+        environnement conda — `dlc`, `pipeline` ou `vame`) sans dupliquer leur
+        logique : l'app construit et lance la commande, affiche le suivi de
+        job, et lit les fichiers produits.
 
-        ## Nouveautés v2
+        ## Les neuf pages du pipeline
 
-        - **Pipeline structuré** : la page *Lancer pipeline* est segmentée en
-          DLC / post-DLC / VAME / Analyse, avec un bouton dédié par sous-commande.
-        - **Labellisation des motifs** : nouvelle page pour visionner chaque
-          `cluster_video` et attribuer un label éthologique, persisté dans
-          `<projet>/analysis/motif_labels_<algo>.yaml` (consommé par
-          `analyze_vame.py --labels`).
-        - **Support empty-arena** : intégration des options `--validity-source`,
-          `--mask-empty`, `--min-edge-frames` et du script `trim_empty_arena.py`
-          (voir ETHOFLOW.md §6.6).
-        - **Page Résultats refondue** : affiche inline la heatmap, les plots
-          par condition et les CSV produits par `analyze_vame.py`.
-        - **Sélecteur de projet VAME** : tu peux pointer plusieurs projets dans
-          `~/Inserm/vame-projects/` (configurable dans la sidebar) et basculer.
+        - **Projet** — ouvrir ou créer un projet, désigner le modèle DLC à
+          utiliser, suivre l'avancement global.
+        - **Données** — étapes 2-3 : synchroniser l'Excel maître et générer
+          `metadata.yaml` par session.
+        - **Vidéos & calibration** — étapes 4 et 6a : localiser/recadrer les
+          vidéos, calibrer l'échelle px/cm et les arènes, QC visuel des
+          trajectoires.
+        - **Pose (DLC)** — étape 5 : lance `run_dlc_inference.py` (env `dlc`)
+          pour produire les `.h5` de points-clés par session.
+        - **Nettoyage** — étape 6b : post-traitement des trajectoires
+          (interpolation, filtrage de vitesse, détection de blocages).
+        - **VAME** — étape 7, présentée en stepper : `setup`, `align`,
+          `trainset`, `train`, `evaluate`, `segment` (env `vame`).
+        - **Motifs** — étape 8 : visionne les clips de chaque motif VAME et
+          nomme les comportements. Voir « Où vivent les labels » ci-dessous.
+        - **Analyses** — étape 9 : des motifs segmentés aux statistiques
+          (`analyze_vame.py`), tableaux et figures affichés inline.
+        - **Visualisations** — étape 9, rendus optionnels (motif_gif,
+          manifold, dendrogramme de communautés) pour un papier ou un poster.
 
-        ## Sources et documentation
+        Deux pages système complètent la navigation : **Configuration**
+        (chemins de préférence, santé des environnements conda) et **À
+        propos** (cette page).
 
-        - Documentation complète : [`docs/ETHOFLOW.md`](docs/ETHOFLOW.md)
-          - §6.6 — Détection et exclusion des artefacts empty-arena
-          - §6.7 — Labellisation des motifs (vocabulaire standard)
-          - §6.8 — Notes hyperparamètres VAME (overfit, régularisation)
-        - Source de vérité expérimentale : fichier Excel maître
-          (`OpenField_trials_*.xlsx`)
-        - Workflow : Excel → sync → metadata.yaml → DLC → post-DLC → VAME → analyse
+        ## Où vivent les labels de motifs
+
+        La page **Motifs** lit et écrit exclusivement
+        `<projet>/data/vame/motif_labels.csv` (séparateur `;`, encodage
+        `utf-8-sig`), généré par `run_vame.py motif-videos` /
+        `motif-labels` et consommé par `analyze_vame.py`. Sans ce fichier,
+        les figures affichent `motif_0`, `motif_1`, etc. au lieu d'un vrai
+        nom de comportement.
+
+        Une ancienne version de l'app écrivait les labels dans
+        `<projet>/analysis/motif_labels_<algo>.yaml` — un fichier que rien
+        en aval ne lisait, donc invisible pour `analyze_vame.py`. Ce format
+        n'est plus produit ; s'il en reste sur un vieux projet, la page
+        **Motifs** propose de reprendre la colonne `label` dans le nouveau
+        CSV (rien n'est écrasé sans confirmation explicite).
 
         ## Entraîner un nouveau modèle DeepLabCut
 
@@ -46,7 +66,9 @@ def render() -> None:
         via `scripts/dlc_model-training/`. L'app EthoFlow n'importe et utilise
         que des modèles préalablement entraînés.
 
-        Consulte le [README](README.md) pour le détail complet du pipeline.
+        Consulte le [README](README.md) pour le détail complet du pipeline et
+        [`docs/ETHOFLOW.md`](docs/ETHOFLOW.md) pour la documentation
+        technique approfondie.
 
         ## Stack
 

@@ -229,7 +229,7 @@ def _section_artefacts(projet: Path) -> None:
     else:
         st.caption(
             "Pour un contrôle qualité visuel des `_labeled.mp4`, voir la "
-            "page **Vidéos & calibration** (à venir)."
+            "page **Vidéos & calibration**."
         )
 
 

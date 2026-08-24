@@ -164,7 +164,8 @@ def _section_nettoyage(projet: Path) -> None:
             "ci-dessous pour cette exécution."
         )
         saisie = st.number_input("px/cm (pour cette exécution seulement)",
-                                 min_value=0.0, value=0.0, step=0.5)
+                                 min_value=0.0, value=0.0, step=0.5,
+                                 key="nettoyage_px_per_cm_fallback")
         echelle = saisie if saisie > 0 else None
     else:
         st.caption(f"Échelle : {echelle} px/cm — passe 3 active.")
@@ -292,7 +293,7 @@ def _section_resume(projet: Path) -> None:
                     }
                     for r in resultats
                 ],
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
             pire = max(r["pct_repaired"] for r in resultats)
             if pire > 15:
@@ -458,7 +459,7 @@ def _section_brut_vs_nettoye(projet: Path, galerie: dict[str, dict[str, Path]], 
         st.caption(f"Trajectoire nettoyée — `{keypoint}`")
         chemin_plot = galerie.get(keypoint, {}).get(session_id)
         if chemin_plot:
-            st.image(str(chemin_plot), use_container_width=True)
+            st.image(str(chemin_plot), width="stretch")
         else:
             st.caption(f"Pas de graphe QC pour `{session_id}` / `{keypoint}`.")
 
@@ -502,7 +503,7 @@ def _section_galerie_qc(projet: Path) -> None:
     colonnes = st.columns(3)
     for i, (session_id, chemin) in enumerate(sorted(sessions_du_keypoint.items())):
         with colonnes[i % 3]:
-            st.image(str(chemin), caption=session_id, use_container_width=True)
+            st.image(str(chemin), caption=session_id, width="stretch")
 
     st.divider()
     _section_regenerer_keypoint(projet, keypoints)

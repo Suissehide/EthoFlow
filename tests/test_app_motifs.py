@@ -133,6 +133,77 @@ def test_categorie_offre_exactement_les_8_valeurs_fermees(tmp_path, monkeypatch)
 
 
 # ============================================================
+# CRITIQUE : une `category` hors liste fermée ne doit jamais être perdue.
+#
+# README.md:517 dit d'écrire `artifact` dans `category` — qui n'est pas une
+# des 8 valeurs ETHOGRAM. Avant le correctif, le selectbox affichait cette
+# valeur comme "non catégorisé" (options=cats uniquement, valeur hors
+# options -> None), et un simple clic sur Enregistrer réécrivait
+# `category=""`, effaçant l'annotation sans le moindre avertissement.
+# ============================================================
+
+def test_categorie_hors_liste_visible_et_pas_perdue_a_lecture(tmp_path, monkeypatch):
+    projet = _projet(tmp_path)
+    _ecrire_csv(projet, ["0;grooming_face;artifact;;;;5.00;"])
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    cats_widget = [s for s in at.selectbox if s.label == "Catégorie"][0]
+    # La valeur du CSV doit rester affichée — pas "non catégorisé" (None).
+    assert cats_widget.value == "artifact"
+    assert "artifact" in cats_widget.options
+
+    # Un avertissement explicite doit signaler que c'est hors liste.
+    avertissements = " ".join(w.value for w in at.warning)
+    assert "artifact" in avertissements
+    assert "hors" in avertissements.lower()
+
+
+def test_categorie_hors_liste_survit_a_une_edition_du_label_seul(tmp_path, monkeypatch):
+    """Le cas exact du bug critique : le chercheur ne touche QUE le label
+    (via le vocabulaire suggéré ou en tapant), clique Enregistrer, et la
+    `category` hors liste déjà présente dans le fichier doit survivre
+    intacte — aucun clic ne doit l'effacer sans que l'utilisateur ne l'ait
+    demandé."""
+    projet = _projet(tmp_path)
+    csv_path = _ecrire_csv(projet, ["0;;artifact;;;;5.00;"])
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    champ_label = [t for t in at.text_input if t.label == "Label (texte libre)"][0]
+    champ_label.set_value("bruit_de_tracking").run()
+    assert not at.exception, at.exception
+
+    bouton_save = [b for b in at.button if b.key.startswith("motifs_save_")][0]
+    bouton_save.click().run()
+    assert not at.exception, at.exception
+
+    import pandas as pd
+    df = pd.read_csv(csv_path, sep=";", dtype=str, keep_default_na=False,
+                      encoding="utf-8-sig")
+    assert df.loc[df["motif_id"] == "0", "label"].iloc[0] == "bruit_de_tracking"
+    assert df.loc[df["motif_id"] == "0", "category"].iloc[0] == "artifact"
+
+
+def test_categorie_hors_liste_typo_ou_vocabulaire_labo_aussi_protegee(tmp_path, monkeypatch):
+    """Pas seulement `artifact` : n'importe quelle valeur hors liste (typo,
+    vocabulaire propre à un labo) doit être traitée pareil."""
+    projet = _projet(tmp_path)
+    csv_path = _ecrire_csv(projet, ["0;;Locomotton;;;;5.00;"])  # typo volontaire
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    cats_widget = [s for s in at.selectbox if s.label == "Catégorie"][0]
+    assert cats_widget.value == "Locomotton"
+
+    bouton_save = [b for b in at.button if b.key.startswith("motifs_save_")][0]
+    bouton_save.click().run()
+    assert not at.exception, at.exception
+
+    import pandas as pd
+    df = pd.read_csv(csv_path, sep=";", dtype=str, keep_default_na=False,
+                      encoding="utf-8-sig")
+    assert df.loc[df["motif_id"] == "0", "category"].iloc[0] == "Locomotton"
+
+
+# ============================================================
 # Édition d'un label : écrite sur disque
 # ============================================================
 
@@ -197,6 +268,53 @@ def test_colonne_ajoutee_a_la_main_survit_a_une_edition(tmp_path, monkeypatch):
     # La ligne du motif 1, non éditée, reste strictement inchangée.
     assert df.loc[df["motif_id"] == "1", "label"].iloc[0] == "walking"
     assert df.loc[df["motif_id"] == "1", "category"].iloc[0] == "Locomotion"
+
+
+# ============================================================
+# Onglet "Tableau" : sauvegarde en ordre `motif_id`, pas en ordre d'usage
+#
+# `_tab_table` affiche `df` déjà trié par `usage_pct` décroissant (cohérent
+# avec l'onglet « Par motif »). Si on sauvegardait cet ordre d'affichage
+# tel quel, on réordonnerait pour de bon le fichier de `run_vame` à chaque
+# édition depuis le Tableau. `st.data_editor` n'est pas pilotable depuis
+# AppTest (pas d'accesseur dédié, contrairement à `st.dataframe`) : on
+# monkeypatche donc `st.data_editor` pour simuler le retour d'une édition,
+# et on vérifie ce que `_tab_table` écrit sur disque.
+# ============================================================
+
+def test_sauvegarde_tableau_conserve_ordre_motif_id(tmp_path, monkeypatch):
+    import views.motifs as motifs_module
+
+    projet = _projet(tmp_path)
+    csv_path = _ecrire_csv(projet, [
+        "0;;;;;;5.00;",
+        "1;;;;;;42.50;",
+        "2;label2;;;;;10.00;",
+    ])
+
+    def faux_data_editor(data, *args, **kwargs):
+        # Simule l'utilisateur éditant `label` pour le motif 1, sans
+        # changer l'ordre des lignes que `st.data_editor` lui présente
+        # (ordre d'affichage = usage décroissant : 1, 2, 0).
+        edited = data.copy()
+        edited.loc[edited["motif_id"] == "1", "label"] = "edite_depuis_tableau"
+        return edited
+
+    monkeypatch.setattr(motifs_module.st, "data_editor", faux_data_editor)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert not at.exception, at.exception
+
+    import pandas as pd
+    df = pd.read_csv(csv_path, sep=";", dtype=str, keep_default_na=False,
+                      encoding="utf-8-sig")
+    # Le fichier reste dans l'ordre `motif_id` écrit par `run_vame`
+    # (0, 1, 2), pas dans l'ordre d'affichage par usage décroissant
+    # (1, 2, 0) qu'aurait produit une sauvegarde de `edited` telle quelle.
+    assert list(df["motif_id"]) == ["0", "1", "2"]
+    assert df.loc[df["motif_id"] == "1", "label"].iloc[0] == "edite_depuis_tableau"
+    # Les autres lignes, non éditées, restent intactes.
+    assert df.loc[df["motif_id"] == "2", "label"].iloc[0] == "label2"
 
 
 # ============================================================

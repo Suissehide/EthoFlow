@@ -193,13 +193,12 @@ def _section_sessions(projet: Path) -> None:
     col1.metric("Sessions", n_total)
     col2.metric("Vidéos localisées", f"{n_video_ok}/{n_total}")
 
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(df, width="stretch", hide_index=True)
 
     if n_video_ok < n_total:
         st.caption(
             f"{n_total - n_video_ok} session(s) sans vidéo localisable — "
-            "re-pointe les chemins depuis la page **Vidéos & calibration** "
-            "(à venir)."
+            "re-pointe les chemins depuis la page **Vidéos & calibration**."
         )
 
 
