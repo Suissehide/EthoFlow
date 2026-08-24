@@ -46,6 +46,11 @@ class Job:
     cancel_requested: bool = False   # posé par cancel() ; l'état terminal
                                       # est décidé par le watcher, seul à
                                       # savoir quand le process meurt vraiment
+    owner_pid: int | None = None     # pid du process Python qui a lancé ce
+                                      # job (celui qui héberge son watcher) ;
+                                      # sert à distinguer "j'ai un watcher qui
+                                      # va écrire l'état terminal" de "orphelin
+                                      # d'une exécution précédente de l'app"
 
 
 # ------------------------------------------------------------------- chemins
@@ -88,6 +93,18 @@ def _argv(cmd: Command) -> list[str]:
     return to_argv(cmd)
 
 
+def _apres_reclamation_hook() -> None:
+    """Point d'ancrage pour les tests : ne fait rien en production.
+
+    Appelé par le watcher juste après `proc.wait()`, avant qu'il écrive
+    l'état terminal. Sans lui, la fenêtre entre « le process est réclamé »
+    et « l'état terminal est écrit » n'est atteignable en test que par
+    hasard (un flake ~1/20 en pratique) — ce hook permet de la bloquer
+    délibérément via `monkeypatch` pour la couvrir à coup sûr. Ne change
+    aucune décision, ne fait rien tant qu'il n'est pas monkeypatché.
+    """
+
+
 def _pid_vivant(pid: int | None) -> bool:
     if not pid:
         return False
@@ -113,10 +130,26 @@ def _liberer_verrou_si_proprietaire(project: Path, job_id: str) -> None:
 
 
 def _reconcilier(project: Path, job: Job) -> Job:
-    """Un job `running` dont le process a disparu = app tuée en cours de route."""
+    """Rattrape les jobs orphelins d'une exécution précédente de l'app.
+
+    Un job `running` dont le process a disparu a normalement un watcher
+    (thread démarré par `start()`) qui va lui-même écrire l'état terminal
+    dès que `proc.wait()` renvoie. Si ce job appartient au process Python
+    courant (`owner_pid == os.getpid()`), il A ce watcher : il ne faut
+    surtout pas lui marcher dessus entre le moment où il a réclamé le pid
+    et celui où il a écrit l'état terminal, sous peine d'écraser un
+    `cancelled` par un `interrupted` (R4.4). Seuls les jobs sans watcher
+    vivant — parce que l'app a été tuée puis relancée — ont besoin d'être
+    reconciliés ici.
+    """
     if job.state != "running" or _pid_vivant(job.pid):
         return job
-    job = replace(job, state="interrupted",
+    if job.owner_pid == os.getpid():
+        return job     # un watcher de CE process va écrire l'état terminal
+    # Défense en profondeur : un job orphelin dont l'utilisateur avait
+    # demandé l'annulation reste `cancelled`, jamais `interrupted`.
+    etat = "cancelled" if job.cancel_requested else "interrupted"
+    job = replace(job, state=etat,
                   ended_at=datetime.now().isoformat(timespec="seconds"))
     _write_job(project, job)
     _liberer_verrou_si_proprietaire(project, job.job_id)
@@ -251,7 +284,7 @@ def start(project: Path, cmd: Command) -> Job:
     job = Job(
         job_id=job_id, script=cmd.script, env=cmd.env, label=cmd.label,
         argv=argv, started_at=datetime.now().isoformat(timespec="seconds"),
-        pid=proc.pid, state="running",
+        pid=proc.pid, state="running", owner_pid=os.getpid(),
     )
     _write_job(project, job)
     _lock(project).write_text(job_id, encoding="utf-8")
@@ -265,6 +298,7 @@ def start(project: Path, cmd: Command) -> Job:
         # encore et retient le GPU.
         code = proc.wait()
         log_file.close()
+        _apres_reclamation_hook()
         courant = _read_job(project, job_id) or job
         etat = "cancelled" if courant.cancel_requested else (
             "succeeded" if code == 0 else "failed")

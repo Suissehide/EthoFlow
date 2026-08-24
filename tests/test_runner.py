@@ -158,12 +158,82 @@ def test_verrou_libere_apres_la_fin(project):
 
 
 def test_job_running_dont_le_process_a_disparu(project):
-    """App tuée pendant un job : le JSON dit running, le pid n'existe plus."""
+    """App tuée pendant un job, PUIS relancée : le JSON dit running, le pid
+    n'existe plus, et `owner_pid` désigne un process qui n'est plus le
+    nôtre (sans quoi `_reconcilier` considérerait, à raison, qu'un watcher
+    de CE process va s'en charger — voir R4.4)."""
     R.start(project, _echo())
     job = _attendre_fin(project)
-    R._write_job(project, R.replace(job, state="running", pid=999999, ended_at=None))
+    R._write_job(project, R.replace(
+        job, state="running", pid=999999, owner_pid=999998, ended_at=None))
     releve = R.current(project)
     assert releve.state == "interrupted"
+
+
+def test_reconciliation_orphelin_honore_cancel_requested(project):
+    """Régression R4.4 (défense en profondeur) : un job orphelin d'une
+    exécution précédente (owner_pid étranger, pid mort) que l'utilisateur
+    avait demandé d'annuler doit rester `cancelled`, jamais `interrupted`
+    — même quand c'est `_reconcilier`, pas le watcher d'origine, qui le
+    constate (l'app a été tuée avant que ce watcher-là ait pu écrire quoi
+    que ce soit)."""
+    R.start(project, _echo())
+    job = _attendre_fin(project)
+    orphelin = R.replace(
+        job, state="running", pid=999999, owner_pid=999998,
+        cancel_requested=True, ended_at=None)
+    R._write_job(project, orphelin)
+    releve = R.current(project)
+    assert releve.state == "cancelled"
+
+
+def test_reconciliation_ne_marche_pas_sur_lannulation_en_cours(project, monkeypatch):
+    """Régression Critical (fix round 2, R4.4) : entre le moment où le
+    watcher d'un job qu'ON a lancé réclame son process mort et celui où il
+    écrit l'état terminal, marteler `current()`/`history()` ne doit jamais
+    faire dévier l'état de l'annulation en cours vers `interrupted`.
+
+    Avant R4.4, `_reconcilier` ne distinguait pas "watcher à moi qui va
+    écrire l'état terminal" de "orphelin d'une exécution précédente" : un
+    appel concurrent pendant cette fenêtre pouvait écraser un `cancelled`
+    à venir par un `interrupted`. Constaté ~1 run sur 20 en pratique — on
+    force ici la fenêtre au lieu de compter sur la chance pour la couvrir.
+
+    `_apres_reclamation_hook` est un point d'ancrage no-op en production,
+    ajouté spécifiquement pour rendre cette fenêtre déterministe : le
+    monkeypatcher ne change aucune décision du watcher, il ne fait que le
+    bloquer un instant juste après `proc.wait()`, exactement là où la
+    fenêtre existe réellement.
+    """
+    reclame = threading.Event()
+    peut_ecrire = threading.Event()
+
+    def hook_retarde():
+        reclame.set()
+        peut_ecrire.wait(timeout=5.0)
+
+    monkeypatch.setattr(R, "_apres_reclamation_hook", hook_retarde)
+
+    R.start(project, PL.Command(
+        "ethoflow", "__test__", ["python", "-c", "import time; time.sleep(0.2)"], "long"))
+    job = R.current(project)
+    R.cancel(project, job.job_id)
+
+    # Le process est mort et réclamé (proc.wait() a rendu la main), le
+    # watcher est bloqué juste avant d'écrire l'état terminal.
+    assert reclame.wait(timeout=5.0)
+
+    # Martèle current()/history() pendant la fenêtre, comme le ferait une
+    # page Streamlit qui poll le statut : aucun appel ne doit jamais faire
+    # apparaître "interrupted".
+    for _ in range(50):
+        vu = R.current(project)
+        assert vu is None or vu.state in ("running", "cancelled")
+        assert all(j.state in ("running", "cancelled") for j in R.history(project))
+
+    peut_ecrire.set()
+    job_final = _attendre_fin(project)
+    assert job_final.state == "cancelled"
 
 
 def test_historique_du_plus_recent_au_plus_ancien(project):
