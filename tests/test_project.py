@@ -126,6 +126,93 @@ def test_set_dlc_config_cree_le_fichier_si_absent(tmp_path):
     assert P.dlc_config_path(projet) == "/modeles/x/config.yaml"
 
 
+# ============================================================
+# Task 20 — set_arena_coords / set_px_per_cm (délégation aux scripts CLI)
+# ============================================================
+
+def test_set_arena_coords_preserve_le_reste(project):
+    """Écrire les arènes ne doit pas effacer `px_per_cm` ni
+    `dlc_project_config` déjà présents — merge-write, comme `set_dlc_config`."""
+    cfg_path = project / "configs" / "pipeline_config.yaml"
+    cfg_path.write_text(yaml.safe_dump({
+        "px_per_cm": 12.5,
+        "dlc_project_config": "/modeles/souris/config.yaml",
+    }))
+    P.set_arena_coords(project, {"A1": [0, 0, 100, 100], "A2": [100, 0, 100, 100]})
+    cfg = P.read_pipeline_config(project)
+    assert cfg["default_arenes_coords"] == {"A1": [0, 0, 100, 100], "A2": [100, 0, 100, 100]}
+    assert cfg["px_per_cm"] == 12.5
+    assert cfg["dlc_project_config"] == "/modeles/souris/config.yaml"
+
+
+def test_set_px_per_cm_preserve_le_reste(project):
+    """Et l'inverse : écrire l'échelle ne doit pas effacer les arènes ni le
+    modèle DLC déjà configurés."""
+    cfg_path = project / "configs" / "pipeline_config.yaml"
+    cfg_path.write_text(yaml.safe_dump({
+        "default_arenes_coords": {"A1": [0, 0, 100, 100]},
+        "dlc_project_config": "/modeles/souris/config.yaml",
+    }))
+    P.set_px_per_cm(project, 8.421)
+    cfg = P.read_pipeline_config(project)
+    assert cfg["px_per_cm"] == 8.421
+    assert cfg["default_arenes_coords"] == {"A1": [0, 0, 100, 100]}
+    assert cfg["dlc_project_config"] == "/modeles/souris/config.yaml"
+
+
+def test_set_arena_coords_et_set_px_per_cm_coexistent(project):
+    """Les deux wrappers appelés l'un après l'autre sur le même fichier :
+    aucun n'écrase la clé de l'autre (vérifie les deux sens en une fois,
+    plus proche du scénario réel dans les deux onglets de la page)."""
+    P.set_px_per_cm(project, 10.0)
+    P.set_arena_coords(project, {"A1": [1, 2, 3, 4]})
+    cfg = P.read_pipeline_config(project)
+    assert cfg["px_per_cm"] == 10.0
+    assert cfg["default_arenes_coords"] == {"A1": [1, 2, 3, 4]}
+    assert cfg["kind"] == "single"          # posé par le fixture `project`, jamais touché
+
+
+def test_set_arena_coords_cree_le_fichier_si_absent(tmp_path):
+    projet = tmp_path / "sans-config"
+    (projet / "data").mkdir(parents=True)
+    P.set_arena_coords(projet, {"A1": [0, 0, 10, 10]})
+    assert P.arena_coords(projet) == {"A1": [0, 0, 10, 10]}
+
+
+def test_set_px_per_cm_cree_le_fichier_si_absent(tmp_path):
+    projet = tmp_path / "sans-config"
+    (projet / "data").mkdir(parents=True)
+    resultat = P.set_px_per_cm(projet, 5.0)
+    assert resultat == projet / "configs" / "pipeline_config.yaml"
+    assert P.px_per_cm(projet) == 5.0
+
+
+def test_set_arena_coords_lu_par_crop_arenes_cli(project, session_factory):
+    """La vraie validation croisée (brief Task 20) : ce que l'app écrit via
+    `set_arena_coords` doit être lu par `scripts/crop_arenes.py`, le même
+    fichier interprété de la même façon par l'app et le terminal.
+
+    La session n'a pas de `coords` propre dans sa metadata : crop_arenes.py
+    doit retomber sur `default_arenes_coords`, exactement ce que ce test
+    vient d'écrire via le wrapper de `lib/project.py` — jamais une
+    réimplémentation de la sérialisation YAML côté app.
+    """
+    P.set_arena_coords(project, {"A1": [0, 0, 20, 20]})
+    session_factory("S1", arenes=[{"id": "A1", "mouse_id": 1}])  # pas de "coords" ici
+
+    resultat = subprocess.run(
+        [sys.executable, str(P.SCRIPTS_DIR / "crop_arenes.py"),
+         "--project-dir", str(project), "--all", "--no-prompt"],
+        capture_output=True, text=True,
+    )
+    sortie = resultat.stdout + resultat.stderr
+    # La vidéo source de session_factory() est un fichier factice d'un octet
+    # (pas un vrai .mp4) : l'échec attendu est *plus loin*, sur la lecture
+    # vidéo par ffmpeg — jamais sur "pas de coords".
+    assert "pas de coords" not in sortie, sortie
+    assert "Coords par défaut chargées" in sortie, sortie
+
+
 def _creer_projet_reel(tmp_path: Path, nom: str, kind: str) -> Path:
     """Lance le vrai create_project.py — pas un fixture qui invente la
     forme du YAML. Régression Critical 5 : tests/test_project.py écrivait

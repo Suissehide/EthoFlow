@@ -17,6 +17,7 @@ dependencies:
   - pytables                       # backend HDF5 pour pandas.read_hdf (sortie DLC)
   - pip:
     - streamlit>=1.33
+    - streamlit-image-coordinates>=0.1.9
     - opencv-python>=4.8
     - pandas>=2.0
     - numpy>=1.24

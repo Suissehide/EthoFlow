@@ -16,9 +16,17 @@ testable) :
    crop puis DLC single-animal, l'alternative à la voie A (DLC multi-animal
    puis split, page Pose/Nettoyage).
 
-Onglets ``Sessions`` et ``Crop`` construits ici ; la Task 20 ajoute
-``Calibration arènes`` et ``Échelle px/cm`` au même `st.tabs(...)` dans
-`render()`, sans restructurer le reste du fichier.
+4. **Calibrer au clic.** `scripts/calibrate_arenes.py` et
+   `scripts/calibrate_scale.py` ouvrent une fenêtre OpenCV et demandent de
+   cliquer — impossible à travers un serveur web. `streamlit_image_coordinates`
+   reproduit le geste dans le navigateur ; l'écriture du résultat dans
+   `configs/pipeline_config.yaml` passe par `lib.project.set_arena_coords`/
+   `set_px_per_cm`, qui délèguent aux fonctions des scripts
+   (`save_coords_default`/`write_scale`) — la vue ne réimplémente jamais
+   la sérialisation YAML.
+
+Quatre onglets : ``Sessions``, ``Crop``, ``Calibration arènes``,
+``Échelle px/cm``.
 
 Aucune commande n'est exécutée ici : `lib.pipeline` construit,
 `views._job.bouton_lancer` lance via `lib.runner`.
@@ -27,15 +35,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import cv2
+import numpy as np
 import pandas as pd
 import streamlit as st
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 import lib.pipeline as PL
-from lib.config import arena_coords, project_kind, require_project
+from lib.config import arena_coords, project_kind, px_per_cm, require_project, set_arena_coords, set_px_per_cm
 from lib.icons import lucide_title
 from lib import sessions as S
 from lib import video as V
 from views import _job, _widgets
+
+# Labels des arènes dans l'ordre où elles sont cliquées — `crop_arenes.py:130`
+# fait `x, y, w, h = coords`, donc l'ordre des clés n'a pas d'importance pour
+# le CLI, mais A1→A4 est la convention du reste du projet (`calibrate_arenes.py`,
+# metadata `arenes[].id`).
+_LABELS_ARENES = ["A1", "A2", "A3", "A4"]
 
 # Écart de fps (en images/seconde) au-delà duquel on alerte visiblement.
 # Une valeur strictement nulle ferait ressortir des arrondis de sonde sans
@@ -399,6 +416,265 @@ def _onglet_crop(projet: Path) -> None:
 
 
 # ============================================================
+# Sélection commune session + frame (onglets Calibration arènes / Échelle)
+# ============================================================
+
+def _sessions_avec_video(projet: Path) -> list[str]:
+    """Sessions dont `list_sessions` déclare une vidéo source valide (`vidéo == "OK"`)."""
+    df = S.list_sessions(projet)
+    if df.empty:
+        return []
+    return [sid for sid, statut in zip(df["session_id"], df["vidéo"]) if statut == "OK"]
+
+
+def _choisir_frame_session(projet: Path, *, cle: str) -> tuple[str, np.ndarray] | None:
+    """Sélecteur session + index de frame ; renvoie `(identifiant_source, frame_BGR)` ou `None`.
+
+    `identifiant_source` sert de clé de remise à zéro de l'état de clics
+    (nouvelle session ou nouvelle frame = anciens clics sans rapport).
+    """
+    sessions = _sessions_avec_video(projet)
+    if not sessions:
+        st.info(
+            "Aucune session avec une vidéo source valide pour l'instant — "
+            "voir l'onglet **Sessions** pour re-pointer une vidéo manquante."
+        )
+        return None
+
+    session_id = st.selectbox("Session", options=sessions, key=f"{cle}_session")
+    meta = S.load_metadata(projet, session_id) or {}
+    chemin = Path(meta["source_video"])
+    info = _probe_cache(str(chemin))
+    if not info.n_frames:
+        st.warning(f"`{chemin}` : nombre de frames illisible, impossible d'en extraire une.")
+        return None
+
+    defaut = min(info.n_frames // 2, info.n_frames - 1)
+    frame_idx = st.number_input(
+        "Index de la frame", min_value=0, max_value=info.n_frames - 1,
+        value=defaut, key=f"{cle}_frame",
+        help=f"Vidéo de {info.n_frames} frames.",
+    )
+    frame = V.grab_frame(chemin, index=int(frame_idx))
+    if frame is None:
+        st.warning(f"Impossible d'extraire la frame {frame_idx} de `{chemin}`.")
+        return None
+    return f"session:{chemin}#{frame_idx}", frame
+
+
+# ============================================================
+# Onglet Calibration arènes — deux clics par arène, ajustement au pixel
+# ============================================================
+
+def _reset_arenes_clics() -> None:
+    st.session_state["calib_arenes_rects"] = []
+    st.session_state["calib_arenes_premier_clic"] = None
+    for label in _LABELS_ARENES:
+        for champ in ("x", "y", "w", "h"):
+            st.session_state.pop(f"calib_arenes_{label}_{champ}", None)
+
+
+def _onglet_calibration_arenes(projet: Path) -> None:
+    st.markdown(lucide_title("waypoints", "Calibration des arènes"), unsafe_allow_html=True)
+    st.caption(
+        "Deux clics par arène — les deux coins opposés du rectangle — dans "
+        "l'ordre A1 → A2 → A3 → A4. Écrit `default_arenes_coords` dans "
+        "`configs/pipeline_config.yaml` (via `calibrate_arenes.save_coords_default`), "
+        "utilisé par `crop_arenes.py`/`assign_arenas.py` comme repli pour "
+        "toute session sans coordonnées propres dans sa `metadata.yaml`."
+    )
+
+    choix = _choisir_frame_session(projet, cle="calib_arenes")
+    if choix is None:
+        return
+    source_actuelle, frame = choix
+
+    if st.session_state.get("calib_arenes_source") != source_actuelle:
+        st.session_state["calib_arenes_source"] = source_actuelle
+        _reset_arenes_clics()
+
+    rects: list[list[int]] = st.session_state.setdefault("calib_arenes_rects", [])
+    coords_actuelles = {_LABELS_ARENES[i]: r for i, r in enumerate(rects)}
+
+    frame_rgb = V.to_rgb(frame)
+    apercu = V.draw_arenas(frame_rgb, coords_actuelles) if coords_actuelles else frame_rgb
+
+    if len(rects) >= len(_LABELS_ARENES):
+        st.success(
+            f"{len(_LABELS_ARENES)} arènes définies. Ajuste-les au pixel "
+            "ci-dessous si besoin, puis enregistre."
+        )
+    else:
+        label = _LABELS_ARENES[len(rects)]
+        etape = "premier coin" if st.session_state.get("calib_arenes_premier_clic") is None else "coin opposé"
+        st.caption(f"Clique le **{etape}** de l'arène **{label}** ({len(rects)}/{len(_LABELS_ARENES)}).")
+
+    valeur = streamlit_image_coordinates(apercu, key=f"calib_arenes_clic__{source_actuelle}")
+
+    if (valeur is not None and len(rects) < len(_LABELS_ARENES)
+            and valeur.get("unix_time") != st.session_state.get("calib_arenes_dernier_clic")):
+        st.session_state["calib_arenes_dernier_clic"] = valeur.get("unix_time")
+        point = (int(valeur["x"]), int(valeur["y"]))
+        premier = st.session_state.get("calib_arenes_premier_clic")
+        if premier is None:
+            st.session_state["calib_arenes_premier_clic"] = point
+        else:
+            rects.append(V.rect_from_two_points(premier, point))
+            st.session_state["calib_arenes_premier_clic"] = None
+            st.rerun()  # redessine immédiatement avec le rectangle qui vient d'être posé
+
+    if st.button("Recommencer les clics", key="calib_arenes_recommencer", disabled=not rects):
+        _reset_arenes_clics()
+        st.rerun()
+
+    if rects:
+        st.markdown(lucide_title("settings", "Ajustement fin (pixels)"), unsafe_allow_html=True)
+        st.caption(
+            "Recliquer précisément est pénible — corrige de quelques "
+            "pixels ici plutôt que de recommencer."
+        )
+        for i, rect in enumerate(rects):
+            label = _LABELS_ARENES[i]
+            st.caption(f"**{label}**")
+            col_x, col_y, col_w, col_h = st.columns(4)
+            x = col_x.number_input("x", value=int(rect[0]), step=1, key=f"calib_arenes_{label}_x")
+            y = col_y.number_input("y", value=int(rect[1]), step=1, key=f"calib_arenes_{label}_y")
+            w = col_w.number_input("largeur", value=int(rect[2]), min_value=1, step=1, key=f"calib_arenes_{label}_w")
+            h = col_h.number_input("hauteur", value=int(rect[3]), min_value=1, step=1, key=f"calib_arenes_{label}_h")
+            rects[i] = [int(x), int(y), int(w), int(h)]
+
+        if len(rects) == len(_LABELS_ARENES):
+            if st.button("Enregistrer les 4 arènes", key="calib_arenes_enregistrer", type="primary"):
+                coords = {_LABELS_ARENES[i]: rects[i] for i in range(len(_LABELS_ARENES))}
+                set_arena_coords(projet, coords)
+                st.cache_data.clear()
+                st.toast("Coordonnées des 4 arènes enregistrées dans pipeline_config.yaml.")
+        else:
+            st.caption(
+                f"{len(rects)}/{len(_LABELS_ARENES)} arènes définies — "
+                f"encore {len(_LABELS_ARENES) - len(rects)} avant de pouvoir enregistrer."
+            )
+
+
+# ============================================================
+# Onglet Échelle px/cm — deux clics sur une distance connue, ou saisie directe
+# ============================================================
+
+def _reset_echelle_clics() -> None:
+    st.session_state["echelle_points"] = []
+
+
+def _onglet_echelle(projet: Path) -> None:
+    st.markdown(lucide_title("scan-line", "Échelle px/cm"), unsafe_allow_html=True)
+    st.caption(
+        "Nécessaire pour détecter les vitesses aberrantes dans "
+        "`prepare_vame_input_custom.py` — sans échelle, un déplacement en "
+        "pixels ne peut pas être converti en vitesse réelle."
+    )
+    st.info(
+        "**Conseil du README** : photographie une règle plutôt que de "
+        "mesurer les dimensions de l'arène — plus l'objet mesuré est "
+        "grand, plus la distorsion de lentille fausse la conversion "
+        "pixels → centimètres."
+    )
+
+    actuelle = px_per_cm(projet)
+    if actuelle:
+        st.caption(
+            f"Échelle actuellement enregistrée : **{actuelle:.3f} px/cm** "
+            f"(1 px = {10 / actuelle:.2f} mm)."
+        )
+
+    source = st.radio(
+        "Source de l'image à cliquer",
+        ["Frame d'une vidéo de session", "Photo importée (règle)"],
+        key="echelle_source_mode", horizontal=True,
+    )
+
+    frame = None
+    source_actuelle: str | None = None
+    if source == "Frame d'une vidéo de session":
+        choix = _choisir_frame_session(projet, cle="echelle")
+        if choix is not None:
+            source_actuelle, frame = choix
+    else:
+        fichier = st.file_uploader(
+            "Photo d'une règle (ou de tout objet de longueur connue)",
+            type=["png", "jpg", "jpeg"], key="echelle_upload",
+        )
+        if fichier is not None:
+            octets = np.frombuffer(fichier.getvalue(), dtype=np.uint8)
+            frame = cv2.imdecode(octets, cv2.IMREAD_COLOR)
+            if frame is None:
+                st.error(f"« {fichier.name} » n'a pas pu être lu comme image.")
+            else:
+                source_actuelle = f"image:{fichier.name}#{fichier.size}"
+
+    if frame is not None and source_actuelle is not None:
+        if st.session_state.get("echelle_source") != source_actuelle:
+            st.session_state["echelle_source"] = source_actuelle
+            _reset_echelle_clics()
+
+        points: list[tuple[int, int]] = st.session_state.setdefault("echelle_points", [])
+        frame_rgb = V.to_rgb(frame)
+        apercu = V.draw_scale_line(frame_rgb, points[0], points[1]) if len(points) == 2 else frame_rgb
+
+        if len(points) < 2:
+            etape = "première" if not points else "seconde"
+            st.caption(f"Clique la **{etape}** extrémité de la distance connue ({len(points)}/2).")
+
+        valeur = streamlit_image_coordinates(apercu, key=f"echelle_clic__{source_actuelle}")
+
+        if (valeur is not None and len(points) < 2
+                and valeur.get("unix_time") != st.session_state.get("echelle_dernier_clic")):
+            st.session_state["echelle_dernier_clic"] = valeur.get("unix_time")
+            points.append((int(valeur["x"]), int(valeur["y"])))
+            if len(points) == 2:
+                st.rerun()  # redessine immédiatement le segment
+
+        if st.button("Recommencer les clics", key="echelle_recommencer", disabled=not points):
+            _reset_echelle_clics()
+            st.rerun()
+
+        if len(points) == 2:
+            distance_px = V.distance_from_two_points(points[0], points[1])
+            st.write(f"Distance mesurée : **{distance_px:.1f} px**")
+            known_cm = st.number_input(
+                "Distance réelle entre les deux points cliqués (cm)",
+                min_value=0.01, value=10.0, step=0.5, key="echelle_known_cm",
+            )
+            valeur_calculee = distance_px / known_cm
+            st.write(
+                f"Échelle calculée : **{valeur_calculee:.3f} px/cm** "
+                f"(1 px = {10 / valeur_calculee:.2f} mm)."
+            )
+            if st.button("Enregistrer cette échelle", key="echelle_enregistrer_clics", type="primary"):
+                set_px_per_cm(projet, valeur_calculee)
+                st.toast(f"px_per_cm = {valeur_calculee:.3f} enregistré dans pipeline_config.yaml.")
+    else:
+        st.caption(
+            "Choisis une source d'image ci-dessus pour calibrer par les "
+            "clics, ou saisis directement une valeur déjà connue plus bas."
+        )
+
+    st.divider()
+    st.markdown(
+        lucide_title("save", "Saisie directe d'une valeur déjà connue"),
+        unsafe_allow_html=True,
+    )
+    st.caption("Équivalent de `calibrate_scale.py --set <valeur>` : écrit px_per_cm sans clic.")
+    valeur_directe = st.number_input(
+        "px/cm connu", min_value=0.0, value=0.0, step=0.1, key="echelle_valeur_directe",
+    )
+    if st.button(
+        "Enregistrer cette valeur", key="echelle_enregistrer_directe",
+        disabled=valeur_directe <= 0,
+    ):
+        set_px_per_cm(projet, valeur_directe)
+        st.toast(f"px_per_cm = {valeur_directe:.3f} enregistré dans pipeline_config.yaml.")
+
+
+# ============================================================
 # Page
 # ============================================================
 
@@ -414,8 +690,14 @@ def render() -> None:
     )
     st.caption(f"Projet détecté comme `{project_kind(projet)}`.")
 
-    onglet_sessions, onglet_crop = st.tabs(["Sessions", "Crop"])
+    onglet_sessions, onglet_crop, onglet_calibration_arenes, onglet_echelle = st.tabs(
+        ["Sessions", "Crop", "Calibration arènes", "Échelle px/cm"]
+    )
     with onglet_sessions:
         _onglet_sessions(projet)
     with onglet_crop:
         _onglet_crop(projet)
+    with onglet_calibration_arenes:
+        _onglet_calibration_arenes(projet)
+    with onglet_echelle:
+        _onglet_echelle(projet)

@@ -15,6 +15,10 @@ Trois besoins concrets, tous formulés par le chercheur :
    chaque `metadata.yaml`.
 3. Dessiner les rectangles d'arène sur une frame, pour la page de
    calibrage au clic.
+4. Convertir des paires de clics en géométrie (rectangle d'arène,
+   distance en pixels) pour les onglets de calibration — Task 20. Pure et
+   testable sans Streamlit ni `streamlit-image-coordinates`, qui n'est
+   qu'une source de points `(x, y)` pour ces fonctions.
 
 Ce module ne doit JAMAIS importer Streamlit, ni directement ni
 transitivement : les pages l'appellent pour chaque session d'une liste,
@@ -22,6 +26,7 @@ et une exception ou une dépendance lourde ici casserait la page entière.
 """
 from __future__ import annotations
 
+import math
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -134,6 +139,56 @@ def draw_arenas(frame: np.ndarray, coords: dict[str, list[int]]) -> np.ndarray:
         cv2.rectangle(sortie, (int(x), int(y)), (int(x + w), int(y + h)), (0, 255, 0), 2)
         cv2.putText(sortie, str(label), (int(x) + 4, int(y) + 16),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1, cv2.LINE_AA)
+    return sortie
+
+
+def to_rgb(frame: np.ndarray) -> np.ndarray:
+    """BGR (convention OpenCV, celle de `grab_frame`/`draw_arenas`) → RGB.
+
+    `streamlit_image_coordinates` construit l'image affichée via
+    `PIL.Image.fromarray`, qui interprète un tableau 3 canaux comme du RGB.
+    Sans cette conversion, une frame couleur s'affiche avec le rouge et le
+    bleu inversés dans le navigateur (les rectangles verts de `draw_arenas`
+    restent verts par coïncidence — canal G symétrique — mais une vraie
+    photo, elle, se verrait fausse).
+    """
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+
+def rect_from_two_points(p1: tuple[int, int], p2: tuple[int, int]) -> list[int]:
+    """Deux clics sur des coins opposés → `[x, y, w, h]` (format `crop_arenes.py`).
+
+    Peu importe quel coin est cliqué en premier ou l'ordre haut/bas,
+    gauche/droite : `x, y` est toujours le coin haut-gauche du rectangle.
+    """
+    x0, y0 = p1
+    x1, y1 = p2
+    x, y = min(x0, x1), min(y0, y1)
+    w, h = abs(x1 - x0), abs(y1 - y0)
+    return [int(x), int(y), int(w), int(h)]
+
+
+def distance_from_two_points(p1: tuple[int, int], p2: tuple[int, int]) -> float:
+    """Distance euclidienne en pixels entre deux clics — pour l'échelle px/cm."""
+    return float(math.hypot(p2[0] - p1[0], p2[1] - p1[1]))
+
+
+def draw_scale_line(frame: np.ndarray, p1: tuple[int, int], p2: tuple[int, int]) -> np.ndarray:
+    """Dessine le segment de calibration d'échelle sur une copie de `frame`.
+
+    Même précaution que `draw_arenas` : ne jamais muter l'original, une
+    page rappelle cette fonction à chaque rerun sur la même frame mise en
+    cache pendant que l'utilisateur clique ses deux points.
+    """
+    sortie = frame.copy()
+    pt1 = (int(p1[0]), int(p1[1]))
+    pt2 = (int(p2[0]), int(p2[1]))
+    cv2.line(sortie, pt1, pt2, (255, 0, 255), 2, cv2.LINE_AA)
+    cv2.circle(sortie, pt1, 5, (255, 0, 255), -1)
+    cv2.circle(sortie, pt2, 5, (255, 0, 255), -1)
+    distance = distance_from_two_points(p1, p2)
+    cv2.putText(sortie, f"{distance:.1f} px", (pt1[0] + 8, pt1[1] - 8),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2, cv2.LINE_AA)
     return sortie
 
 

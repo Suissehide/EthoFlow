@@ -26,6 +26,8 @@ from interactive import (  # noqa: E402
     DEFAULT_PROJECTS_ROOT,
 )
 from sync_from_excel import find_project_excel as _find_project_excel  # noqa: E402
+from calibrate_arenes import save_coords_default as _save_arena_coords  # noqa: E402
+from calibrate_scale import write_scale as _write_scale  # noqa: E402
 
 # Préférences d'interface uniquement (racines, dernier projet ouvert).
 # Jamais lues par les scripts CLI.
@@ -145,6 +147,24 @@ def set_dlc_config(project: Path, dlc_config: str | Path) -> Path:
         encoding="utf-8",
     )
     return cfg_path
+
+
+def set_arena_coords(project: Path, coords: dict[str, list[int]]) -> None:
+    """Écrit `default_arenes_coords` — délègue à `calibrate_arenes.save_coords_default`.
+
+    Task 20 (calibration au clic dans le navigateur) : la vue ne doit
+    jamais réimplémenter la sérialisation YAML de `pipeline_config.yaml`,
+    ce format appartient au script CLI — deux implémentations divergeraient
+    au premier changement de forme. Même patron que `set_dlc_config`
+    (merge-write, ne touche à aucune autre clé), mais l'écriture elle-même
+    est faite par le script, pas ici.
+    """
+    _save_arena_coords(Path(project), coords)
+
+
+def set_px_per_cm(project: Path, value: float) -> Path:
+    """Écrit `px_per_cm` — délègue à `calibrate_scale.write_scale` (même raison que ci-dessus)."""
+    return _write_scale(Path(project), value)
 
 
 def _session_a_des_arenes(project: Path) -> bool:

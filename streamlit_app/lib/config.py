@@ -4,7 +4,7 @@ Seul module de `lib/` autorisé à importer Streamlit : il lit le projet
 courant dans le `session_state`. Toute la logique testable vit dans
 `lib/project.py`.
 
-Les 18 noms ré-exportés de `lib.project` (SCRIPTS_DIR, arena_coords, etc.)
+Les 20 noms ré-exportés de `lib.project` (SCRIPTS_DIR, arena_coords, etc.)
 sont une commodité pour la couche vue : elle importe d'ici plutôt que d'avoir
 deux imports. `lib/project.py` en reste propriétaire et lieu de test — aucune
 modification ne doit leur être apportée ici.
@@ -34,7 +34,9 @@ from lib.project import (  # noqa: F401  (ré-exports pour les vues)
     px_per_cm,
     read_pipeline_config,
     save_prefs,
+    set_arena_coords,
     set_dlc_config,
+    set_px_per_cm,
 )
 
 _CLE = "current_project_path"

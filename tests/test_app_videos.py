@@ -25,6 +25,11 @@ REPO = Path(__file__).resolve().parent.parent
 APP_PY = str(REPO / "streamlit_app" / "app.py")
 
 
+def _pipeline_config(projet: Path) -> dict:
+    chemin = projet / "configs" / "pipeline_config.yaml"
+    return yaml.safe_load(chemin.read_text()) if chemin.is_file() else {}
+
+
 @pytest.fixture
 def video_reelle(tmp_path):
     cv2 = pytest.importorskip("cv2")
@@ -297,3 +302,214 @@ def test_repointage_preserve_accents_et_structures_imbriquees(
     assert meta_apres["notes"] == meta_avant["notes"]
     assert meta_apres["arenes"] == arenes          # structure imbriquée intacte
     assert set(meta_apres) == set(meta_avant)
+
+
+# ============================================================
+# Task 20 — Calibration arènes / Échelle px/cm
+# ============================================================
+#
+# `streamlit_image_coordinates` est un composant custom (iframe) : AppTest
+# n'a pas de méthode pour lui simuler un clic de souris (contrairement à
+# `.button.click()` ou `.text_input.set_value()`, qui existent pour les
+# widgets natifs). Vérifié empiriquement : dans l'arbre d'éléments, il
+# apparaît comme `UnknownElement` avec `.type == "component_instance"`, et
+# cette classe n'expose qu'une propriété `.value` en lecture seule.
+#
+# Ce que le composant retourne à Streamlit est en revanche un contrat
+# documenté et stable : un dict `{"x", "y", "width", "height", "unix_time"}`
+# stocké sous `st.session_state[cle_du_widget]` — exactement ce que
+# `streamlit.testing.v1.AppTest` permet d'écrire directement AVANT
+# `.run()`. On s'en sert ici pour piloter le vrai code de production (la
+# détection de « nouveau clic » via `unix_time`, l'accumulation en
+# rectangle/segment, l'écriture finale) sans jamais avoir à interagir avec
+# le rendu de l'image elle-même. Ce n'est pas un test qui « fait semblant » :
+# c'est la même frontière que le composant utilise pour parler à Streamlit,
+# poussée à la main plutôt que par un vrai navigateur.
+#
+# La géométrie pure (deux clics → rectangle, deux clics → distance) est
+# testée séparément et sans AppTest dans `tests/test_video.py`.
+
+def _cle_clic_arenes(chemin, frame_idx: int) -> str:
+    return f"calib_arenes_clic__session:{chemin}#{frame_idx}"
+
+
+def _cle_clic_echelle_video(chemin, frame_idx: int) -> str:
+    return f"echelle_clic__session:{chemin}#{frame_idx}"
+
+
+def test_calibration_arenes_quatre_clics_ajustement_et_enregistrement(
+    tmp_path, monkeypatch, video_reelle,
+):
+    projet = _projet(tmp_path, kind="multi")
+    video = video_reelle(tmp_path / "videos", fps=10.0, n=20, w=64, h=48)
+    _ecrire_session(projet, "S1", source_video=video)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    onglets = {t.proto.label: t for t in at.tabs}
+    assert "Calibration arènes" in onglets, list(onglets)
+
+    # Frame par défaut = min(n_frames // 2, n_frames - 1) = 10 pour n=20.
+    cle_clic = _cle_clic_arenes(video, 10)
+
+    # Quatre paires de clics (coins opposés) → quatre rectangles A1..A4.
+    points = [
+        ((5, 5), (15, 15)),
+        ((20, 5), (30, 20)),
+        ((5, 25), (15, 35)),
+        ((20, 25), (35, 40)),
+    ]
+    unix_time = 1.0
+    for p1, p2 in points:
+        at.session_state[cle_clic] = {"x": p1[0], "y": p1[1], "unix_time": unix_time}
+        at.run()
+        assert not at.exception, at.exception
+        unix_time += 1
+        at.session_state[cle_clic] = {"x": p2[0], "y": p2[1], "unix_time": unix_time}
+        at.run()
+        assert not at.exception, at.exception
+        unix_time += 1
+
+    attendu = {
+        "A1": [5, 5, 10, 10],
+        "A2": [20, 5, 10, 15],
+        "A3": [5, 25, 10, 10],
+        "A4": [20, 25, 15, 15],
+    }
+    assert at.session_state["calib_arenes_rects"] == [attendu[f"A{i+1}"] for i in range(4)]
+
+    # Ajustement fin : nudge de A1.x de +3 px via le number_input dédié.
+    nums = {n.key: n for n in at.number_input}
+    assert "calib_arenes_A1_x" in nums, list(nums)
+    nums["calib_arenes_A1_x"].set_value(8).run()
+    assert not at.exception, at.exception
+
+    boutons = {b.key: b for b in at.button}
+    assert "calib_arenes_enregistrer" in boutons, list(boutons)
+    boutons["calib_arenes_enregistrer"].click().run()
+    assert not at.exception, at.exception
+
+    cfg = _pipeline_config(projet)
+    ecrites = cfg["default_arenes_coords"]
+    assert ecrites["A1"] == [8, 5, 10, 10]   # x nudgé, reste inchangé
+    assert ecrites["A2"] == attendu["A2"]
+    assert ecrites["A3"] == attendu["A3"]
+    assert ecrites["A4"] == attendu["A4"]
+
+
+def test_calibration_arenes_bouton_enregistrer_absent_avant_quatre_arenes(
+    tmp_path, monkeypatch, video_reelle,
+):
+    projet = _projet(tmp_path, kind="multi")
+    video = video_reelle(tmp_path / "videos", fps=10.0, n=20, w=64, h=48)
+    _ecrire_session(projet, "S1", source_video=video)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    cle_clic = _cle_clic_arenes(video, 10)
+
+    at.session_state[cle_clic] = {"x": 5, "y": 5, "unix_time": 1.0}
+    at.run()
+    at.session_state[cle_clic] = {"x": 15, "y": 15, "unix_time": 2.0}
+    at.run()
+    assert not at.exception, at.exception
+
+    assert len(at.session_state["calib_arenes_rects"]) == 1
+    boutons = {b.key: b for b in at.button}
+    assert "calib_arenes_enregistrer" not in boutons
+    assert "calib_arenes_recommencer" in boutons
+    assert _pipeline_config(projet).get("default_arenes_coords") in (None, {})
+
+
+def test_echelle_deux_clics_calcule_et_enregistre_px_per_cm(
+    tmp_path, monkeypatch, video_reelle,
+):
+    projet = _projet(tmp_path, kind="single")
+    video = video_reelle(tmp_path / "videos", fps=10.0, n=20, w=64, h=48)
+    _ecrire_session(projet, "S1", source_video=video)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    radios = {r.key: r for r in at.radio}
+    assert "echelle_source_mode" in radios
+    radios["echelle_source_mode"].set_value("Frame d'une vidéo de session").run()
+    assert not at.exception, at.exception
+
+    cle_clic = _cle_clic_echelle_video(video, 10)
+    at.session_state[cle_clic] = {"x": 10, "y": 10, "unix_time": 1.0}
+    at.run()
+    at.session_state[cle_clic] = {"x": 10, "y": 30, "unix_time": 2.0}  # 20 px verticaux
+    at.run()
+    assert not at.exception, at.exception
+
+    nums = {n.key: n for n in at.number_input}
+    assert "echelle_known_cm" in nums, list(nums)
+    nums["echelle_known_cm"].set_value(10.0).run()
+    assert not at.exception, at.exception
+
+    # Distance mesurée affichée : 20 px pour 10 cm déclarés → 2 px/cm.
+    textes = [w.value for w in at.markdown] + [c.value for c in at.caption]
+    assert any("20.0" in t and "px" in t for t in textes), textes
+
+    boutons = {b.key: b for b in at.button}
+    assert "echelle_enregistrer_clics" in boutons, list(boutons)
+    boutons["echelle_enregistrer_clics"].click().run()
+    assert not at.exception, at.exception
+
+    assert _pipeline_config(projet)["px_per_cm"] == pytest.approx(2.0)
+
+
+def test_echelle_photo_importee_comme_source_alternative(tmp_path, monkeypatch):
+    """Le brief demande explicitement une source « photo de règle », pas
+    seulement des frames de vidéo (conseil du README sur la distorsion de
+    lentille)."""
+    cv2 = pytest.importorskip("cv2")
+    projet = _projet(tmp_path, kind="single")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    radios = {r.key: r for r in at.radio}
+    radios["echelle_source_mode"].set_value("Photo importée (règle)").run()
+    assert not at.exception, at.exception
+
+    uploaders = {u.key: u for u in at.file_uploader}
+    assert "echelle_upload" in uploaders, list(uploaders)
+
+    ok, buf = cv2.imencode(".png", np.zeros((30, 30, 3), dtype=np.uint8))
+    assert ok
+    uploaders["echelle_upload"].set_value(("regle.png", buf.tobytes(), "image/png")).run()
+    assert not at.exception, at.exception
+
+    cle_clic = "echelle_clic__image:regle.png#" + str(len(buf.tobytes()))
+    at.session_state[cle_clic] = {"x": 2, "y": 2, "unix_time": 1.0}
+    at.run()
+    at.session_state[cle_clic] = {"x": 2, "y": 12, "unix_time": 2.0}
+    at.run()
+    assert not at.exception, at.exception
+    assert at.session_state["echelle_points"] == [(2, 2), (2, 12)]
+
+
+def test_echelle_saisie_directe_equivalent_du_set(tmp_path, monkeypatch):
+    """Équivalent de `calibrate_scale.py --set 12.5` : pas de clic du tout."""
+    projet = _projet(tmp_path, kind="single")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    nums = {n.key: n for n in at.number_input}
+    assert "echelle_valeur_directe" in nums
+    nums["echelle_valeur_directe"].set_value(12.5).run()
+    assert not at.exception, at.exception
+
+    boutons = {b.key: b for b in at.button}
+    assert "echelle_enregistrer_directe" in boutons
+    boutons["echelle_enregistrer_directe"].click().run()
+    assert not at.exception, at.exception
+
+    assert _pipeline_config(projet)["px_per_cm"] == pytest.approx(12.5)
+
+
+def test_echelle_valeur_actuelle_affichee_si_deja_configuree(tmp_path, monkeypatch):
+    projet = _projet(tmp_path, kind="single")
+    (projet / "configs" / "pipeline_config.yaml").write_text(
+        yaml.safe_dump({"kind": "single", "px_per_cm": 4.0}), encoding="utf-8",
+    )
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    textes = [c.value for c in at.caption]
+    assert any("4.000 px/cm" in t for t in textes), textes

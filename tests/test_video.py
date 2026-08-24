@@ -78,3 +78,43 @@ def test_relink_retrouve_les_videos_deplacees(project, session_factory, tmp_path
 def test_relink_ignore_les_sessions_deja_ok(project, session_factory, tmp_path):
     session_factory("BV-971")           # vidéo présente et valide
     assert V.find_relinks(project, tmp_path) == []
+
+
+# ============================================================
+# Géométrie des clics (Task 20) — logique pure sous les onglets de calibration.
+# ============================================================
+
+def test_to_rgb_inverse_les_canaux():
+    # Pixel bleu pur en BGR (convention OpenCV) : B=255, G=0, R=0.
+    frame_bgr = np.zeros((2, 2, 3), dtype=np.uint8)
+    frame_bgr[:, :, 0] = 255
+    rgb = V.to_rgb(frame_bgr)
+    # En RGB, le même pixel doit porter la valeur sur le canal R (indice 0).
+    assert (rgb[:, :, 0] == 0).all()
+    assert (rgb[:, :, 2] == 255).all()
+
+
+def test_rect_from_two_points_coins_opposes_ordre_quelconque():
+    # Coin bas-droit cliqué en premier, coin haut-gauche en second.
+    assert V.rect_from_two_points((30, 40), (10, 10)) == [10, 10, 20, 30]
+
+
+def test_rect_from_two_points_meme_resultat_quel_que_soit_lordre_des_clics():
+    a, b = (10, 10), (30, 40)
+    assert V.rect_from_two_points(a, b) == V.rect_from_two_points(b, a)
+
+
+def test_distance_from_two_points_pythagore():
+    assert V.distance_from_two_points((0, 0), (3, 4)) == 5.0
+
+
+def test_distance_from_two_points_symetrique():
+    p1, p2 = (5, 5), (12, 20)
+    assert V.distance_from_two_points(p1, p2) == V.distance_from_two_points(p2, p1)
+
+
+def test_draw_scale_line_ne_modifie_pas_loriginal():
+    frame = np.zeros((100, 100, 3), dtype=np.uint8)
+    sortie = V.draw_scale_line(frame, (10, 10), (60, 10))
+    assert frame.sum() == 0
+    assert sortie.sum() > 0
