@@ -549,7 +549,9 @@ motif_id;label;category;confidence;qc_inspected_sessions;notes;usage_pct;video
 1;walking;Locomotion;high;BV-970,BV-971;;12.07;results/community_videos/motif_1.mp4
 ```
 
-Un motif ininterprétable (bruit de tracking, animal hors champ) : mets `artifact` dans `category`, `analyze_vame.py` l'exclura des stats au lieu de le compter comme un comportement.
+Un motif ininterprétable (bruit de tracking, animal hors champ) : mets `artifact` dans **`confidence`**, `analyze_vame.py` l'exclura des stats au lieu de le compter comme un comportement.
+
+> `artifact` est aussi accepté dans `category`, parce que cette section l'a longtemps indiqué là et que des CSV annotés ainsi existent. Les deux marchent, `confidence` est l'emplacement canonique — `category` est réservée aux huit valeurs ETHOGRAM, dont `artifact` ne fait pas partie.
 
 Ce CSV est lu par toutes les analyses en aval. Sans lui, les figures affichent `motif_0`, `motif_1`, etc.
 

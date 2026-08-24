@@ -287,20 +287,40 @@ def motif_display(motif_id: int, labels: dict[int, dict] | dict[int, str]) -> st
 
 
 def motif_category(motif_id: int, labels: dict[int, dict]) -> str | None:
-    """Retourne la catégorie ETHOGRAM pour ce motif, ou None."""
+    """Retourne la catégorie ETHOGRAM pour ce motif, ou None.
+
+    Un motif marqué artifact n'a pas de catégorie : la renvoyer formerait
+    un faux groupe « artifact » dans les analyses par catégorie.
+    """
     entry = labels.get(motif_id)
     if not isinstance(entry, dict):
+        return None
+    if is_artifact_motif(motif_id, labels):
         return None
     return entry.get("category")
 
 
 def is_artifact_motif(motif_id: int, labels: dict[int, dict]) -> bool:
-    """True si le motif est marqué confidence=artifact (à exclure de l'analyse)."""
+    """True si le motif est marqué artifact, donc à exclure de l'analyse.
+
+    La marque est acceptée dans `confidence` — l'emplacement canonique —
+    **ou** dans `category`, parce que le README a longtemps indiqué
+    `category` et que des CSV annotés ainsi existent déjà. Ne reconnaître
+    qu'une seule des deux colonnes laisse le motif compté comme un
+    comportement, silencieusement.
+
+    `artifact` n'appartient à aucune catégorie ETHOGRAM, donc la valeur est
+    sans ambiguïté dans les deux colonnes. Comparaison insensible à la
+    casse et aux espaces de bord.
+    """
     entry = labels.get(motif_id)
     if not isinstance(entry, dict):
         return False
-    conf = entry.get("confidence")
-    return conf is not None and conf.lower() == "artifact"
+    for champ in ("confidence", "category"):
+        valeur = entry.get(champ)
+        if valeur is not None and str(valeur).strip().lower() == "artifact":
+            return True
+    return False
 
 
 def find_label_file(motif_usage_path: Path) -> Path | None:

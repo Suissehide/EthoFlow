@@ -18,14 +18,13 @@ Deux notions à ne pas confondre (voir README étape 8) :
   « toilettage tête »). Présenté comme exemples repliés dans l'onglet
   « Par motif », jamais comme source de `category`.
 
-Note sur `artifact` (divergence README/code, tranchée en faveur du code) :
-le README dit "mets `artifact` dans `category`", mais
-`analyze_vame.is_artifact_motif` regarde en réalité la colonne
-`confidence` (`confidence.lower() == "artifact"`) — `category` reste la
-liste fermée des 8 catégories ETHOGRAM, qui n'inclut pas `artifact`.
-Cette page suit le code : `confidence` est donc un troisième champ libre,
-éditable dans l'onglet « Par motif », pour que l'exclusion documentée par
-le README soit réellement utilisable depuis l'app.
+Note sur `artifact` : `analyze_vame.is_artifact_motif` accepte la marque
+dans `confidence` **ou** dans `category`. `confidence` est l'emplacement
+canonique — `category` reste la liste fermée des 8 catégories ETHOGRAM,
+qui n'inclut pas `artifact` — mais les deux excluent bien le motif des
+stats, parce que le README a longtemps indiqué `category` et que des CSV
+annotés ainsi existent. `confidence` est donc un troisième champ libre,
+éditable dans l'onglet « Par motif ».
 """
 from __future__ import annotations
 
@@ -210,11 +209,11 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
         st.text_input(
             "Confiance", key=conf_key,
             help="Champ libre. Motif ininterprétable (bruit de tracking, "
-                 "animal hors champ) : mets `artifact` ICI, pas dans "
-                 "Catégorie — `analyze_vame.py` exclut un motif des "
-                 "stats quand `confidence` vaut `artifact`, pas quand "
-                 "`category` le vaut (qui reste la liste fermée des 8 "
-                 "catégories ETHOGRAM).",
+                 "animal hors champ) : mets `artifact` ici et "
+                 "`analyze_vame.py` l'exclura des stats au lieu de le "
+                 "compter comme un comportement. C'est l'emplacement "
+                 "canonique ; `artifact` dans Catégorie fonctionne aussi, "
+                 "pour les CSV déjà annotés ainsi.",
         )
 
         if st.button("Enregistrer", key=f"motifs_save_{motif_id}", type="primary"):
