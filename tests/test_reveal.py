@@ -169,10 +169,15 @@ def test_bouton_present_dans_la_barre_laterale_avec_un_projet(tmp_path, monkeypa
 
     boutons = {b.key: b for b in at.button}
     assert "btn_ouvrir_dossier" in boutons, list(boutons)
-    assert reveal.nom_explorateur() in boutons["btn_ouvrir_dossier"].label
-    # L'aide doit dire que le dossier s'ouvre côté serveur : en usage LAN,
-    # l'utilisateur distant ne verrait rien s'ouvrir chez lui.
-    assert "machine" in (boutons["btn_ouvrir_dossier"].help or "")
+    aide = boutons["btn_ouvrir_dossier"].help or ""
+    # Bouton icône : le libellé est vide (le glyphe est posé en CSS), donc
+    # tout ce qui informe l'utilisateur passe par l'infobulle — le nom de
+    # l'explorateur, le chemin visé, et le fait que le dossier s'ouvre côté
+    # serveur (en usage LAN, l'utilisateur distant ne verrait rien).
+    assert not boutons["btn_ouvrir_dossier"].label.strip()
+    assert reveal.nom_explorateur() in aide
+    assert projet.name in aide
+    assert "machine" in aide
 
     boutons["btn_ouvrir_dossier"].click().run()
     assert not at.exception, at.exception
@@ -195,3 +200,73 @@ def test_pas_de_bouton_sans_projet_ouvert(tmp_path, monkeypatch):
     at.run()
     assert not at.exception, at.exception
     assert "btn_ouvrir_dossier" not in {b.key for b in at.button}
+
+
+# --------------------------------------------------- sélecteur de dossier
+
+def test_dialogue_annule_reste_silencieux(monkeypatch):
+    """`osascript` sort en code 1 avec « User canceled » quand on ferme la
+    fenêtre. Une annulation est un choix, pas une erreur : rien à afficher."""
+    monkeypatch.setattr(reveal, "_plateforme", lambda: "darwin")
+    monkeypatch.setattr(
+        reveal.subprocess, "run",
+        lambda c, **k: subprocess.CompletedProcess(c, 1, "", "User canceled."),
+    )
+    chemin, message = reveal.choisir_dossier()
+    assert chemin is None
+    assert message == "", "une annulation ne doit produire aucun message"
+
+
+def test_dialogue_retourne_le_dossier_choisi(monkeypatch):
+    monkeypatch.setattr(reveal, "_plateforme", lambda: "darwin")
+    monkeypatch.setattr(
+        reveal.subprocess, "run",
+        lambda c, **k: subprocess.CompletedProcess(c, 0, "/tmp/choisi\n", ""),
+    )
+    chemin, message = reveal.choisir_dossier()
+    assert chemin == Path("/tmp/choisi"), "le retour est nettoyé du saut de ligne"
+    assert message == ""
+
+
+def test_dialogue_macos_demande_un_chemin_posix(monkeypatch, tmp_path):
+    """Sans `POSIX path of`, `choose folder` renvoie un alias
+    « Macintosh HD:Users:… » inutilisable comme chemin."""
+    monkeypatch.setattr(reveal, "_plateforme", lambda: "darwin")
+    commande = reveal._commande_dialogue("Titre", tmp_path)
+    assert commande[0] == "osascript"
+    assert "POSIX path of" in commande[2]
+    assert str(tmp_path) in commande[2], "le dossier de départ est transmis"
+
+
+def test_dialogue_indisponible_sur_linux_nu(monkeypatch):
+    """Ni zenity ni kdialog : on le dit et on renvoie vers la saisie."""
+    monkeypatch.setattr(reveal, "_plateforme", lambda: "autre")
+    monkeypatch.setattr(reveal.shutil, "which", lambda outil: None)
+    chemin, message = reveal.choisir_dossier()
+    assert chemin is None
+    assert "à la main" in message
+
+
+def test_dialogue_prefere_zenity_puis_kdialog(monkeypatch, tmp_path):
+    monkeypatch.setattr(reveal, "_plateforme", lambda: "autre")
+    monkeypatch.setattr(reveal.shutil, "which", lambda o: "/usr/bin/" + o)
+    assert reveal._commande_dialogue("T", tmp_path)[0] == "zenity"
+
+    monkeypatch.setattr(
+        reveal.shutil, "which",
+        lambda o: "/usr/bin/kdialog" if o == "kdialog" else None,
+    )
+    assert reveal._commande_dialogue("T", tmp_path)[0] == "kdialog"
+
+
+def test_dialogue_timeout_ne_leve_pas(monkeypatch):
+    """Une fenêtre laissée ouverte ne doit pas figer l'app indéfiniment."""
+    monkeypatch.setattr(reveal, "_plateforme", lambda: "darwin")
+
+    def _sans_reponse(commande, **kwargs):
+        raise subprocess.TimeoutExpired(commande, reveal.TIMEOUT_DIALOGUE_S)
+
+    monkeypatch.setattr(reveal.subprocess, "run", _sans_reponse)
+    chemin, message = reveal.choisir_dossier()
+    assert chemin is None
+    assert "sans réponse" in message

@@ -15,6 +15,7 @@ ne verrait pas ; l'appelant est censé le dire.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -53,6 +54,95 @@ def _commande(chemin: Path) -> list[str]:
         "windows": "explorer",
     }.get(_plateforme(), "xdg-open")
     return [outil, str(chemin)]
+
+
+# Un humain choisit dans une boîte de dialogue : il lui faut le temps de
+# naviguer. Le run Streamlit attend pendant ce temps — acceptable puisque
+# c'est lui qui vient de cliquer — mais la borne évite qu'une fenêtre
+# oubliée fige l'app indéfiniment.
+TIMEOUT_DIALOGUE_S = 180
+
+
+def _commande_dialogue(titre: str, depart: Path | None) -> list[str] | None:
+    """Commande ouvrant un sélecteur de dossier natif, ou None si aucune."""
+    plateforme = _plateforme()
+    if plateforme == "darwin":
+        # `POSIX path of` évite l'alias « Macintosh HD:Users:… » que
+        # `choose folder` renvoie par défaut.
+        script = f'POSIX path of (choose folder with prompt "{titre}"'
+        if depart and depart.is_dir():
+            script += f' default location POSIX file "{depart}"'
+        script += ")"
+        return ["osascript", "-e", script]
+    if plateforme == "windows":
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms;"
+            "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
+            f'$d.Description = "{titre}";'
+        )
+        if depart and depart.is_dir():
+            ps += f'$d.SelectedPath = "{depart}";'
+        ps += (
+            "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.SelectedPath }"
+        )
+        return ["powershell", "-NoProfile", "-Command", ps]
+    # Linux : zenity d'abord, kdialog ensuite. Aucun des deux n'est garanti.
+    for outil in ("zenity", "kdialog"):
+        if shutil.which(outil):
+            if outil == "zenity":
+                cmd = ["zenity", "--file-selection", "--directory",
+                       f"--title={titre}"]
+                if depart and depart.is_dir():
+                    cmd.append(f"--filename={depart}/")
+                return cmd
+            return ["kdialog", "--getexistingdirectory",
+                    str(depart if depart and depart.is_dir() else Path.home())]
+    return None
+
+
+def choisir_dossier(
+    titre: str = "Choisir le dossier des projets",
+    depart: Path | None = None,
+) -> tuple[Path | None, str]:
+    """Ouvre un sélecteur de dossier natif. Retourne (chemin ou None, message).
+
+    Trois issues distinctes, que l'appelant doit pouvoir différencier :
+      - un dossier choisi   → (Path, "")
+      - annulation          → (None, "") — normal, ne rien afficher
+      - impossible/échec    → (None, message) — à montrer
+
+    **La fenêtre s'ouvre sur la machine qui HÉBERGE le serveur.** En local
+    c'est celle de l'utilisateur ; consultée à distance, il ne la verrait
+    pas s'ouvrir et l'app semblerait figée jusqu'au délai.
+    """
+    commande = _commande_dialogue(titre, depart)
+    if commande is None:
+        return None, (
+            "Aucun sélecteur de dossier disponible sur cette machine "
+            "(ni zenity ni kdialog) — saisis le chemin à la main."
+        )
+    try:
+        proc = subprocess.run(
+            commande, capture_output=True, text=True,
+            timeout=TIMEOUT_DIALOGUE_S,
+        )
+    except FileNotFoundError:
+        return None, f"Commande « {commande[0]} » introuvable."
+    except subprocess.TimeoutExpired:
+        return None, (
+            f"Sélecteur sans réponse après {TIMEOUT_DIALOGUE_S} s — "
+            "fenêtre restée ouverte ?"
+        )
+    except Exception as e:  # noqa: BLE001 — jamais faire tomber l'appelant
+        return None, f"Échec du sélecteur : {e}"
+
+    sortie = (proc.stdout or "").strip()
+    if not sortie:
+        # Annulation : osascript sort en code 1 avec « User canceled »,
+        # zenity en code 1 sans rien, PowerShell en code 0 sans rien. Aucun
+        # n'est une erreur à afficher.
+        return None, ""
+    return Path(sortie), ""
 
 
 def ouvrir_dans_explorateur(chemin: Path) -> tuple[bool, str]:

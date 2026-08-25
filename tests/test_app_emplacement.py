@@ -126,3 +126,63 @@ def test_bascule_par_bouton_recent_ne_leve_pas(tmp_path, monkeypatch):
 
     assert not at.exception, at.exception
     assert at.text_input(key="emplacement_saisi").value == str(a)
+
+
+def test_bouton_parcourir_applique_le_dossier_choisi(tmp_path, monkeypatch):
+    """Le sélecteur natif renvoie un chemin : il doit atterrir dans le champ
+    et devenir la racine effective."""
+    from lib import reveal
+    a, b = _isoler(tmp_path, monkeypatch)
+    monkeypatch.setattr(reveal, "choisir_dossier",
+                        lambda **kwargs: (b, ""))
+
+    at = AppTest.from_file(APP_PY)
+    at.run()
+    boutons = {btn.key: btn for btn in at.button}
+    assert "btn_parcourir" in boutons, list(boutons)
+    boutons["btn_parcourir"].click().run()
+
+    assert not at.exception, at.exception
+    assert at.text_input(key="emplacement_saisi").value == str(b)
+    assert P.projects_root() == b
+
+
+def test_bouton_parcourir_annule_ne_change_rien(tmp_path, monkeypatch):
+    """Annuler la fenêtre est un choix, pas une erreur : ni changement, ni
+    message affiché."""
+    from lib import reveal
+    a, _ = _isoler(tmp_path, monkeypatch)
+    monkeypatch.setattr(reveal, "choisir_dossier", lambda **kwargs: (None, ""))
+
+    at = AppTest.from_file(APP_PY)
+    at.run()
+    {btn.key: btn for btn in at.button}["btn_parcourir"].click().run()
+
+    assert not at.exception, at.exception
+    assert at.text_input(key="emplacement_saisi").value == str(a)
+    # Assertion ciblée : la page affiche par ailleurs des avertissements
+    # légitimes (modèle DLC non configuré, par exemple). On vérifie qu'aucun
+    # ne vient du sélecteur, pas qu'il n'y en a aucun.
+    du_selecteur = [
+        w.value for w in at.warning
+        if "sélecteur" in w.value or "à la main" in w.value
+    ]
+    assert not du_selecteur, du_selecteur
+
+
+def test_bouton_parcourir_indisponible_le_dit(tmp_path, monkeypatch):
+    """Un Linux sans zenity ni kdialog doit renvoyer vers la saisie."""
+    from lib import reveal
+    a, _ = _isoler(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        reveal, "choisir_dossier",
+        lambda **kwargs: (None, "Aucun sélecteur — saisis le chemin à la main."),
+    )
+
+    at = AppTest.from_file(APP_PY)
+    at.run()
+    {btn.key: btn for btn in at.button}["btn_parcourir"].click().run()
+
+    assert not at.exception, at.exception
+    assert any("à la main" in w.value for w in at.warning)
+    assert at.text_input(key="emplacement_saisi").value == str(a)

@@ -13,7 +13,7 @@ from pathlib import Path
 import streamlit as st
 
 import lib.pipeline as PL
-from lib import runner
+from lib import reveal, runner
 from lib.config import (
     current_project,
     dlc_config_path,
@@ -62,14 +62,39 @@ def _section_emplacement() -> Path:
     if "emplacement_saisi" not in st.session_state:
         st.session_state["emplacement_saisi"] = str(projects_root())
 
-    st.text_input(
-        "Dossier des projets",
-        key="emplacement_saisi",
-        label_visibility="collapsed",
-        help="Un dossier qui contient tes projets, ou le chemin d'un projet "
-             "précis. Le choix est mémorisé et retrouvé au prochain "
-             "démarrage.",
-    )
+    col_champ, col_parcourir = st.columns([1, 0.28], vertical_alignment="bottom")
+    with col_champ:
+        st.text_input(
+            "Dossier des projets",
+            key="emplacement_saisi",
+            label_visibility="collapsed",
+            help="Un dossier qui contient tes projets, ou le chemin d'un "
+                 "projet précis. Le choix est mémorisé et retrouvé au "
+                 "prochain démarrage.",
+        )
+    with col_parcourir:
+        # La fenêtre s'ouvre sur la machine qui héberge le serveur, et le
+        # run attend qu'on ait choisi. En local — le cas normal — c'est
+        # transparent ; l'aide le précise pour l'usage à distance.
+        if st.button(
+            "Parcourir…",
+            key="btn_parcourir",
+            help=f"Ouvre un sélecteur de dossier ({reveal.nom_explorateur()}) "
+                 "sur la machine qui fait tourner l'app.",
+            width="stretch",
+        ):
+            choisi, message = reveal.choisir_dossier(
+                titre="Dossier des projets EthoFlow",
+                depart=Path(st.session_state["emplacement_saisi"]).expanduser(),
+            )
+            if choisi is not None:
+                # Même détour par la clé tampon que les boutons « récents » :
+                # écrire dans la clé d'un widget déjà instancié lève.
+                st.session_state["_emplacement_a_appliquer"] = str(choisi)
+                st.rerun()
+            elif message:
+                # Une annulation renvoie un message vide : ne rien afficher.
+                st.warning(message)
 
     recents = [p for p in recent_roots() if str(p) != st.session_state["emplacement_saisi"]]
     if recents:

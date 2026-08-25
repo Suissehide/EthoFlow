@@ -150,6 +150,10 @@ for p in _visible_main + BOTTOM_PAGES:
 # ============================================================
 # Sidebar CSS
 # ============================================================
+# Icône du bouton « ouvrir le dossier », posée en ::before comme celles de
+# la navigation. Définie hors du bloc parce que la feuille est une f-string.
+uri_ouvrir = lucide_data_uri("folder-open", "9ca3af")
+
 st.sidebar.markdown(
     f"""
     <style>
@@ -162,7 +166,7 @@ st.sidebar.markdown(
         display: none !important;
     }}
     .ef-brand {{
-        padding: 0.8rem 1rem 0 1rem;
+        padding: 0.8rem 0.75rem 0 0.75rem;
     }}
     .ef-brand-text {{
         font-size: 1.6rem;
@@ -173,52 +177,71 @@ st.sidebar.markdown(
     .ef-brand-sub {{
         font-size: 0.72rem;
         color: #6b7280;
-        padding: 0.1rem 1rem 0.3rem 1rem;
+        padding: 0.1rem 0.75rem 0.3rem 0.75rem;
         margin: 0;
     }}
-    .ef-project-badge {{
+    /* L'encart projet : la carte est portée par le conteneur, parce que le
+       bouton « ouvrir le dossier » vit à l'intérieur et qu'un bouton
+       Streamlit ne peut pas être injecté dans du markup. Largeur pleine,
+       comme les entrées de navigation. */
+    .st-key-ef_badge {{
+        background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.08));
+        border: 1px solid rgba(16,185,129,0.25);
+        border-radius: 8px;
+        padding: 0.3rem 0.75rem !important;
+        margin: 0 0 0.7rem 0 !important;
+    }}
+    .st-key-ef_badge [data-testid="stHorizontalBlock"] {{
+        gap: 0 !important;
+        align-items: center;
+    }}
+    .ef-badge-nom {{
         display: flex;
         align-items: center;
         gap: 8px;
         font-size: 0.82rem;
         font-weight: 600;
         color: #f9fafb;
-        background: linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.08));
-        border: 1px solid rgba(16,185,129,0.25);
-        padding: 0.45rem 0.75rem;
-        margin: 0 0.75rem 0.7rem 0.75rem;
-        border-radius: 8px;
+        overflow: hidden;
     }}
-    .ef-project-badge svg {{
+    .ef-badge-nom span {{
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }}
+    .ef-badge-nom img {{
         flex-shrink: 0;
+    }}
+    /* Bouton icône, au bout de l'encart. Le libellé est une espace : c'est
+       le ::before qui porte le glyphe, comme pour la navigation. */
+    .st-key-btn_ouvrir_dossier button {{
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+        padding: 0.2rem !important;
+        min-height: 0 !important;
+        font-size: 0 !important;
+        line-height: 0 !important;
+        display: flex;
+        justify-content: center;
+        opacity: 0.65;
+    }}
+    .st-key-btn_ouvrir_dossier button::before {{
+        content: "";
+        display: inline-block;
+        width: 15px; height: 15px;
+        background: url("{uri_ouvrir}") no-repeat center/contain;
+    }}
+    .st-key-btn_ouvrir_dossier button:hover {{
+        opacity: 1;
+        background: rgba(255,255,255,0.06) !important;
     }}
     .ef-no-project {{
         font-size: 0.78rem;
         color: #6b7280;
         font-style: italic;
-        padding: 0.3rem 1rem 0.7rem 1rem;
+        padding: 0.3rem 0.75rem 0.7rem 0.75rem;
         margin: 0;
-    }}
-    /* Bouton « ouvrir le dossier », discret sous l'encart du projet :
-       même gouttière que le badge, et il ne doit pas concurrencer
-       visuellement les entrées de navigation. */
-    .st-key-ouvrir_dossier {{
-        margin: -0.4rem 0.75rem 0.7rem 0.75rem;
-    }}
-    .st-key-ouvrir_dossier button {{
-        background: transparent;
-        color: #6b7280;
-        border: 1px solid #1f2937;
-        border-radius: 6px;
-        padding: 0.25rem 0.5rem;
-        font-size: 0.72rem;
-        font-weight: 500;
-        min-height: 0;
-    }}
-    .st-key-ouvrir_dossier button:hover {{
-        background: rgba(255,255,255,0.04);
-        color: #d1d5db;
-        border-color: #374151;
     }}
     .ef-section-label {{
         font-size: 0.65rem;
@@ -226,13 +249,13 @@ st.sidebar.markdown(
         text-transform: uppercase;
         letter-spacing: 0.08em;
         color: #4b5563;
-        padding: 0.5rem 1rem 0.2rem 1rem;
+        padding: 0.5rem 0.75rem 0.2rem 0.75rem;
         margin: 0;
     }}
     .ef-divider {{
         border: none;
         border-top: 1px solid #1f2937;
-        margin: 0.35rem 1rem;
+        margin: 0.35rem 0;
     }}
     .st-key-nav_main [data-testid="stVerticalBlock"],
     .st-key-nav_bottom [data-testid="stVerticalBlock"] {{
@@ -283,24 +306,30 @@ st.sidebar.markdown(
 
 project_name = current_project_name()
 if project_name:
-    folder_icon = lucide_data_uri("folder-open", ACCENT_HEX)
-    st.sidebar.markdown(
-        f'<div class="ef-project-badge">'
-        f'<img src="{folder_icon}" width="16" height="16" />'
-        f'{project_name}</div>',
-        unsafe_allow_html=True,
-    )
-    # Le dossier s'ouvre sur la machine qui héberge le serveur. En local —
-    # le cas normal — c'est celle de l'utilisateur ; l'aide le précise pour
-    # qui consulte l'app depuis un autre poste via --server.address.
+    # L'encart est un conteneur, pas un simple bloc HTML : le bouton
+    # « ouvrir le dossier » vit dedans, à sa droite, et un bouton Streamlit
+    # ne peut pas être injecté dans du markup arbitraire. La carte (dégradé,
+    # bordure, arrondi) est donc stylée sur le conteneur lui-même.
+    folder_icon = lucide_data_uri("folder", ACCENT_HEX)
     _projet_courant = current_project()
-    with st.sidebar.container(key="ouvrir_dossier"):
-        if st.button(
-            f"Ouvrir dans le {reveal.nom_explorateur()}",
+    with st.sidebar.container(key="ef_badge"):
+        col_nom, col_ouvrir = st.columns([1, 0.22], vertical_alignment="center")
+        col_nom.markdown(
+            f'<div class="ef-badge-nom">'
+            f'<img src="{folder_icon}" width="16" height="16" />'
+            f'<span>{project_name}</span></div>',
+            unsafe_allow_html=True,
+        )
+        # Libellé réduit à une espace : l'icône est posée en `::before` par
+        # le CSS, comme pour les entrées de navigation. Le dossier s'ouvre
+        # sur la machine qui héberge le serveur — l'aide le dit, pour qui
+        # consulte l'app à distance via --server.address.
+        if col_ouvrir.button(
+            " ",
             key="btn_ouvrir_dossier",
-            help=f"{_projet_courant} — s'ouvre sur la machine qui fait "
-                 "tourner l'app.",
-            width="stretch",
+            help=f"Ouvrir {_projet_courant} dans le "
+                 f"{reveal.nom_explorateur()} (sur la machine qui fait "
+                 "tourner l'app)",
         ):
             ok, message = reveal.ouvrir_dans_explorateur(_projet_courant)
             (st.toast if ok else st.sidebar.error)(message)
