@@ -29,18 +29,30 @@ Usage type dans un script :
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 
-# Racine par défaut où chercher les projets EthoFlow (cohérent avec
-# create_project.py). Sert de base aux prompts de sélection de projet.
-DEFAULT_PROJECTS_ROOT = Path(r"D:\EthoFlow\projects")
-
-# Racine par défaut des modèles DLC entraînés (cohérent avec le wizard
-# 00_init_training_config.py). Un modèle = un dossier contenant un
-# config.yaml.
-DEFAULT_MODELS_ROOT = Path(r"D:\EthoFlow\models")
+# Racines par défaut, dépendantes de la plateforme.
+#
+# `D:\EthoFlow\...` n'est un chemin absolu QUE sous Windows. Ailleurs,
+# pathlib le lit comme un unique composant nommé littéralement
+# « D:\EthoFlow\projects » — donc un dossier RELATIF, créé là où le
+# process a été lancé. Un projet créé sous macOS atterrissait ainsi dans
+# un dossier au nom absurde (le Finder affiche « : » comme « / »), au
+# lieu de la racine attendue.
+if os.name == "nt":
+    # Racine par défaut où chercher les projets EthoFlow (cohérent avec
+    # create_project.py). Sert de base aux prompts de sélection de projet.
+    DEFAULT_PROJECTS_ROOT = Path(r"D:\EthoFlow\projects")
+    # Racine par défaut des modèles DLC entraînés (cohérent avec le wizard
+    # 00_init_training_config.py). Un modèle = un dossier contenant un
+    # config.yaml.
+    DEFAULT_MODELS_ROOT = Path(r"D:\EthoFlow\models")
+else:
+    DEFAULT_PROJECTS_ROOT = Path.home() / "EthoFlow" / "projects"
+    DEFAULT_MODELS_ROOT = Path.home() / "EthoFlow" / "models"
 
 
 def add_no_prompt_arg(parser: argparse.ArgumentParser) -> None:

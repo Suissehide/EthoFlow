@@ -25,6 +25,7 @@ from lib.project import (  # noqa: F401  (ré-exports pour les vues)
     cropped_videos_exist,
     dlc_config_path,
     dlc_config_status,
+    est_projet,
     dlc_output_dir,
     excel_path,
     list_dlc_models,
@@ -35,7 +36,9 @@ from lib.project import (  # noqa: F401  (ré-exports pour les vues)
     projects_root,
     px_per_cm,
     read_pipeline_config,
+    recent_roots,
     save_prefs,
+    set_projects_root,
     set_arena_coords,
     set_dlc_config,
     set_px_per_cm,
@@ -77,9 +80,15 @@ def set_current_project(path: Path | str | None) -> None:
     if path is None:
         st.session_state.pop(_CLE, None)
         return
-    st.session_state[_CLE] = str(Path(path))
+    # Toujours mémoriser un chemin ABSOLU : `last_project` est relu au
+    # démarrage suivant, et un chemin relatif se résoudrait par rapport au
+    # dossier depuis lequel l'app a été lancée — donc ailleurs à chaque
+    # fois. `resolve()` sans `strict` ne lève pas si le dossier a disparu ;
+    # current_project() gère déjà ce cas.
+    absolu = Path(path).expanduser().resolve()
+    st.session_state[_CLE] = str(absolu)
     prefs = load_prefs()
-    prefs["last_project"] = str(Path(path))
+    prefs["last_project"] = str(absolu)
     save_prefs(prefs)
 
 

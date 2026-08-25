@@ -67,6 +67,69 @@ def models_root() -> Path:
     return Path(load_prefs().get("models_root", DEFAULT_MODELS_ROOT))
 
 
+# --------------------------------------------------- emplacement des projets
+
+# Nombre d'emplacements récents mémorisés. Assez pour alterner entre un
+# disque interne, un disque externe et une archive réseau sans retaper.
+MAX_EMPLACEMENTS_RECENTS = 8
+
+
+def est_projet(chemin: Path) -> bool:
+    """Vrai si `chemin` est un projet EthoFlow, pas un dossier qui en contient.
+
+    Même critère que `list_projects` : la présence de `data/`. C'est ce qui
+    permet au champ d'emplacement d'accepter indifféremment une racine ou un
+    projet — un projet sur disque externe n'a aucune raison de vivre sous la
+    racine configurée.
+    """
+    chemin = Path(chemin)
+    return chemin.is_dir() and (chemin / "data").is_dir()
+
+
+def set_projects_root(root: Path) -> None:
+    """Fixe la racine des projets et la mémorise comme emplacement récent.
+
+    Refuse un chemin relatif. Un `D:\\EthoFlow\\projects` saisi sous macOS
+    ou Linux n'est pas un chemin absolu mais un unique composant portant ce
+    nom : il produirait un dossier au nom absurde, créé là où l'app a été
+    lancée, et donc résolu différemment au prochain démarrage.
+    """
+    root = Path(root)
+    if not root.is_absolute():
+        raise ValueError(
+            f"Racine des projets non absolue : {root!r}. "
+            "Donne un chemin complet."
+        )
+    prefs = load_prefs()
+    # L'emplacement QUITTÉ entre aussi dans les récents, sinon on ne peut pas
+    # revenir en arrière : le seul intérêt de la liste est de faire l'aller-
+    # retour entre deux disques sans retaper le chemin.
+    precedent = prefs.get("projects_root")
+    recents = prefs.get("recent_roots") or []
+    if precedent and precedent != str(root):
+        recents = _avec_en_tete(recents, precedent)
+    prefs["projects_root"] = str(root)
+    prefs["recent_roots"] = _avec_en_tete(recents, str(root))
+    save_prefs(prefs)
+
+
+def recent_roots() -> list[Path]:
+    """Emplacements récemment utilisés, du plus récent au plus ancien.
+
+    Les chemins devenus introuvables (disque démonté, dossier supprimé) sont
+    filtrés à la lecture mais restent dans les préférences : un disque
+    externe rebranché retrouve sa place dans la liste.
+    """
+    bruts = load_prefs().get("recent_roots") or []
+    return [Path(p) for p in bruts if Path(p).is_dir()]
+
+
+def _avec_en_tete(liste: list[str], valeur: str) -> list[str]:
+    """`valeur` en tête, sans doublon, liste tronquée."""
+    reste = [v for v in liste if v != valeur]
+    return [valeur, *reste][:MAX_EMPLACEMENTS_RECENTS]
+
+
 # ------------------------------------------------------------------ inventaire
 
 def list_projects(root: Path) -> list[Path]:

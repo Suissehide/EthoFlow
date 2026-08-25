@@ -68,7 +68,9 @@ def test_creer_supprimer_retaper_ne_ressuscite_pas_le_projet(tmp_path, monkeypat
     at = AppTest.from_file(APP_PY)
     at.run()
     assert not at.exception, at.exception
-    list(at.text_input)[0].set_value(nom).run()
+    # Ciblage par clé, jamais par position : la page porte aussi le champ
+    # d'emplacement, et un index se casserait au moindre ajout de widget.
+    at.text_input(key="creation_nom").set_value(nom).run()
     boutons = {b.key: b for b in at.button}
     assert "btn_creer" in boutons, list(boutons)
     boutons["btn_creer"].click().run()

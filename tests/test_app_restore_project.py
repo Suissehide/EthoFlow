@@ -6,9 +6,11 @@ AppTest exercising the actual restore block in `app.py` lines 44-50:
 - Deleted project: recorded project is deleted, app does NOT recreate it
 - Missing/corrupt prefs: app runs with no project, no exception
 
-Isolation : `lib.project.PREFS_PATH` est monkeypatché pour éviter toute
-dépendance à `~/.ethoflow/app_prefs.yaml` réel. `interactive.DEFAULT_PROJECTS_ROOT`
-est aussi monkeypatché pour éviter de créer des dossiers dans le dépôt.
+Isolation : `lib.project.PREFS_PATH` ET `lib.project.DEFAULT_PROJECTS_ROOT`
+sont monkeypatchés. Le second doit l'être sur `lib.project`, pas sur
+`interactive` : le nom y est lié par valeur à l'import, donc patcher le
+module source ne l'atteint pas et le test retomberait sur la vraie racine
+de la machine — au risque d'y lire, voire d'y créer, de vrais projets.
 """
 from __future__ import annotations
 
@@ -38,9 +40,10 @@ def test_app_restores_valid_last_project(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "PREFS_PATH", prefs_file)
     P.save_prefs({"last_project": str(project_path)})
 
-    # Mock DEFAULT_PROJECTS_ROOT to avoid creating directories in repo
-    import interactive
-    monkeypatch.setattr(interactive, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
+    # `lib.project` lie DEFAULT_PROJECTS_ROOT par VALEUR a l'import :
+    # patcher `interactive` n'atteindrait pas le nom effectivement lu, et
+    # le test retomberait sur la vraie racine de la machine.
+    monkeypatch.setattr(P, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
 
     # Run the app
     at = AppTest.from_file(APP_PY)
@@ -70,9 +73,10 @@ def test_app_does_not_restore_deleted_project(tmp_path, monkeypatch):
     shutil.rmtree(project_path)
     assert not project_path.exists(), "Setup: project should be deleted"
 
-    # Mock DEFAULT_PROJECTS_ROOT
-    import interactive
-    monkeypatch.setattr(interactive, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
+    # `lib.project` lie DEFAULT_PROJECTS_ROOT par VALEUR a l'import :
+    # patcher `interactive` n'atteindrait pas le nom effectivement lu, et
+    # le test retomberait sur la vraie racine de la machine.
+    monkeypatch.setattr(P, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
 
     # Run the app with the deleted project in prefs
     at = AppTest.from_file(APP_PY)
@@ -94,9 +98,10 @@ def test_app_handles_missing_prefs_file(tmp_path, monkeypatch):
     prefs_file = tmp_path / "nonexistent.yaml"
     monkeypatch.setattr(P, "PREFS_PATH", prefs_file)
 
-    # Mock DEFAULT_PROJECTS_ROOT
-    import interactive
-    monkeypatch.setattr(interactive, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
+    # `lib.project` lie DEFAULT_PROJECTS_ROOT par VALEUR a l'import :
+    # patcher `interactive` n'atteindrait pas le nom effectivement lu, et
+    # le test retomberait sur la vraie racine de la machine.
+    monkeypatch.setattr(P, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
 
     # Run the app — should not raise
     at = AppTest.from_file(APP_PY)
@@ -115,9 +120,10 @@ def test_app_handles_corrupt_prefs_file(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "PREFS_PATH", prefs_file)
     prefs_file.write_text("{ invalid yaml [[ bad }", encoding="utf-8")
 
-    # Mock DEFAULT_PROJECTS_ROOT
-    import interactive
-    monkeypatch.setattr(interactive, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
+    # `lib.project` lie DEFAULT_PROJECTS_ROOT par VALEUR a l'import :
+    # patcher `interactive` n'atteindrait pas le nom effectivement lu, et
+    # le test retomberait sur la vraie racine de la machine.
+    monkeypatch.setattr(P, "DEFAULT_PROJECTS_ROOT", tmp_path / "projects")
 
     # Run the app — should not raise despite corrupt prefs
     at = AppTest.from_file(APP_PY)

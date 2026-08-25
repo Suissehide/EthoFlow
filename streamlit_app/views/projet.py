@@ -6,6 +6,7 @@ diagnostic DLC passent par `lib.pipeline` (constructeurs de commandes) et
 """
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -16,13 +17,16 @@ from lib import runner
 from lib.config import (
     current_project,
     dlc_config_path,
+    est_projet,
     list_dlc_models,
     list_projects,
     models_root,
     project_kind,
     projects_root,
+    recent_roots,
     set_current_project,
     set_dlc_config,
+    set_projects_root,
 )
 from lib.icons import lucide_title
 from lib.sessions import list_sessions
@@ -33,14 +37,112 @@ from views import _job
 # Ouvrir un projet
 # ============================================================
 
-def _section_ouverture() -> None:
+def _section_emplacement() -> Path:
+    """Champ d'emplacement + raccourcis récents. Retourne la racine effective.
+
+    Le champ accepte indifféremment une **racine** (un dossier qui contient
+    des projets) ou un **projet** directement, reconnu à son sous-dossier
+    `data/` : un projet sur disque externe n'a aucune raison de vivre sous
+    la racine configurée. Coller un chemin de projet l'ouvre et retient son
+    dossier parent comme racine, pour que la liste montre ses voisins.
+    """
+    st.markdown(lucide_title("folder", "Emplacement"), unsafe_allow_html=True)
+
+    # Le champ est piloté par son `key` seul (pas de `value=`), sinon
+    # Streamlit réimposerait la valeur à chaque passage et écraserait la
+    # saisie. Corollaire : on ne peut plus écrire dans cette clé une fois le
+    # widget instancié — Streamlit lève `StreamlitAPIException`. Les
+    # bascules (bouton « récent », projet collé) déposent donc leur valeur
+    # dans une clé tampon, appliquée ici au run suivant, avant le widget.
+    if "_emplacement_a_appliquer" in st.session_state:
+        st.session_state["emplacement_saisi"] = st.session_state.pop(
+            "_emplacement_a_appliquer"
+        )
+
+    if "emplacement_saisi" not in st.session_state:
+        st.session_state["emplacement_saisi"] = str(projects_root())
+
+    st.text_input(
+        "Dossier des projets",
+        key="emplacement_saisi",
+        label_visibility="collapsed",
+        help="Un dossier qui contient tes projets, ou le chemin d'un projet "
+             "précis. Le choix est mémorisé et retrouvé au prochain "
+             "démarrage.",
+    )
+
+    recents = [p for p in recent_roots() if str(p) != st.session_state["emplacement_saisi"]]
+    if recents:
+        st.caption("Emplacements récents")
+        colonnes = st.columns(min(len(recents), 4))
+        for i, chemin_recent in enumerate(recents[:4]):
+            if colonnes[i].button(chemin_recent.name or str(chemin_recent),
+                                  key=f"recent_{i}",
+                                  help=str(chemin_recent),
+                                  width="stretch"):
+                st.session_state["_emplacement_a_appliquer"] = str(chemin_recent)
+                st.rerun()
+
+    saisi = st.session_state["emplacement_saisi"].strip()
+    if not saisi:
+        st.warning("Indique un emplacement.")
+        return projects_root()
+
+    chemin = Path(saisi).expanduser()
+
+    # Un chemin relatif se résout par rapport au dossier de lancement de
+    # l'app, donc ailleurs à chaque démarrage. Le cas classique est un
+    # `D:\EthoFlow\projects` saisi sous macOS ou Linux : pathlib y voit un
+    # unique composant portant littéralement ce nom, et le dossier créé
+    # apparaît sous un nom absurde dans le Finder.
+    if not chemin.is_absolute():
+        st.error(
+            f"`{chemin}` n'est pas un chemin absolu. "
+            "Donne un chemin complet — par exemple "
+            f"`{Path.home() / 'EthoFlow' / 'projects'}`"
+            + (" sous macOS/Linux, ou `D:\\EthoFlow\\projects` sous Windows."
+               if os.name != "nt" else ".")
+        )
+        return projects_root()
+
+    if est_projet(chemin):
+        # Un projet a été collé directement : on l'ouvre et on liste ses
+        # voisins. Le champ garde ce que l'utilisateur a tapé — le réécrire
+        # sur le dossier parent obligerait à un aller-retour par la clé
+        # tampon, pour un gain nul : la liste dessous montre déjà les
+        # voisins, et voir sa propre saisie est plus lisible qu'un chemin
+        # substitué sous les doigts.
+        racine = chemin.parent
+        if current_project() != chemin:
+            set_current_project(chemin)
+        if racine != projects_root():
+            set_projects_root(racine)
+        st.caption(f"Projet ouvert directement — voisins dans `{racine}`.")
+        return racine
+
+    if not chemin.is_dir():
+        st.error(f"`{chemin}` n'existe pas.")
+        return projects_root()
+
+    if chemin != projects_root():
+        set_projects_root(chemin)
+
+    n = len(list_projects(chemin))
+    if n:
+        st.caption(f"{n} projet(s) à cet emplacement.")
+    else:
+        st.caption("Aucun projet ici — tu peux en créer un ci-dessous.")
+    return chemin
+
+
+def _section_ouverture(racine: Path) -> None:
     st.markdown(lucide_title("folder-open", "Ouvrir un projet"), unsafe_allow_html=True)
 
-    existants = list_projects(projects_root())
+    existants = list_projects(racine)
     courant = current_project()
 
     if not existants:
-        st.caption(f"Aucun projet dans `{projects_root()}`.")
+        st.caption(f"Aucun projet dans `{racine}`.")
         return
 
     noms = [p.name for p in existants]
@@ -55,7 +157,7 @@ def _section_ouverture() -> None:
         key="projet_selector",
         label_visibility="collapsed",
     )
-    chemin_choisi = projects_root() / nom_choisi
+    chemin_choisi = racine / nom_choisi
 
     if courant is None or courant.name != nom_choisi:
         set_current_project(chemin_choisi)
@@ -95,7 +197,7 @@ def _section_ouverture() -> None:
                 st.rerun()
         with col_confirmer:
             if st.button("Oui, supprimer", key="btn_confirmer_suppression", type="primary"):
-                chemin_a_supprimer = projects_root() / a_supprimer
+                chemin_a_supprimer = racine / a_supprimer
                 # Recontrôle juste avant le rmtree : un job a pu démarrer
                 # entre l'affichage du bouton et ce clic (même course que
                 # JobBusy dans bouton_lancer).
@@ -118,7 +220,7 @@ def _section_ouverture() -> None:
 # Créer un projet
 # ============================================================
 
-def _section_creation() -> None:
+def _section_creation(racine: Path) -> None:
     st.subheader("Créer un projet")
     # Clés explicites : sans elles, Streamlit dérive la clé du widget de sa
     # position dans le script. `_section_ouverture()`, rendue juste avant,
@@ -150,7 +252,7 @@ def _section_creation() -> None:
              "Tu peux le désigner plus tard.",
         key="creation_modele",
     )
-    cible = projects_root() / nom.strip().replace(" ", "-") if nom.strip() else None
+    cible = racine / nom.strip().replace(" ", "-") if nom.strip() else None
     if cible is None:
         return
 
@@ -313,11 +415,14 @@ def _section_sessions(projet: Path) -> None:
 def render() -> None:
     st.title("Projet")
 
+    racine = _section_emplacement()
+
+    st.divider()
     col_ouvrir, col_creer = st.columns(2)
     with col_ouvrir:
-        _section_ouverture()
+        _section_ouverture(racine)
     with col_creer:
-        _section_creation()
+        _section_creation(racine)
 
     projet = current_project()
     if projet is None:
