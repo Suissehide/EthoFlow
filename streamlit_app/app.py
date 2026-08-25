@@ -19,7 +19,8 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from lib.config import current_project_name  # noqa: E402
+from lib import reveal  # noqa: E402
+from lib.config import current_project, current_project_name  # noqa: E402
 from lib.icons import ACCENT, ACCENT_BG, ACCENT_HEX, lucide_data_uri  # noqa: E402
 from views import (  # noqa: E402
     about,
@@ -198,6 +199,27 @@ st.sidebar.markdown(
         padding: 0.3rem 1rem 0.7rem 1rem;
         margin: 0;
     }}
+    /* Bouton « ouvrir le dossier », discret sous l'encart du projet :
+       même gouttière que le badge, et il ne doit pas concurrencer
+       visuellement les entrées de navigation. */
+    .st-key-ouvrir_dossier {{
+        margin: -0.4rem 0.75rem 0.7rem 0.75rem;
+    }}
+    .st-key-ouvrir_dossier button {{
+        background: transparent;
+        color: #6b7280;
+        border: 1px solid #1f2937;
+        border-radius: 6px;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.72rem;
+        font-weight: 500;
+        min-height: 0;
+    }}
+    .st-key-ouvrir_dossier button:hover {{
+        background: rgba(255,255,255,0.04);
+        color: #d1d5db;
+        border-color: #374151;
+    }}
     .ef-section-label {{
         font-size: 0.65rem;
         font-weight: 600;
@@ -268,6 +290,20 @@ if project_name:
         f'{project_name}</div>',
         unsafe_allow_html=True,
     )
+    # Le dossier s'ouvre sur la machine qui héberge le serveur. En local —
+    # le cas normal — c'est celle de l'utilisateur ; l'aide le précise pour
+    # qui consulte l'app depuis un autre poste via --server.address.
+    _projet_courant = current_project()
+    with st.sidebar.container(key="ouvrir_dossier"):
+        if st.button(
+            f"Ouvrir dans le {reveal.nom_explorateur()}",
+            key="btn_ouvrir_dossier",
+            help=f"{_projet_courant} — s'ouvre sur la machine qui fait "
+                 "tourner l'app.",
+            width="stretch",
+        ):
+            ok, message = reveal.ouvrir_dans_explorateur(_projet_courant)
+            (st.toast if ok else st.sidebar.error)(message)
 else:
     st.sidebar.markdown(
         '<p class="ef-no-project">Aucun projet sélectionné</p>',
