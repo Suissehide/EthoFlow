@@ -196,3 +196,86 @@ def test_list_qc_trajectories(project, session_factory, tmp_path):
 
 def test_list_qc_trajectories_dossier_absent(project):
     assert S.list_qc_trajectories(project) == {}
+
+
+# ------------------------------------------------- écriture des metadata
+
+def _ecrire_meta(project, session_id, contenu):
+    import yaml
+    d = project / "data" / "raw" / session_id
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "metadata.yaml").write_text(
+        yaml.safe_dump(contenu, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+
+
+def _lire_meta(project, session_id):
+    import yaml
+    return yaml.safe_load(
+        (project / "data" / "raw" / session_id / "metadata.yaml").read_text(
+            encoding="utf-8")
+    )
+
+
+def test_save_metadata_ne_perd_aucune_cle_non_affichee(project):
+    """Le fichier contient le travail du chercheur : l'app n'édite que ce
+    qu'elle montre, et préserve le reste dans son ordre."""
+    _ecrire_meta(project, "S1", {
+        "id": "S1", "mouse_id": 970, "group": "MCCf/f", "operateur": "Léo",
+        "source_video": "/videos/S1.mp4",
+        "camera": {"fps": 30},
+        "arenes": [{"id": "A1", "coords": [0, 0, 5, 5]}],
+    })
+    assert S.save_metadata_fields(project, "S1", {"group": "MCCiECKO"})
+    apres = _lire_meta(project, "S1")
+
+    assert apres["group"] == "MCCiECKO"
+    assert apres["source_video"] == "/videos/S1.mp4", "chemin vidéo perdu"
+    assert apres["camera"] == {"fps": 30}, "structure imbriquée perdue"
+    assert apres["arenes"] == [{"id": "A1", "coords": [0, 0, 5, 5]}]
+    assert apres["operateur"] == "Léo", "accent abîmé"
+    assert list(apres)[:3] == ["id", "mouse_id", "group"], "ordre bousculé"
+
+
+def test_save_metadata_valeur_videe_retire_la_cle(project):
+    """Une chaîne vide deviendrait un groupe à part entière dans les
+    analyses : mieux vaut retirer la clé."""
+    _ecrire_meta(project, "S1", {"id": "S1", "sexe": "F"})
+    S.save_metadata_fields(project, "S1", {"sexe": "  "})
+    assert "sexe" not in _lire_meta(project, "S1")
+
+
+def test_save_metadata_session_inconnue_ne_leve_pas(project):
+    assert S.save_metadata_fields(project, "fantome", {"x": "y"}) is False
+
+
+def test_save_arenes_reinjecte_les_coords(project):
+    """Les coordonnées viennent de calibrate_arenes et ne transitent pas par
+    le tableau : les perdre obligerait à recalibrer."""
+    _ecrire_meta(project, "S1", {
+        "id": "S1", "group": "MCC",
+        "arenes": [
+            {"id": "A1", "mouse_id": 970, "coords": [0, 0, 5, 5]},
+            {"id": "A2", "mouse_id": 971, "coords": [5, 0, 5, 5]},
+        ],
+    })
+    assert S.save_arenes(project, "S1", [{"id": "A1", "mouse_id": 999}])
+    apres = _lire_meta(project, "S1")
+
+    assert len(apres["arenes"]) == 1, "la ligne supprimée doit disparaître"
+    assert apres["arenes"][0]["mouse_id"] == 999
+    assert apres["arenes"][0]["coords"] == [0, 0, 5, 5], "coords perdues"
+    assert apres["group"] == "MCC", "le reste de la metadata a bougé"
+
+
+def test_save_arenes_n_impose_aucune_colonne(project):
+    """Le vocabulaire des arènes appartient au chercheur : on écrit ce qu'on
+    reçoit, sans colonne présupposée."""
+    _ecrire_meta(project, "S1", {"id": "S1", "arenes": [{"id": "A1"}]})
+    S.save_arenes(project, "S1", [
+        {"id": "A1", "regime": "gras", "observateur": "Léa"},
+    ])
+    arene = _lire_meta(project, "S1")["arenes"][0]
+    assert arene["regime"] == "gras"
+    assert arene["observateur"] == "Léa"

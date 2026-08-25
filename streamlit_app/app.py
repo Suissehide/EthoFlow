@@ -191,9 +191,30 @@ st.sidebar.markdown(
         padding: 0.3rem 0.75rem !important;
         margin: 0 0 0.7rem 0 !important;
     }}
+    /* Les colonnes et leurs blocs internes portent des marges par défaut
+       qui décalent le texte vers le haut : on les neutralise et on centre
+       explicitement à chaque niveau, sinon le nom flotte au-dessus de
+       l'icône du bouton. */
     .st-key-ef_badge [data-testid="stHorizontalBlock"] {{
         gap: 0 !important;
+        align-items: center !important;
+    }}
+    .st-key-ef_badge [data-testid="stColumn"] {{
+        display: flex;
         align-items: center;
+        justify-content: center;
+        min-height: 30px;
+    }}
+    .st-key-ef_badge [data-testid="stColumn"] > div,
+    .st-key-ef_badge [data-testid="stVerticalBlock"],
+    .st-key-ef_badge [data-testid="stElementContainer"],
+    .st-key-ef_badge [data-testid="stMarkdownContainer"] {{
+        width: 100%;
+        margin: 0 !important;
+        padding: 0 !important;
+    }}
+    .st-key-ef_badge [data-testid="stColumn"]:first-child {{
+        justify-content: flex-start;
     }}
     .ef-badge-nom {{
         display: flex;
@@ -201,6 +222,7 @@ st.sidebar.markdown(
         gap: 8px;
         font-size: 0.82rem;
         font-weight: 600;
+        line-height: 1.2;
         color: #f9fafb;
         overflow: hidden;
     }}
@@ -218,18 +240,29 @@ st.sidebar.markdown(
         background: transparent !important;
         border: none !important;
         box-shadow: none !important;
-        padding: 0.2rem !important;
-        min-height: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        width: 28px;
+        height: 28px;
+        min-height: 28px !important;
+        /* Le libellé est une espace : sans font-size nul elle occuperait
+           de la place et décentrerait le glyphe. */
         font-size: 0 !important;
         line-height: 0 !important;
-        display: flex;
-        justify-content: center;
-        opacity: 0.65;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        border-radius: 6px;
+        opacity: 0.7;
+    }}
+    .st-key-btn_ouvrir_dossier button > div,
+    .st-key-btn_ouvrir_dossier button p {{
+        display: none !important;
     }}
     .st-key-btn_ouvrir_dossier button::before {{
         content: "";
-        display: inline-block;
-        width: 15px; height: 15px;
+        display: block;
+        width: 18px; height: 18px;
         background: url("{uri_ouvrir}") no-repeat center/contain;
     }}
     .st-key-btn_ouvrir_dossier button:hover {{

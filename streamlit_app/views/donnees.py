@@ -15,13 +15,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 import lib.pipeline as PL
 from lib.config import excel_path, project_kind, require_project
 from lib.icons import lucide_title
-from lib.sessions import list_sessions
+from lib.sessions import (
+    arenes_dataframe,
+    list_sessions,
+    load_metadata,
+    metadata_fields,
+    save_arenes,
+    save_metadata_fields,
+)
 from views import _job
+from views._widgets import champ_chemin
 
 
 # ============================================================
@@ -123,11 +132,12 @@ def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
         "qui ne correspond à aucun fichier vidéo avant le sync réel."
     )
 
-    videos_dir = st.text_input(
+    videos_dir = champ_chemin(
         "Dossier des vidéos",
-        value=st.session_state.get("_donnees_videos_dir", ""),
+        cle="donnees_videos_dir",
+        valeur_defaut=st.session_state.get("_donnees_videos_dir", ""),
         placeholder="ex : E:/data/bottom_view/08062026",
-        key="donnees_videos_dir",
+        titre_dialogue="Dossier des vidéos à synchroniser",
     )
     st.session_state["_donnees_videos_dir"] = videos_dir
 
@@ -195,6 +205,8 @@ def _section_sessions(projet: Path) -> None:
 
     st.dataframe(df, width="stretch", hide_index=True)
 
+    _section_metadata(projet, df["session_id"].tolist())
+
     if n_video_ok < n_total:
         st.caption(
             f"{n_total - n_video_ok} session(s) sans vidéo localisable — "
@@ -220,3 +232,89 @@ def render() -> None:
     _section_sync(projet, chemin_excel)
     st.divider()
     _section_sessions(projet)
+
+
+# ============================================================
+# Metadata d'une session — consultation et édition
+# ============================================================
+
+def _section_metadata(projet: Path, sessions: list[str]) -> None:
+    """Voir et corriger la metadata d'une session sans rouvrir l'Excel.
+
+    Les colonnes ne sont PAS codées en dur : elles sortent de ce que la
+    session contient réellement, parce que `sync_from_excel.py` recopie
+    toutes les colonnes de l'Excel, y compris celles que le chercheur
+    invente. Une correction ponctuelle (une souris mal saisie, un groupe à
+    rectifier) se fait ici ; une correction de fond se fait dans l'Excel
+    puis un re-sync.
+    """
+    if not sessions:
+        return
+
+    st.divider()
+    st.markdown(lucide_title("file-spreadsheet", "Metadata d'une session"),
+                unsafe_allow_html=True)
+    st.caption(
+        "Édition ponctuelle. Pour une reprise de fond, corrige l'Excel et "
+        "relance le sync avec `--overwrite`."
+    )
+
+    session = st.selectbox("Session", options=sessions, key="donnees_meta_session")
+    meta = load_metadata(projet, session)
+    if meta is None:
+        st.error(f"`metadata.yaml` introuvable pour `{session}`.")
+        return
+
+    champs = metadata_fields(meta)
+    if champs:
+        df_champs = pd.DataFrame(
+            [{"champ": c, "valeur": "" if v is None else str(v)}
+             for c, v in champs.items()]
+        )
+        edite = st.data_editor(
+            df_champs,
+            column_config={
+                "champ": st.column_config.TextColumn("Champ", disabled=True),
+                "valeur": st.column_config.TextColumn("Valeur"),
+            },
+            hide_index=True, width="stretch",
+            key=f"donnees_meta_editor_{session}",
+        )
+        if st.button("Enregistrer la metadata", key="donnees_meta_save"):
+            modifs = {
+                str(r["champ"]): r["valeur"] for _, r in edite.iterrows()
+            }
+            if save_metadata_fields(projet, session, modifs):
+                st.success(f"Metadata de `{session}` enregistrée.")
+                st.rerun()
+            else:
+                st.error("Écriture impossible.")
+    else:
+        st.caption("Cette session n'a aucun champ exploitable.")
+
+    arenes = arenes_dataframe(meta)
+    if not arenes.empty:
+        st.markdown("**Arènes**")
+        st.caption(
+            "Les coordonnées viennent de `calibrate_arenes.py` et ne sont "
+            "pas éditables ici — elles sont préservées à l'enregistrement."
+        )
+        colonnes_editables = [c for c in arenes.columns if c != "coords"]
+        edite_ar = st.data_editor(
+            arenes,
+            column_config={
+                "coords": st.column_config.TextColumn("Coords", disabled=True),
+            },
+            num_rows="dynamic", hide_index=True, width="stretch",
+            key=f"donnees_arenes_editor_{session}",
+        )
+        if st.button("Enregistrer les arènes", key="donnees_arenes_save"):
+            lignes = [
+                {c: r[c] for c in colonnes_editables}
+                for _, r in edite_ar.iterrows()
+            ]
+            if save_arenes(projet, session, lignes):
+                st.success(f"Arènes de `{session}` enregistrées.")
+                st.rerun()
+            else:
+                st.error("Écriture impossible.")

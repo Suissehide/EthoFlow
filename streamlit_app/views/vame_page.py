@@ -43,6 +43,7 @@ import lib.vame as V
 from lib.config import require_project
 from lib.icons import lucide_title
 from views import _job
+from views._widgets import champ_chemin
 
 # ============================================================
 # Constantes du stepper
@@ -136,8 +137,14 @@ def _section_setup(projet: Path, etat: dict) -> None:
             "`data/cropped/`) — à ne changer que pour pointer vers une "
             "autre sortie DLC."
         )
-        input_dir = st.text_input("`--input-dir`", value="", key="vame_setup_input_dir")
-        cropped_dir = st.text_input("`--cropped-dir`", value="", key="vame_setup_cropped_dir")
+        input_dir = champ_chemin(
+            "`--input-dir`", cle="vame_setup_input_dir",
+            titre_dialogue="Dossier des .h5 pour VAME",
+        )
+        cropped_dir = champ_chemin(
+            "`--cropped-dir`", cle="vame_setup_cropped_dir",
+            titre_dialogue="Dossier des vidéos croppées",
+        )
 
     extra: list[str] = ["--pose-confidence", str(pose_confidence)]
     if copie.startswith("Copier"):

@@ -34,6 +34,8 @@ from lib.icons import ACCENT, lucide_html, lucide_title
 
 import streamlit as st
 
+from views._widgets import champ_chemin
+
 _CLE_RESULTATS = "_config_probe_results"
 
 
@@ -50,21 +52,21 @@ def _section_racines() -> None:
         "développement macOS/Linux."
     )
 
-    with st.form("config_racines_form"):
-        col1, col2 = st.columns(2)
-        with col1:
-            projets_val = st.text_input(
-                "Racine des projets EthoFlow",
-                value=str(projects_root()),
-                key="config_projects_root",
-            )
-        with col2:
-            modeles_val = st.text_input(
-                "Racine des modèles DLC",
-                value=str(models_root()),
-                key="config_models_root",
-            )
-        enregistrer = st.form_submit_button("Enregistrer")
+    # Hors formulaire : `champ_chemin` porte un bouton « Parcourir… », et un
+    # `st.form` n'accepte que son propre bouton de soumission.
+    projets_val = champ_chemin(
+        "Racine des projets EthoFlow",
+        cle="config_projects_root",
+        valeur_defaut=str(projects_root()),
+        titre_dialogue="Racine des projets EthoFlow",
+    )
+    modeles_val = champ_chemin(
+        "Racine des modèles DLC",
+        cle="config_models_root",
+        valeur_defaut=str(models_root()),
+        titre_dialogue="Racine des modèles DLC",
+    )
+    enregistrer = st.button("Enregistrer", key="config_enregistrer")
 
     if enregistrer:
         prefs = load_prefs()

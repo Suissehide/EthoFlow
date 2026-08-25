@@ -29,7 +29,9 @@ from lib.config import (
 )
 from lib.icons import lucide_title
 from lib import sessions as S
-from views import _job, _widgets
+from views import _job
+from views import _widgets
+from views._widgets import champ_chemin
 
 # Ligne "[i/n] session_id" imprimée avant chaque session traitée.
 _RE_SESSION = re.compile(r"^\[\d+/\d+\]\s+(\S+)\s*$")
@@ -527,18 +529,17 @@ def _section_avancee(projet: Path) -> None:
 
         # --- filter_keypoints -------------------------------------------------
         st.markdown("**`filter_keypoints.py`** — retire des keypoints trop peu fiables")
-        col_in, col_out = st.columns(2)
-        with col_in:
-            fk_input = st.text_input(
-                "Dossier d'entrée", value=str(dlc_output_dir(projet)),
-                key="nettoyage_fk_input",
-            )
-        with col_out:
-            fk_output = st.text_input(
-                "Dossier de sortie",
-                value=str(dlc_output_dir(projet).parent / "dlc-output-filtered"),
-                key="nettoyage_fk_output",
-            )
+        # Empilés plutôt que côte à côte : `champ_chemin` crée déjà ses
+        # propres colonnes pour loger le bouton, et Streamlit interdit de
+        # les imbriquer.
+        fk_input = champ_chemin(
+            "Dossier d'entrée", cle="nettoyage_fk_input",
+            valeur_defaut=str(dlc_output_dir(projet)),
+        )
+        fk_output = champ_chemin(
+            "Dossier de sortie", cle="nettoyage_fk_output",
+            valeur_defaut=str(dlc_output_dir(projet).parent / "dlc-output-filtered"),
+        )
         fk_min_validity = st.number_input(
             "`--min-validity` (0 = désactivé, utiliser `--keep`/`--drop` à la place)",
             min_value=0.0, max_value=1.0, value=0.0, step=0.05,
@@ -560,17 +561,14 @@ def _section_avancee(projet: Path) -> None:
 
         # --- fill_nan_h5 --------------------------------------------------
         st.markdown("**`fill_nan_h5.py`** — comble agressivement les NaN résiduels")
-        col_root, col_out2 = st.columns(2)
-        with col_root:
-            fn_root = st.text_input(
-                "Dossier source (`--root`)", value=str(dlc_output_dir(projet)),
-                key="nettoyage_fn_root",
-            )
-        with col_out2:
-            fn_output = st.text_input(
-                "Dossier de sortie (vide = réécriture en place)",
-                value="", key="nettoyage_fn_output",
-            )
+        fn_root = champ_chemin(
+            "Dossier source (`--root`)", cle="nettoyage_fn_root",
+            valeur_defaut=str(dlc_output_dir(projet)),
+        )
+        fn_output = champ_chemin(
+            "Dossier de sortie (vide = réécriture en place)",
+            cle="nettoyage_fn_output",
+        )
         fn_dry_run = st.checkbox("`--dry-run`", value=True, key="nettoyage_fn_dry_run")
         cmd_fn = PL.fill_nan_h5(
             root=fn_root, output_dir=fn_output or None, dry_run=fn_dry_run,
@@ -589,33 +587,27 @@ def _section_avancee(projet: Path) -> None:
             "début/fin de session, à partir d'un `validity_per_session.csv` "
             "produit par `analyze_vame.py --validity-source`."
         )
-        te_csv = st.text_input(
-            "`--validity-csv`", value="", key="nettoyage_te_csv",
+        te_csv = champ_chemin(
+            "`--validity-csv`", cle="nettoyage_te_csv",
+            mode="fichier", extensions=[".csv"],
             placeholder=str(projet / "results" / "validity_per_session.csv"),
         )
-        col_h5_in, col_h5_out = st.columns(2)
-        with col_h5_in:
-            te_h5_in = st.text_input(
-                "`--h5-input`", value=str(dlc_output_dir(projet)),
-                key="nettoyage_te_h5_in",
-            )
-        with col_h5_out:
-            te_h5_out = st.text_input(
-                "`--h5-output`",
-                value=str(dlc_output_dir(projet).parent / "dlc-output-trimmed"),
-                key="nettoyage_te_h5_out",
-            )
-        col_v_in, col_v_out = st.columns(2)
-        with col_v_in:
-            te_v_in = st.text_input(
-                "`--video-input`", value=str(projet / "data" / "cropped"),
-                key="nettoyage_te_v_in",
-            )
-        with col_v_out:
-            te_v_out = st.text_input(
-                "`--video-output`", value=str(projet / "data" / "cropped-trimmed"),
-                key="nettoyage_te_v_out",
-            )
+        te_h5_in = champ_chemin(
+            "`--h5-input`", cle="nettoyage_te_h5_in",
+            valeur_defaut=str(dlc_output_dir(projet)),
+        )
+        te_h5_out = champ_chemin(
+            "`--h5-output`", cle="nettoyage_te_h5_out",
+            valeur_defaut=str(dlc_output_dir(projet).parent / "dlc-output-trimmed"),
+        )
+        te_v_in = champ_chemin(
+            "`--video-input`", cle="nettoyage_te_v_in",
+            valeur_defaut=str(projet / "data" / "cropped"),
+        )
+        te_v_out = champ_chemin(
+            "`--video-output`", cle="nettoyage_te_v_out",
+            valeur_defaut=str(projet / "data" / "cropped-trimmed"),
+        )
         te_dry_run = st.checkbox("`--dry-run`", value=True, key="nettoyage_te_dry_run")
 
         te_manque = not all([te_csv.strip(), te_h5_in.strip(), te_h5_out.strip(),

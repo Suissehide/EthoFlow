@@ -46,7 +46,9 @@ from lib.config import arena_coords, project_kind, px_per_cm, require_project, s
 from lib.icons import lucide_title
 from lib import sessions as S
 from lib import video as V
-from views import _job, _widgets
+from views import _job
+from views import _widgets
+from views._widgets import champ_chemin
 
 # Labels des arènes dans l'ordre où elles sont cliquées — `crop_arenes.py:130`
 # fait `x, y, w, h = coords`, donc l'ordre des clés n'a pas d'importance pour
@@ -261,9 +263,10 @@ def _section_relink(projet: Path, sessions_manquantes: list[str]) -> None:
         "`<id>.mp4`, où `id` est la clé `id` de la metadata."
     )
 
-    dossier = st.text_input(
-        "Dossier des vidéos", key="videos_relink_dossier",
+    dossier = champ_chemin(
+        "Dossier des vidéos", cle="videos_relink_dossier",
         placeholder="/chemin/vers/les/videos",
+        titre_dialogue="Où sont les vidéos maintenant ?",
     )
     if not dossier:
         return

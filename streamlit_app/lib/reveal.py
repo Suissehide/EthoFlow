@@ -115,10 +115,88 @@ def choisir_dossier(
     c'est celle de l'utilisateur ; consultée à distance, il ne la verrait
     pas s'ouvrir et l'app semblerait figée jusqu'au délai.
     """
-    commande = _commande_dialogue(titre, depart)
+    return _executer_dialogue(
+        _commande_dialogue(titre, depart), "dossier"
+    )
+
+
+def _commande_dialogue_fichier(
+    titre: str, depart: Path | None, extensions: list[str] | None
+) -> list[str] | None:
+    """Commande ouvrant un sélecteur de FICHIER natif, ou None si aucune."""
+    plateforme = _plateforme()
+    if plateforme == "darwin":
+        script = f'POSIX path of (choose file with prompt "{titre}"'
+        if extensions:
+            liste = ", ".join(f'"{e.lstrip(".")}"' for e in extensions)
+            script += f" of type {{{liste}}}"
+        if depart and depart.is_dir():
+            script += f' default location POSIX file "{depart}"'
+        script += ")"
+        return ["osascript", "-e", script]
+    if plateforme == "windows":
+        if extensions:
+            motifs = ";".join(f"*{e}" for e in extensions)
+            filtre = f"Fichiers ({motifs})|{motifs}|Tous|*.*"
+        else:
+            filtre = "Tous|*.*"
+        ps = (
+            "Add-Type -AssemblyName System.Windows.Forms;"
+            "$d = New-Object System.Windows.Forms.OpenFileDialog;"
+            f'$d.Title = "{titre}";'
+            f'$d.Filter = "{filtre}";'
+        )
+        if depart and depart.is_dir():
+            ps += f'$d.InitialDirectory = "{depart}";'
+        ps += "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.FileName }"
+        return ["powershell", "-NoProfile", "-Command", ps]
+    for outil in ("zenity", "kdialog"):
+        if shutil.which(outil):
+            if outil == "zenity":
+                cmd = ["zenity", "--file-selection", f"--title={titre}"]
+                if depart and depart.is_dir():
+                    cmd.append(f"--filename={depart}/")
+                if extensions:
+                    motifs = " ".join(f"*{e}" for e in extensions)
+                    cmd.append(f"--file-filter={motifs}")
+                return cmd
+            cmd = ["kdialog", "--getopenfilename",
+                   str(depart if depart and depart.is_dir() else Path.home())]
+            if extensions:
+                cmd.append(" ".join(f"*{e}" for e in extensions))
+            return cmd
+    return None
+
+
+def choisir_fichier(
+    titre: str = "Choisir un fichier",
+    depart: Path | None = None,
+    extensions: list[str] | None = None,
+) -> tuple[Path | None, str]:
+    """Sélecteur de fichier natif. Mêmes trois issues que `choisir_dossier`.
+
+    `extensions` filtre l'affichage (« .yaml », « .xlsx »…) ; c'est une aide,
+    pas une contrainte — l'appelant reste responsable de valider ce qui
+    revient.
+    """
+    return _executer_dialogue(
+        _commande_dialogue_fichier(titre, depart, extensions),
+        "fichier",
+    )
+
+
+def _executer_dialogue(
+    commande: list[str] | None, quoi: str
+) -> tuple[Path | None, str]:
+    """Exécute un sélecteur natif et normalise ses trois issues.
+
+    Factorisé entre dossier et fichier : c'est la gestion des issues qui
+    est délicate, pas la commande, et la dupliquer ferait diverger le
+    traitement de l'annulation.
+    """
     if commande is None:
         return None, (
-            "Aucun sélecteur de dossier disponible sur cette machine "
+            f"Aucun sélecteur de {quoi} disponible sur cette machine "
             "(ni zenity ni kdialog) — saisis le chemin à la main."
         )
     try:

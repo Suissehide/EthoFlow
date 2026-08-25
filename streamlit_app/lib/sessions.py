@@ -178,3 +178,80 @@ def arenes_dataframe(meta: dict | None) -> pd.DataFrame:
                 ligne[cle] = "" if valeur is None else str(valeur)
         lignes.append(ligne)
     return pd.DataFrame(lignes, columns=colonnes)
+
+
+def save_metadata_fields(
+    project: Path, session_id: str, champs: dict
+) -> bool:
+    """Met à jour des clés scalaires d'un `metadata.yaml`, sans rien perdre.
+
+    Seules les clés passées sont écrites. Tout le reste — `source_video`,
+    `arenes`, `camera`, et les colonnes Excel qu'on n'affiche pas — est
+    conservé tel quel, dans son ordre d'origine. C'est la même règle que
+    pour `motif_labels.csv` : ce fichier contient le travail du chercheur,
+    l'app n'en édite que ce qu'elle montre.
+
+    Retourne True si le fichier a été écrit.
+    """
+    chemin = raw_dir(Path(project)) / session_id / "metadata.yaml"
+    if not chemin.is_file():
+        return False
+    meta = load_metadata(project, session_id)
+    if meta is None:
+        return False
+    for cle, valeur in champs.items():
+        # Une cellule vidée retire la clé plutôt que d'y laisser "" : une
+        # chaîne vide deviendrait un groupe à part entière dans les analyses.
+        if valeur is None or (isinstance(valeur, str) and not valeur.strip()):
+            meta.pop(cle, None)
+        else:
+            meta[cle] = valeur.strip() if isinstance(valeur, str) else valeur
+    chemin.write_text(
+        yaml.safe_dump(meta, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return True
+
+
+def save_arenes(project: Path, session_id: str, lignes: list[dict]) -> bool:
+    """Réécrit la liste `arenes` d'une session. Le reste est préservé.
+
+    Les colonnes sont celles que l'appelant fournit — rien n'est présupposé,
+    conformément au principe « l'Excel est à colonnes libres ». Une valeur
+    vide est retirée de l'arène plutôt qu'écrite comme chaîne vide.
+    """
+    chemin = raw_dir(Path(project)) / session_id / "metadata.yaml"
+    if not chemin.is_file():
+        return False
+    meta = load_metadata(project, session_id)
+    if meta is None:
+        return False
+
+    arenes: list[dict] = []
+    for ligne in lignes:
+        arene = {}
+        for cle, valeur in ligne.items():
+            if valeur is None or (isinstance(valeur, str) and not valeur.strip()):
+                continue
+            if cle == "coords" and isinstance(valeur, str):
+                # La colonne affiche "(à définir)" ou une liste : on ne
+                # réécrit que ce qui est déjà une vraie liste.
+                continue
+            arene[cle] = valeur.strip() if isinstance(valeur, str) else valeur
+        if arene:
+            arenes.append(arene)
+
+    # Les coords existantes ne transitent pas par le tableau (elles viennent
+    # de calibrate_arenes) : on les réinjecte par id d'arène.
+    anciennes = {a.get("id"): a.get("coords") for a in (meta.get("arenes") or [])}
+    for arene in arenes:
+        coords = anciennes.get(arene.get("id"))
+        if coords is not None:
+            arene["coords"] = coords
+
+    meta["arenes"] = arenes
+    chemin.write_text(
+        yaml.safe_dump(meta, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return True

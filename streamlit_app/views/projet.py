@@ -31,6 +31,7 @@ from lib.config import (
 from lib.icons import lucide_title
 from lib.sessions import list_sessions
 from views import _job
+from views._widgets import champ_chemin
 
 
 # ============================================================
@@ -379,7 +380,11 @@ def _section_modele_dlc(projet: Path) -> None:
     options = [str(m / "config.yaml") for m in modeles]
     choisi = (st.selectbox("Modèles trouvés", options=options, key="modele_dlc_trouve")
               if options else None)
-    libre = st.text_input("…ou un chemin de config.yaml", value="", key="modele_dlc_libre")
+    libre = champ_chemin(
+        "…ou un chemin de config.yaml", cle="modele_dlc_libre",
+        mode="fichier", extensions=[".yaml", ".yml"],
+        titre_dialogue="Choisir le config.yaml du modèle DLC",
+    )
     chemin = libre.strip() or choisi
     if chemin:
         # Écriture locale instantanée, pas un job : `set_dlc_config` ne
