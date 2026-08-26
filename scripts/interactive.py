@@ -193,6 +193,53 @@ def prompt_project(root: Path = DEFAULT_PROJECTS_ROOT,
     return p.resolve()
 
 
+def list_dlc_config_dirs(root: Path = DEFAULT_MODELS_ROOT) -> list[Path]:
+    """Dossiers de config d'entraînement DLC trouvés sous `root`.
+
+    Un dossier de config est reconnu à son `_config.py` — celui qu'écrit
+    le wizard `00_init_training_config.py`. Pendant du `config.yaml` pour
+    `list_dlc_models` : un modèle entraîné a les deux, un projet en cours
+    de création n'a encore que le `_config.py`.
+    """
+    if not root.exists():
+        return []
+    return [d for d in sorted(root.iterdir())
+            if d.is_dir() and (d / "_config.py").exists()]
+
+
+def prompt_dlc_config_dir(root: Path = DEFAULT_MODELS_ROOT,
+                           no_prompt: bool = False) -> Path:
+    """Demande quel dossier de config d'entraînement DLC utiliser.
+
+    Même menu numéroté que `prompt_project` : ce sont les mêmes gestes
+    pour l'utilisateur, sur la même racine que les modèles.
+    """
+    _fail_or_prompt(no_prompt, "--config-dir")
+    dirs = list_dlc_config_dirs(root)
+    if dirs:
+        print(f"Dossiers de config DLC trouvés dans {root} :")
+        for i, d in enumerate(dirs, start=1):
+            print(f"  {i}. {d.name}")
+        print(f"  {len(dirs) + 1}. (autre chemin)")
+        while True:
+            choice = prompt("Dossier de config", default="1")
+            if choice.isdigit():
+                idx = int(choice)
+                if 1 <= idx <= len(dirs):
+                    return dirs[idx - 1]
+                if idx == len(dirs) + 1:
+                    break
+            match = [d for d in dirs if d.name == choice]
+            if match:
+                return match[0]
+            print("  ⚠ choix invalide")
+    else:
+        print(f"Aucun dossier de config DLC sous {root}.\n"
+              "   Le wizard 00_init_training_config.py en crée un.")
+    return prompt_existing_path(
+        "Dossier de config DLC", must_exist=True).resolve()
+
+
 def resolve_or_prompt_project(args: argparse.Namespace,
                                 root: Path = DEFAULT_PROJECTS_ROOT) -> Path:
     """Retourne le projet depuis args.project_dir, ou le demande.

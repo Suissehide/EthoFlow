@@ -783,14 +783,15 @@ Résultat : un `_config.py` écrit dans `D:\EthoFlow\models\souris-bottomview\_c
 ### B.2 — Setup du projet DLC + auto-extraction de frames
 
 ```cmd
-python scripts\dlc_model-training\01_setup_project.py ^
-    --config-dir D:\EthoFlow\models\souris-bottomview
+python scripts\dlc_model-training\01_setup_project.py
 ```
+
+Le dossier de config est demandé à l'invite (menu des dossiers trouvés sous `D:\EthoFlow\models`), ou donné directement avec `--config-dir D:\EthoFlow\models\souris-bottomview`.
 
 Cette commande fait **tout en une passe** :
 
-1. Crée le projet DLC (DLC crée temporairement `<WORKDIR>\<name>-<exp>-<date>\`)
-2. **Merge le contenu du projet DLC dans le dossier de config** — le dossier daté est supprimé, tout vit maintenant côte à côte dans `D:\EthoFlow\models\souris-bottomview\`
+1. Crée le projet DLC. `deeplabcut.create_new_project` nomme toujours son dossier `<nom>-<expérimentateur>-<date>` — le suffixe daté est câblé dans l'API DLC, on ne peut pas lui demander autre chose. Tu as donc, l'espace d'un instant, `D:\EthoFlow\models\souris-bottomview-labo-2026-08-26\` à côté du `souris-bottomview\` que le wizard a créé à l'étape B.1.
+2. **Merge le dossier daté dans le dossier de config**, puis le supprime. Sans ça tu aurais deux dossiers frères pour un seul modèle — l'un avec ton `_config.py`, l'autre avec le projet DLC — et `--config-dir` ne désignerait pas le même endroit que le `config.yaml`. Le merge déplace le contenu, efface le dossier daté devenu vide, et réécrit les chemins absolus à l'intérieur du `config.yaml` (`project_path` et les clés de `video_sets`, qui pointaient encore vers l'ancien nom). Résultat : **un seul dossier par modèle, au nom que tu as choisi** — exactement celui que tu passeras plus tard en `--dlc-config` dans le Parcours A.
 3. **Auto-patche** le `config.yaml` DLC :
    - Écrit les 12 bodyparts (`nose`, `left_ear`, `right_ear`, `front_paw_left/right`, `hind_paw_left/right`, `tail_base/mid/tip`, `center`, `left_flank`) — modifiable via `DEFAULT_BODYPARTS` dans `_config.py`
    - Écrit le skeleton anatomique (12 liaisons) — modifiable via `DEFAULT_SKELETON`
@@ -810,16 +811,6 @@ D:\EthoFlow\models\souris-bottomview\
 ├── training-datasets\
 └── dlc-models\
 ```
-
-Tous les scripts numérotés 02-06 acceptent le même `--config-dir` :
-
-```cmd
-python scripts\dlc_model-training\02_train.py --config-dir D:\EthoFlow\models\souris-bottomview
-python scripts\dlc_model-training\03_apply.py --config-dir D:\EthoFlow\models\souris-bottomview
-:: etc.
-```
-
-Sans `--config-dir`, les scripts retombent sur le template `_config.py` du repo (utile pour tester, pas pour un vrai projet).
 
 ### B.3 — Préparer le training set complet
 
@@ -941,7 +932,7 @@ Audit géométrique qui détecte les frames où left/right paws ont probablement
 
 ### B.4 — Premier entraînement
 
-> **N'oublie pas `--config-dir`** sur cette commande et toutes celles de B.5 à B.6. Sans ce flag, les scripts retombent sur le template `_config.py` du repo et vont chercher un projet DLC qui n'existe pas.
+> **`--config-dir` est optionnel partout dans le Parcours B** — ici comme en B.5 et B.6. Sans lui, le script affiche le menu des dossiers de config trouvés sous `D:\EthoFlow\models` et te demande lequel utiliser, comme `--project-dir` ailleurs. Il est écrit en toutes lettres dans les commandes ci-dessous pour qu'elles restent copiables telles quelles.
 
 ```cmd
 python scripts\dlc_model-training\02_train.py ^
@@ -1126,8 +1117,8 @@ default_arenes_coords:
 **DLC training** (`scripts/dlc_model-training/`) — top-view ou bottom-view, contrôlé via `_config.py`
 - `00_init_training_config.py` — Wizard interactif qui crée un `_config.py` custom dans un dossier hors du repo
 - `_config.py` — Template versionné (défauts + `DEFAULT_BODYPARTS` + `DEFAULT_SKELETON`)
-- `_load_config.py` — Helper commun pour le flag `--config-dir` (partagé par tous les scripts numérotés)
-- `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement, tous acceptent `--config-dir` (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
+- `_load_config.py` — Helper commun pour `--config-dir` : flag, ou menu des dossiers de config trouvés (partagé par tous les scripts numérotés)
+- `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement, tous acceptent `--config-dir` et le demandent s'il manque (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
 - `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent
 
 **DLC inférence**

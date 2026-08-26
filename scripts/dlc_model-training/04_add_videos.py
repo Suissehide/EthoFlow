@@ -173,16 +173,13 @@ def main() -> None:
         help="Override NEW_VIDEO_FRAMES (nombre de kmeans par vidéo).",
     )
     args = parser.parse_args()
-    load_config(args)
+    # `load_config` renseigne args.config_dir (flag ou invite) : le
+    # _config.py à éditer plus bas est toujours celui de l'utilisateur.
+    config_dir = load_config(args)
 
     # Si --videos fourni, écris dans _config.py AVANT de l'importer
     if args.videos:
-        if args.config_dir is None:
-            print("❌ --videos requiert --config-dir (pour trouver le _config.py "
-                  "à modifier). Refuse d'éditer le template du repo.",
-                  file=sys.stderr)
-            sys.exit(1)
-        cfg_py = args.config_dir.resolve() / "_config.py"
+        cfg_py = config_dir / "_config.py"
         # Vérifie que les vidéos existent avant d'écrire
         missing = [v for v in args.videos if not v.exists()]
         if missing:

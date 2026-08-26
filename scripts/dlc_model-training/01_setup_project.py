@@ -7,8 +7,8 @@ définis dans `_config.py`, puis lance l'extraction k-means.
 Workflow simplifié :
     1. python scripts/dlc_model-training/00_init_training_config.py
        (wizard → écrit ton _config.py custom)
-    2. python scripts/dlc_model-training/01_setup_project.py \\
-           --config-dir <dossier créé à l'étape 1>
+    2. python scripts/dlc_model-training/01_setup_project.py
+       (le dossier créé à l'étape 1 est demandé, ou donné en --config-dir)
     3. dlc.label_frames(CONFIG) dans une session Python pour labelliser
        (ou GUI : python -c "import deeplabcut; deeplabcut.launch_dlc()")
 
@@ -30,21 +30,8 @@ import argparse
 import sys
 from pathlib import Path
 
-
-def _load_config(config_dir: Path | None):
-    """Insère `config_dir` (ou le dossier du script) en tête de sys.path
-    pour que `from _config import ...` cible la bonne copie.
-    """
-    if config_dir is not None:
-        cd = config_dir.resolve()
-        if not (cd / "_config.py").exists():
-            print(f"❌ _config.py introuvable dans {cd}\n"
-                  f"   Lance d'abord : python scripts/dlc_model-training/"
-                  f"00_init_training_config.py", file=sys.stderr)
-            sys.exit(1)
-        sys.path.insert(0, str(cd))
-    else:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
 def patch_dlc_config(config_path: Path, bodyparts: list[str],
@@ -150,12 +137,7 @@ def merge_dlc_project_into_config_dir(dlc_config_path: Path,
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument(
-        "--config-dir", type=Path, default=None,
-        help="Dossier contenant ton _config.py custom (produit par "
-             "00_init_training_config.py). Sans ce flag, utilise le "
-             "template dans scripts/dlc_model-training/.",
-    )
+    add_config_dir_arg(parser)
     parser.add_argument(
         "--skip-extract", action="store_true",
         help="Ne lance pas l'extraction k-means à la fin (utile si tu "
@@ -163,7 +145,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    _load_config(args.config_dir)
+    config_dir = load_config(args)
     import deeplabcut as dlc  # noqa: E402 — après sys.path setup
     from _config import (  # noqa: E402
         DEFAULT_BODYPARTS,
@@ -197,14 +179,8 @@ def main() -> None:
     # contenu dans <WORKDIR>/<name>/ (le dossier de config), et on
     # supprime le dossier daté vide. Résultat : un SEUL dossier par
     # projet, contenant à la fois _config.py et le projet DLC.
-    if args.config_dir is not None:
-        target_dir = args.config_dir.resolve()
-    else:
-        # Cas legacy sans --config-dir : on merge dans WORKDIR/PROJECT_NAME
-        target_dir = WORKDIR / PROJECT_NAME
-        target_dir.mkdir(parents=True, exist_ok=True)
     config_path = merge_dlc_project_into_config_dir(
-        config_path, target_dir, PROJECT_NAME, EXPERIMENTER,
+        config_path, config_dir, PROJECT_NAME, EXPERIMENTER,
     )
     print(f"✅ Projet DLC prêt dans : {config_path.parent}\n")
 

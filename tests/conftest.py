@@ -15,7 +15,8 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 
 # `lib.*` et `paths` doivent être importables comme dans l'app.
-for extra in (ROOT / "streamlit_app", ROOT / "scripts"):
+for extra in (ROOT / "streamlit_app", ROOT / "scripts",
+              ROOT / "scripts" / "dlc_model-training"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 

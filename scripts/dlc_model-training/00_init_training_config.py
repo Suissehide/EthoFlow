@@ -10,7 +10,8 @@ pour recréer un config (il t'avertira si le fichier existe déjà).
 
 Après génération, tous les scripts numérotés (01 → 06) acceptent un flag
 `--config-dir <chemin>` qui pointe vers le dossier contenant ton
-`_config.py`. Sans ce flag, ils retombent sur le template du repo.
+`_config.py`. Sans ce flag, ils affichent le menu des dossiers de config
+trouvés et te demandent lequel utiliser.
 
 Usage :
     python scripts/dlc_model-training/00_init_training_config.py
