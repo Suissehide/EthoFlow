@@ -120,15 +120,7 @@ python -c "from importlib.metadata import version; print('vame', version('vame')
 python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 ```
 
-Le paquet `vame` n'expose pas d'attribut `__version__` — `import vame; print(vame.__version__)` lève `AttributeError`. On passe donc par `importlib.metadata`, qui lit la version depuis les métadonnées d'installation.
-
-Au premier `import vame`, VAME logue lui-même l'état GPU :
-
-```
-INFO --- vame.util.auxiliary : Using CUDA — GPU: NVIDIA GeForce RTX 5080
-```
-
-Cette ligne suffit : si elle apparaît, l'env `vame` voit la GPU. **Les envs sont indépendants** — `vame` peut très bien être en CUDA pendant que `dlc` est en CPU, chacun a son propre torch.
+Doit afficher le numéro de version, puis `CUDA: True`. Sinon → `python scripts\diagnose_gpu.py --fix` dans cet env aussi (chaque env a son propre torch).
 
 ---
 
@@ -1248,6 +1240,19 @@ Si tu voulais en fait utiliser un **autre** modèle déjà entraîné, corrige l
 # <project>/configs/pipeline_config.yaml
 dlc_project_config: D:\EthoFlow\models\<modele-entraine>\config.yaml
 ```
+
+### `run_vame.py setup` : "Config file is not found"
+
+Corrigé — si tu le vois encore, c'est que ta copie du repo est antérieure.
+
+`create_project.py` crée le squelette du projet, `data/vame/` compris, vide. `vame.init_new_project` ne teste que l'existence du dossier :
+
+```python
+if project_path.exists():
+    return projconfigfile, read_config(projconfigfile)
+```
+
+Il prenait donc ce dossier vide pour un projet déjà initialisé, sautait la création, et plantait en lisant un `config.yaml` jamais écrit. `setup` efface maintenant le dossier s'il est vide (rien à y perdre, VAME le recrée) ; un vrai projet VAME reste protégé et demande `--force`. Contournement sur une ancienne copie : supprime `<project>/data/vame/` à la main avant de relancer `setup`.
 
 ### VAME `motif_videos` : "Video capture could not be opened"
 
