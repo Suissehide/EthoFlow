@@ -116,11 +116,13 @@ Dans les deux cas `diagnose_gpu.py --fix` tranche. À refaire après chaque `con
 
 ```cmd
 conda activate vame
-python -c "from importlib.metadata import version; print('vame', version('vame'))"
+pip show vame-py
 python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 ```
 
 Doit afficher le numéro de version, puis `CUDA: True`. Sinon → `python scripts\diagnose_gpu.py --fix` dans cet env aussi (chaque env a son propre torch).
+
+Le paquet s'installe sous le nom `vame-py` mais s'importe en `import vame` — d'où `pip show vame-py` et non `vame`.
 
 ---
 

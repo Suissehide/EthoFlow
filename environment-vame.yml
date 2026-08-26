@@ -11,9 +11,13 @@
 #   conda activate vame
 #
 # Vérification :
-#   python -c "from importlib.metadata import version; print(version('vame'))"
-#   (le paquet n'expose pas d'attribut __version__ ; au premier import,
-#    VAME logue lui-même « Using CUDA — GPU: ... » s'il voit la carte)
+#   pip show vame-py
+#
+#   Le paquet s'installe sous le nom `vame-py` et s'importe en `vame` :
+#   ni `vame.__version__` (l'attribut n'existe pas) ni
+#   `importlib.metadata.version('vame')` (mauvais nom de distribution) ne
+#   fonctionnent. Au premier `import vame`, VAME logue de lui-même
+#   « Using CUDA — GPU: ... » s'il voit la carte.
 
 name: vame
 channels:
