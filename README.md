@@ -1122,6 +1122,7 @@ default_arenes_coords:
 - `inspect_session.py` — QC par session (couverture, gaps)
 - `inspect_vame_project.py` — QC d'un projet VAME (.nc files)
 - `diagnose_dlc_model.py` — Diagnostique un modèle DLC qui refuse de servir à l'inférence (projet déplacé, shuffle incohérent, jamais entraîné) et répare
+- `diagnose_gpu.py` — Diagnostique `torch.cuda.is_available() == False` : build CPU, build CUDA trop ancienne pour la carte, driver absent — et donne la commande de réinstallation adaptée
 - `prepare_dlc_feedback_kit.py` — Kit diagnostic à envoyer à une équipe partenaire
 
 **Visualisations**
@@ -1137,23 +1138,36 @@ default_arenes_coords:
 
 ## Troubleshooting
 
-### CUDA non détectée ou torch=cpu
-
-Piège fréquent sur Windows : `pip install torch` récupère parfois la build CPU. Après création de l'env `dlc`, vérifie :
+### CUDA non détectée (`torch.cuda.is_available()` → False)
 
 ```cmd
 conda activate dlc
-python -c "import torch; print(torch.__version__)"
+python scripts\diagnose_gpu.py
 ```
 
-Si ça finit par `+cpu`, ou si tu as une GPU Blackwell (RTX 50xx) qu'aucune build stable ne supporte encore, installe la nightly CUDA 12.8 :
+Le script identifie laquelle des quatre causes s'applique et donne la commande exacte. Il vérifie le driver (`nvidia-smi`), la build torch, l'architecture de la carte, puis tente un vrai calcul GPU.
+
+| Ce qu'il affiche | Cause | Correction |
+|---|---|---|
+| `torch 2.5.1+cpu` → build CPU | `pip install torch` sert la build CPU par défaut sur Windows. **Le piège n°1.** | réinstaller sur l'index CUDA (commande donnée par le script) |
+| build CUDA trop ancienne pour la carte | RTX 50xx = Blackwell/sm_120, absent des builds stables | nightly `cu128` |
+| `nvidia-smi` introuvable | driver absent, ou pas de GPU NVIDIA | installer le driver, ou accepter le CPU |
+| build correcte mais GPU invisible | `CUDA_VISIBLE_DEVICES`, session RDP, GPU accaparée | vérifier l'env, puis réinstaller |
+
+À la main, si tu préfères :
 
 ```cmd
+python -c "import torch; print(torch.__version__)"
+:: finit par +cpu ? alors :
 pip uninstall torch torchvision torchaudio -y
 pip install --pre torch torchvision torchaudio ^
     --index-url https://download.pytorch.org/whl/nightly/cu128
 python -c "import torch; x = torch.randn(1024,1024,device='cuda'); print(torch.cuda.get_device_name(0))"
 ```
+
+**Attention à l'environnement.** Chaque env conda a son propre torch : `dlc` peut voir la GPU pendant que `vame` ne la voit pas. Lance le diagnostic dans l'env où tu as le problème, pas dans `base`.
+
+**Sans GPU, le pipeline tourne quand même** — DLC et VAME fonctionnent sur CPU, 10 à 50× plus lentement. Pour l'inférence sur quelques vidéos c'est tenable ; pour entraîner un modèle DLC ou le VAE de VAME, il faut une GPU.
 
 ### « Could not find a shuffle with trainingset fraction 0.95 and index 1 »
 
