@@ -12,15 +12,22 @@ Il y a quatre causes possibles et elles ne se corrigent pas pareil :
 
 Le script identifie laquelle et donne la commande exacte à lancer.
 
+C'est LE problème qu'on rencontre après chaque `conda env create -f
+environment-dlc.yml` : le fichier d'env installe `torch` depuis PyPI, et
+PyPI sert la build CPU sur Windows. Recréer l'env repose donc le problème
+à chaque fois — d'où `--fix`, qui réinstalle sans rien avoir à recopier.
+
 Usage :
     conda activate dlc
-    python scripts/diagnose_gpu.py
+    python scripts/diagnose_gpu.py          # diagnostic seul
+    python scripts/diagnose_gpu.py --fix    # diagnostic + réinstallation
 
 Sans GPU, le pipeline tourne quand même : DLC et VAME fonctionnent sur CPU,
 juste 10 à 50× plus lentement. Le script le rappelle en fin de diagnostic.
 """
 from __future__ import annotations
 
+import argparse
 import platform
 import re
 import shutil
@@ -129,7 +136,38 @@ def cuda_install_cmd(tag: str, nightly: bool) -> str:
     )
 
 
+def apply_fix(tag: str, nightly: bool) -> int:
+    """Désinstalle torch et réinstalle depuis le bon index. Renvoie un code.
+
+    On passe par `sys.executable -m pip` et non `pip` : ça garantit qu'on
+    installe dans l'environnement courant, même si un autre pip traîne
+    plus haut dans le PATH (piège classique avec conda sur Windows).
+    """
+    index = (f"https://download.pytorch.org/whl/nightly/{tag}" if nightly
+             else f"https://download.pytorch.org/whl/{tag}")
+    steps = [
+        [sys.executable, "-m", "pip", "uninstall", "-y",
+         "torch", "torchvision", "torchaudio"],
+        [sys.executable, "-m", "pip", "install"]
+        + (["--pre"] if nightly else [])
+        + ["torch", "torchvision", "torchaudio", "--index-url", index],
+    ]
+    for cmd in steps:
+        print(f"\n$ {' '.join(cmd[2:])}\n")
+        r = subprocess.run(cmd)
+        if r.returncode != 0 and "uninstall" not in cmd:
+            print(f"\n❌ Échec (code {r.returncode}).", file=sys.stderr)
+            return r.returncode
+    return 0
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--fix", action="store_true",
+                        help="Réinstalle torch depuis l'index CUDA adapté "
+                             "à ta carte, dans l'environnement courant.")
+    args = parser.parse_args()
+
     print("=" * 66)
     print("Diagnostic GPU / CUDA")
     print("=" * 66)
@@ -242,6 +280,21 @@ def main() -> None:
 
     tag, nightly = pick_wheel_index(min_cuda, cuda_max)
     print()
+
+    if args.fix:
+        print(f"--fix : réinstallation depuis {tag}"
+              f"{' (nightly)' if nightly else ''}")
+        print(f"        environnement ciblé : {sys.executable}")
+        print("=" * 66)
+        rc = apply_fix(tag, nightly)
+        if rc == 0:
+            print()
+            print("=" * 66)
+            print("Réinstallation terminée. Relance le diagnostic :")
+            print("  python scripts/diagnose_gpu.py")
+            print("=" * 66)
+        sys.exit(rc)
+
     print("Dans l'environnement où tu as le problème :")
     print()
     print(f"  {cuda_install_cmd(tag, nightly)}")
@@ -250,7 +303,8 @@ def main() -> None:
         print("  (nightly : aucune build stable ne couvre encore cette "
               "architecture)")
     print()
-    print("Puis relance ce script pour confirmer.")
+    print("Ou laisse le script le faire :")
+    print("  python scripts/diagnose_gpu.py --fix")
     print("=" * 66)
     sys.exit(1)
 

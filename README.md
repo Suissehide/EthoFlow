@@ -81,14 +81,24 @@ conda env create -f environment-vame.yml        :: env "vame"
 
 Chaque env prend 10-20 min. Ils sont isolés : DLC (torch/DeepLabCut) et VAME ont des dépendances incompatibles, donc **jamais mélanger**.
 
-### 3. Vérifier la GPU (côté DLC)
+### 3. Réparer torch pour la GPU — obligatoire sur Windows
 
 ```cmd
 conda activate dlc
-python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('GPU :', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
+python scripts\diagnose_gpu.py --fix
 ```
 
-Doit afficher `CUDA: True` et le nom de ta carte. Sinon → [Troubleshooting CUDA](#cuda-non-détectée-ou-torch-cpu).
+**Cette étape n'est pas optionnelle et n'est pas à faire une seule fois.** Le fichier `environment-dlc.yml` installe `torch` depuis PyPI, qui sert la **build CPU** sur Windows. Un fichier conda ne peut pas dépendre de l'OS, donc chaque `conda env create -f environment-dlc.yml` — y compris une recréation — repose le problème.
+
+Le script détecte l'architecture de ta carte et réinstalle depuis l'index CUDA adapté (nightly `cu128` pour une RTX 50xx, stable sinon). Sur Mac il ne fait rien : pas de CUDA.
+
+Puis vérifie :
+
+```cmd
+python scripts\diagnose_gpu.py
+```
+
+Doit finir par `✅ Rien à faire, l'entraînement utilisera la GPU.` Sinon → [Troubleshooting CUDA](#cuda-non-détectée-torchcudais_available--false).
 
 ### 4. Vérifier VAME
 
@@ -418,6 +428,17 @@ Une fenêtre s'ouvre, tu cliques les deux extrémités de la distance connue, le
 
 **Ce n'est pas obligatoire.** Le pipeline tourne sans : tu peux enchaîner directement sur l'étape 7 avec les `.h5` bruts. Cette étape est de l'assurance qualité, pas une conversion de format. Elle vaut le coup si tes vidéos ont des occlusions (bottom-view avec pattes qui passent sous le corps), un contraste faible, ou si le modèle DLC est encore jeune. Si ton modèle est excellent et tes vidéos propres, elle ne changera presque rien — le résumé de fin (`% utilisables`, nombre de frames réparées) te le dira en une ligne.
 
+Quatre passes successives par session :
+
+1. **Filtre médian temporel** (`dlc.filterpredictions`, fenêtre 5 frames) — tue les jitters d'une ou deux frames.
+2. **Cutoff de likelihood** (`--likelihood-threshold`, défaut 0.70) — le filet grossier.
+3. **Détection de vitesse aberrante** (`--max-speed`, défaut 5 m/s) — la méthode que Tony privilégie. Convertit chaque déplacement inter-frame en m/s via `px_per_cm` et marque les frames physiquement impossibles. **Indépendant de la likelihood** : attrape aussi les labels *confiants mais faux*. Nécessite l'étape 6a, sinon la passe est silencieusement désactivée.
+4. **Détection de points collants** — repère les coordonnées où un keypoint atterrit anormalement souvent (reflet IR fixe, coin d'arène). Tony : « parfois les labels bruités sautent toujours au même point que l'animal ne peut pas atteindre ». Le script distingue un artefact (frames dispersées dans le temps) d'une immobilité réelle (frames contiguës) et ne touche qu'aux premiers.
+
+Les frames marquées par 2/3/4 sont **interpolées** depuis leurs voisines valides, pas jetées. Les trous > `--interp-limit` (défaut 25 frames ≈ 1 s) restent NaN.
+
+**Qu'est-ce que la « likelihood » exactement ?** C'est un nombre entre 0 et 1 que DeepLabCut produit à côté de chaque coordonnée `(x, y)` : sa propre estimation de la probabilité que ce point soit au bon endroit. Elle vient de l'intensité du pic dans la carte de chaleur que le réseau produit pour ce keypoint — pic net et isolé → likelihood proche de 1 ; carte plate ou à deux pics → likelihood basse. C'est une auto-évaluation du modèle, pas une vérité : **un point peut être faux tout en étant confiant** (le modèle confond systématiquement patte avant droite et patte avant gauche, par exemple). D'où les passes 3 et 4 ci-dessous, qui ne regardent pas la likelihood du tout.
+
 ```cmd
 :: Interactif — les seuils sont demandés avec leur valeur par défaut
 python scripts\prepare_vame_input_custom.py
@@ -439,17 +460,6 @@ par interpolation depuis les frames voisines.
   · 0.7 = recommandation de l'équipe VAME/LIN
 Seuil de likelihood [0.7] :
 ```
-
-**Qu'est-ce que la « likelihood » exactement ?** C'est un nombre entre 0 et 1 que DeepLabCut produit à côté de chaque coordonnée `(x, y)` : sa propre estimation de la probabilité que ce point soit au bon endroit. Elle vient de l'intensité du pic dans la carte de chaleur que le réseau produit pour ce keypoint — pic net et isolé → likelihood proche de 1 ; carte plate ou à deux pics → likelihood basse. C'est une auto-évaluation du modèle, pas une vérité : **un point peut être faux tout en étant confiant** (le modèle confond systématiquement patte avant droite et patte avant gauche, par exemple). D'où les passes 3 et 4 ci-dessous, qui ne regardent pas la likelihood du tout.
-
-Quatre passes successives par session :
-
-1. **Filtre médian temporel** (`dlc.filterpredictions`, fenêtre 5 frames) — tue les jitters d'une ou deux frames.
-2. **Cutoff de likelihood** (`--likelihood-threshold`, défaut 0.70) — le filet grossier.
-3. **Détection de vitesse aberrante** (`--max-speed`, défaut 5 m/s) — la méthode que Tony privilégie. Convertit chaque déplacement inter-frame en m/s via `px_per_cm` et marque les frames physiquement impossibles. **Indépendant de la likelihood** : attrape aussi les labels *confiants mais faux*. Nécessite l'étape 6a, sinon la passe est silencieusement désactivée.
-4. **Détection de points collants** — repère les coordonnées où un keypoint atterrit anormalement souvent (reflet IR fixe, coin d'arène). Tony : « parfois les labels bruités sautent toujours au même point que l'animal ne peut pas atteindre ». Le script distingue un artefact (frames dispersées dans le temps) d'une immobilité réelle (frames contiguës) et ne touche qu'aux premiers.
-
-Les frames marquées par 2/3/4 sont **interpolées** depuis leurs voisines valides, pas jetées. Les trous > `--interp-limit` (défaut 25 frames ≈ 1 s) restent NaN.
 
 **Critère d'acceptation** — le script produit un graphe avant/après par session dans `data/dlc-output/_qc_trajectories/`. Le nom du fichier est `<session>_<keypoint>.png`, par exemple `BV-970_tail_base.png` : le graphe ne trace **qu'un seul keypoint**, celui passé à `--qc-bodypart`, et `tail_base` est le défaut. C'est le point le plus stable du corps — il ne disparaît jamais sous l'animal et bouge peu par rapport au centre de masse, donc un saut visible sur sa trajectoire est forcément une erreur de tracking, jamais un vrai mouvement. Le keypoint est dans le nom pour que tu puisses en tracer plusieurs sans écraser le précédent :
 

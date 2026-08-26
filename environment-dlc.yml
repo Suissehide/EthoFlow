@@ -1,5 +1,20 @@
 # Environnement DeepLabCut 3.x (PyTorch backend).
 #
+# ####################################################################
+# #  DEUX COMMANDES, PAS UNE. La création de l'env installe torch    #
+# #  en build CPU sur Windows — c'est PyPI qui sert ça par défaut,   #
+# #  et un fichier conda ne peut pas dépendre de l'OS. Il faut donc  #
+# #  TOUJOURS enchaîner :                                            #
+# #                                                                  #
+# #      conda env create -f environment-dlc.yml                     #
+# #      conda activate dlc                                          #
+# #      python scripts/diagnose_gpu.py --fix                        #
+# #                                                                  #
+# #  Le second script détecte ta carte et réinstalle torch depuis    #
+# #  le bon index CUDA. Sur Mac il ne fait rien (pas de CUDA).       #
+# #  À refaire à CHAQUE recréation de l'env.                         #
+# ####################################################################
+#
 # Installable sur :
 #   - Mac (Apple Silicon ou Intel) : tourne en CPU ou MPS, pour tests / inférence légère
 #   - Linux/Windows + GPU NVIDIA      : tourne en CUDA, pour entraînement et prod
@@ -8,13 +23,9 @@
 # sur PyPI ; sans lui, pip retombe sur DLC 2.3.x (TensorFlow), qui ne supporte
 # pas Apple Silicon (build de PyTables 3.8.0 en échec).
 #
-# Création :
-#   conda env create -f environment-dlc.yml
-#   conda activate dlc
-#
 # Vérification :
 #   python -c "import deeplabcut; print(deeplabcut.__version__)"
-#   python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('MPS:', torch.backends.mps.is_available())"
+#   python scripts/diagnose_gpu.py
 
 name: dlc
 channels:
@@ -32,12 +43,18 @@ dependencies:
       - --pre
       - deeplabcut[gui,modelzoo]
 
-# ⚠️ APRÈS création de l'env, sur Windows ou Linux avec GPU NVIDIA :
-# vérifier que torch a bien la build CUDA. Si `torch.__version__` finit
-# par '+cpu' (cas fréquent sur Windows) OU si tu as un GPU Blackwell
-# (RTX 50xx, sm_120) qu'aucune build stable ne supporte encore, faire :
+# ⚠️ RAPPEL — l'étape suivante n'est pas optionnelle sur Windows/Linux+GPU :
 #
 #     conda activate dlc
+#     python scripts/diagnose_gpu.py --fix
+#
+# `pip install torch` (ci-dessus) récupère la build CPU sur Windows.
+# Le script détecte l'architecture de ta carte et réinstalle depuis
+# l'index CUDA adapté — nightly cu128 pour une RTX 50xx (Blackwell,
+# sm_120), stable sinon. Sans ça, `torch.cuda.is_available()` renvoie
+# False et tout tourne 10 à 50× plus lentement.
+#
+# Équivalent manuel, si tu préfères :
 #     pip uninstall torch torchvision torchaudio -y
 #     pip install --pre torch torchvision torchaudio \
 #         --index-url https://download.pytorch.org/whl/nightly/cu128
