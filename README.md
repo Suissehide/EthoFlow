@@ -570,14 +570,13 @@ python scripts\run_vame.py motif-videos
 python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet motif-videos
 ```
 
-Elle produit les clips (`data/vame/results/community_videos/motif_<N>.mp4`) **et** `data/vame/motif_labels.csv`, pré-rempli avec une ligne par motif :
+Elle produit les clips (`data/vame/results/community_videos/motif_<N>.mp4`) **et** `data/vame/motif_labels.csv`, pré-rempli avec une ligne par motif — **séparateur `;`**, comme attendu par Excel en locale française :
 
-```csv
-motif_id;label;category;confidence;qc_inspected_sessions;notes;usage_pct;video
-0;;;;;;18.42;results/community_videos/motif_0.mp4
-1;;;;;;12.07;results/community_videos/motif_1.mp4
-2;;;;;;9.85;results/community_videos/motif_2.mp4
-```
+| motif_id | label | category | confidence | qc_inspected_sessions | notes | usage_pct | video |
+|---|---|---|---|---|---|---|---|
+| 0 | | | | | | 18.42 | `results/community_videos/motif_0.mp4` |
+| 1 | | | | | | 12.07 | `results/community_videos/motif_1.mp4` |
+| 2 | | | | | | 9.85 | `results/community_videos/motif_2.mp4` |
 
 `usage_pct` (fréquence du motif, toutes sessions confondues) et `video` (chemin du clip) sont remplis pour toi. `label` et `category` sont vides — c'est ton travail après visionnage. Trie par `usage_pct` décroissant et commence par le haut : les motifs à moins de 1 % ne pèsent presque rien dans les analyses.
 
@@ -589,11 +588,20 @@ python scripts\run_vame.py motif-labels
 
 **2. Remplir `label` et `category`.** Le `label` est un nom libre et spécifique (`grooming_face`, `walking_slow`) ; la `category` vient du référentiel ETHOGRAM : `Locomotion`, `Stationary`, `Vertical exploration`, `Sniffing`, `Grooming`, `Exploration`, `Specific behaviors`, `Transitions`. Les analyses groupent par `category`, donc reste dans cette liste.
 
+| motif_id | label | category | confidence | qc_inspected_sessions | notes | usage_pct | video |
+|---|---|---|---|---|---|---|---|
+| 0 | `grooming_face` | `Grooming` | `high` | BV-970 | | 18.42 | `results/community_videos/motif_0.mp4` |
+| 1 | `walking` | `Locomotion` | `high` | BV-970,BV-971 | | 12.07 | `results/community_videos/motif_1.mp4` |
+
+Soit, dans le fichier :
+
 ```csv
 motif_id;label;category;confidence;qc_inspected_sessions;notes;usage_pct;video
 0;grooming_face;Grooming;high;BV-970;;18.42;results/community_videos/motif_0.mp4
 1;walking;Locomotion;high;BV-970,BV-971;;12.07;results/community_videos/motif_1.mp4
 ```
+
+Plusieurs sessions dans `qc_inspected_sessions` se séparent par une virgule — le champ n'est pas entouré de guillemets, c'est le `;` qui délimite les colonnes.
 
 Un motif ininterprétable (bruit de tracking, animal hors champ) : mets `artifact` dans **`confidence`**, `analyze_vame.py` l'exclura des stats au lieu de le compter comme un comportement.
 
