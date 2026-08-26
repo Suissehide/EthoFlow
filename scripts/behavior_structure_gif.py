@@ -52,14 +52,21 @@ Usage :
         --with-video --start 120 --duration 30 --output-format mp4
 
     # Manifold POOLÉ sur toutes les sessions du projet (référentiel commun).
-    # La 1re fois : ~5-15 min pour fit UMAP sur ~1M points, cache écrit
-    # dans <vame>/analysis/behavior_structure/pooled_umap.npz.
-    # Les runs suivants sur d'autres sessions réutilisent le cache
-    # instantanément — parfait pour générer 1 anim par groupe expérimental
-    # avec un référentiel identique entre les figures.
+    # ~5-15 min pour fit UMAP sur ~1M points. Le cache est nommé par session
+    # ANIMÉE (elle seule est gardée en full-res, ce qui change les données
+    # envoyées à UMAP) : relancer sur la même session est instantané, sur
+    # une autre session refait l'ajustement.
     python scripts/behavior_structure_gif.py \\
         --project-dir <...> --session BV-970 \\
         --pool-all-sessions --with-video --output-format mp4
+
+    # Idem, mais le nuage de fond est restreint aux sessions qui partagent
+    # la `condition` de BV-970 — une figure par groupe expérimental, avec
+    # des axes identiques d'une figure à l'autre (l'ajustement UMAP, lui,
+    # reste commun à tout le projet).
+    python scripts/behavior_structure_gif.py \\
+        --project-dir <...> --session BV-970 \\
+        --pool-by condition --with-video --output-format mp4
 """
 from __future__ import annotations
 
@@ -73,6 +80,126 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from interactive import prompt_session  # noqa: E402
 from paths import add_project_dir_arg, raw_dir, resolve_project, vame_dir  # noqa: E402
+
+
+def _read_metadata(project_ethoflow: Path, session: str) -> dict:
+    """metadata.yaml d'une session, dict vide si absente ou illisible."""
+    import yaml
+    meta_path = raw_dir(project_ethoflow) / session / "metadata.yaml"
+    if not meta_path.exists():
+        return {}
+    try:
+        return yaml.safe_load(meta_path.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 — une metadata cassée ne doit pas
+        return {}      # faire tomber le rendu, elle rend juste la session
+                       # inclassable (traitée comme sans valeur)
+
+
+def session_group_values(project_ethoflow: Path, sessions: list[str],
+                          column: str) -> dict[str, str | None]:
+    """{session: valeur de `column`}, None quand la colonne n'est pas remplie.
+
+    Même source que le reste du pipeline : les colonnes de l'Excel
+    recopiées dans `metadata.yaml` par `sync_from_excel.py`.
+    """
+    out: dict[str, str | None] = {}
+    for s in sessions:
+        raw = _read_metadata(project_ethoflow, s).get(column)
+        out[s] = None if raw is None or str(raw).strip() == "" else str(raw)
+    return out
+
+
+def resolve_pool_group(project_ethoflow: Path,
+                        session_slices: dict[str, tuple[int, int]],
+                        column: str, target_session: str) -> str:
+    """Valeur de `column` sur laquelle restreindre le nuage de fond.
+
+    C'est celle de la session animée : pooler « toutes les MCCiECKO » en
+    animant une session MCCf/f donnerait une trajectoire hors de son
+    propre nuage.
+    """
+    vals = session_group_values(project_ethoflow, list(session_slices), column)
+    valeur = vals.get(target_session)
+    if valeur is not None:
+        return valeur
+
+    # Rien à quoi se raccrocher : on distingue les deux causes, qui ne se
+    # corrigent pas de la même façon.
+    colonnes = sorted({
+        c for s in session_slices
+        for c in _read_metadata(project_ethoflow, s)
+        if c != "source_video"
+    })
+    if column not in colonnes:
+        print(f"❌ --pool-by {column} : colonne absente des metadata.\n"
+              f"   Disponibles : {', '.join(colonnes) or '(aucune)'}\n"
+              f"   (ajoute-la à ton Excel puis relance sync_from_excel.py)",
+              file=sys.stderr)
+    else:
+        print(f"❌ --pool-by {column} : la session animée {target_session} "
+              f"n'a pas de valeur pour cette colonne.\n"
+              f"   Impossible de savoir à quel groupe restreindre le nuage.",
+              file=sys.stderr)
+    sys.exit(1)
+
+
+def group_background_mask(project_ethoflow: Path,
+                           session_slices: dict[str, tuple[int, int]],
+                           column: str, value: str, total: int) -> np.ndarray:
+    """Masque des frames du pool appartenant aux sessions du groupe.
+
+    Les bornes viennent de `session_slices`, renvoyé par
+    `build_pooled_projection` : la projection n'est PAS recalculée, on ne
+    fait que cacher les points des autres groupes. C'est ce qui garde les
+    axes identiques d'une figure de groupe à l'autre — deux UMAP ajustés
+    séparément ne sont pas superposables.
+    """
+    vals = session_group_values(project_ethoflow, list(session_slices), column)
+    retenues = [s for s, v in vals.items() if v == value]
+    mask = np.zeros(total, dtype=bool)
+    for s in retenues:
+        start, end = session_slices[s]
+        mask[start:end] = True
+    if len(retenues) == 1:
+        print(f"    · {column}={value} ne compte qu'1 session ({retenues[0]}) "
+              f"— le nuage sera maigre.", file=sys.stderr)
+    return mask
+
+
+def pool_name_fragment(pool_all: bool, column: str | None,
+                        value: str | None) -> str:
+    """Fragment de nom de fichier décrivant l'étendue du nuage de fond.
+
+    Le groupe doit être dans le nom : sans lui, la figure « MCCiECKO » et
+    la figure « MCCf/f » de la même session animée s'écrasent l'une
+    l'autre. Les caractères illégaux en nom de fichier sont remplacés —
+    `MCCf/f` est une valeur parfaitement normale dans un Excel.
+    """
+    if value is None:
+        return "_pooled" if pool_all else ""
+    safe = "".join(c if c.isalnum() or c in "-_." else "-"
+                   for c in f"{column}-{value}")
+    return f"_pooled-{safe}"
+
+
+def axis_limits(coords: np.ndarray, margin: float = 0.05
+                 ) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Bornes (xlim, ylim) englobant `coords`, avec une marge relative.
+
+    Sert à figer le cadrage sur le pool COMPLET quand `--pool-by` ne
+    trace qu'un groupe : matplotlib cadre sinon sur les seuls points
+    tracés, et deux figures de groupes différents se retrouveraient à des
+    zooms différents — ce qui annulerait tout l'intérêt d'un ajustement
+    UMAP commun.
+    """
+    x, y = coords[:, 0], coords[:, 1]
+    out = []
+    for v in (x, y):
+        lo, hi = float(np.min(v)), float(np.max(v))
+        span = hi - lo
+        pad = span * margin if span > 0 else 1.0  # nuage dégénéré
+        out.append((lo - pad, hi + pad))
+    return out[0], out[1]
 
 
 def find_source_video(project_ethoflow: Path, session: str) -> Path | None:
@@ -180,6 +307,11 @@ def build_pooled_projection(
         - session_slices        : {session_id: (start_idx, end_idx)} pour
                                   retrouver la tranche d'une session dans
                                   les arrays poolés.
+        - target_dependent      : True si le cap a forcé un
+                                  sous-échantillonnage, donc si
+                                  l'ajustement dépend de `target_session`
+                                  (deux sessions cibles → deux manifolds
+                                  différents, non superposables).
 
     Le résultat est cache-persistent : la 1re fois on fit UMAP/PCA sur
     l'ensemble (peut prendre plusieurs minutes) ; les fois suivantes on
@@ -194,8 +326,13 @@ def build_pooled_projection(
     if cache_path.exists():
         print(f"  Cache hit : réutilise {cache_path.name}")
         cache = np.load(cache_path, allow_pickle=True)
+        # `target_dependent` est apparu après les premiers caches : absent
+        # = ancien fichier, on ne peut rien affirmer, on suppose le cas
+        # prudent (dépendant) pour ne pas taire un avertissement mérité.
+        dep = bool(cache["target_dependent"]) if "target_dependent" in cache \
+            else True
         return (cache["coords_2d"], cache["labels"],
-                cache["session_slices"].item())
+                cache["session_slices"].item(), dep)
 
     sessions = discover_all_sessions(vame_project, algo)
     if not sessions:
@@ -257,9 +394,10 @@ def build_pooled_projection(
         coords_2d=all_coords_2d,
         labels=all_labels,
         session_slices=np.array(session_slices, dtype=object),
+        target_dependent=step_others > 1,
     )
     print(f"  Cache écrit : {cache_path}")
-    return all_coords_2d, all_labels, session_slices
+    return all_coords_2d, all_labels, session_slices, step_others > 1
 
 
 def load_motif_names(labels_csv: Path | None) -> dict[int, str]:
@@ -374,6 +512,15 @@ def main() -> None:
                              "session ciblée. Plus long (UMAP sur N× plus "
                              "de points) mais beaucoup plus parlant pour "
                              "une figure de publi.")
+    parser.add_argument("--pool-by", default=None, metavar="COLONNE",
+                        help="Restreint le nuage de fond aux sessions qui "
+                             "partagent la valeur de COLONNE (une colonne de "
+                             "ton Excel, ex : condition) avec la session "
+                             "--session. Implique --pool-all-sessions. "
+                             "L'ajustement UMAP reste commun à TOUT le "
+                             "projet — donc le cache poolé est réutilisé tel "
+                             "quel et deux figures de groupes différents ont "
+                             "exactement les mêmes axes, donc se comparent.")
     parser.add_argument("--pool-cache", type=Path, default=None,
                         help="Fichier .npz où mettre en cache la projection "
                              "poolée. Défaut auto : "
@@ -452,6 +599,13 @@ def main() -> None:
     # - pool-all-sessions : UMAP/PCA sur tout le projet, extrait la tranche
     #   de la session ciblée pour l'animation. Le background scatter reste
     #   sur TOUT le pool (le contexte global du dataset).
+    if args.pool_by and not args.pool_all_sessions:
+        # L'ajustement commun EST ce qui rend les figures de groupes
+        # comparables : demander l'un sans l'autre n'a pas de sens.
+        print(f"ℹ  --pool-by {args.pool_by} implique --pool-all-sessions.")
+        args.pool_all_sessions = True
+
+    pool_group = None
     if args.pool_all_sessions:
         # Cache : sensible à target_session + max_frames car ils changent
         # les données envoyées à UMAP (target en full-res, autres subsampled)
@@ -460,7 +614,7 @@ def main() -> None:
             vame_proj / "analysis" / "behavior_structure"
             / f"pooled_{args.projection}_{cap_tag}_target-{args.session}.npz"
         )
-        pool_coords, pool_labels, pool_slices = build_pooled_projection(
+        pool_coords, pool_labels, pool_slices, fit_depends_on_target = build_pooled_projection(
             vame_proj, args.algo, args.projection, cache_path,
             target_session=args.session,
             max_frames=args.pool_max_frames,
@@ -479,6 +633,35 @@ def main() -> None:
         # `pool_coords` + `pool_labels` restent dispo pour le background
         bg_coords = pool_coords
         bg_labels = pool_labels
+        if args.pool_by:
+            pool_group = resolve_pool_group(
+                project, pool_slices, args.pool_by, args.session)
+            mask = group_background_mask(
+                project, pool_slices, args.pool_by, pool_group,
+                total=len(pool_coords))
+            bg_coords = pool_coords[mask]
+            bg_labels = pool_labels[mask]
+            n_grp = sum(1 for s in pool_slices
+                        if mask[pool_slices[s][0]:pool_slices[s][1]].any())
+            print(f"  Nuage restreint à {args.pool_by}={pool_group} : "
+                  f"{n_grp} sessions, {len(bg_coords):,} points "
+                  f"(projection inchangée, axes communs)")
+            if fit_depends_on_target:
+                # Le cap a sous-échantillonné : l'ajustement a vu la session
+                # animée en full-res et les autres 1/N. Une figure sur une
+                # AUTRE session animée part donc d'un ajustement différent —
+                # les deux ne se superposent plus, ce qui est précisément la
+                # promesse de --pool-by.
+                print(f"  ⚠  Le cap --pool-max-frames a sous-échantillonné le "
+                      f"pool, donc cet ajustement dépend de la session animée "
+                      f"({args.session}).\n"
+                      f"     Une figure sur une autre session ne sera PAS "
+                      f"superposable à celle-ci.\n"
+                      f"     Pour une série de figures comparables : "
+                      f"--pool-max-frames 0 --umap-reproducible "
+                      f"(plus long, mais l'ajustement devient identique "
+                      f"quelle que soit la session animée).",
+                      file=sys.stderr)
     else:
         coords_2d = project_to_2d(latents, args.projection)
         bg_coords = coords_2d  # single-session : background = anim
@@ -627,9 +810,22 @@ def main() -> None:
                   edgecolor="gray", alpha=0.7),
     )
 
+    if pool_group is not None:
+        # Cadrage figé sur le pool entier : sans ça, chaque groupe serait
+        # zoomé sur son propre nuage et les figures ne se superposeraient
+        # plus, alors même que la projection est commune.
+        (x0, x1), (y0, y1) = axis_limits(pool_coords)
+        ax.set_xlim(x0, x1)
+        ax.set_ylim(y0, y1)
+
     ax.set_xlabel(f"{args.projection.upper()}-1")
     ax.set_ylabel(f"{args.projection.upper()}-2")
-    title_scope = "pooled dataset" if args.pool_all_sessions else args.session
+    if pool_group is not None:
+        title_scope = f"{args.pool_by} = {pool_group}"
+    elif args.pool_all_sessions:
+        title_scope = "pooled dataset"
+    else:
+        title_scope = args.session
     ax.set_title(f"Behavior manifold — {title_scope}\n"
                  f"animated trajectory : {args.session}"
                  if args.pool_all_sessions
@@ -715,7 +911,7 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     suffix = f"_{args.start:.0f}s_{args.duration:.0f}s" if args.duration else "_full"
     side = "_sidebyside" if video_cap is not None else ""
-    pool = "_pooled" if args.pool_all_sessions else ""
+    pool = pool_name_fragment(args.pool_all_sessions, args.pool_by, pool_group)
     stem = f"{args.session}_manifold_{args.projection}{pool}{side}{suffix}"
 
     # Callback de progression : matplotlib appelle ce truc à chaque frame

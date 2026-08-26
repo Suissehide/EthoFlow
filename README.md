@@ -784,6 +784,54 @@ python scripts\community_dendrogram.py
 python scripts\community_dendrogram.py --project-dir D:\EthoFlow\projects\mon-projet --group MCCiECKO
 ```
 
+##### Un manifold par groupe expérimental
+
+`--pool-by <colonne>` restreint le nuage de fond aux sessions qui partagent la valeur de cette colonne avec la session animée — une figure « les MCCiECKO », une figure « les MCCf/f » :
+
+```cmd
+:: BV-970 est MCCiECKO → nuage = toutes les sessions MCCiECKO
+python scripts\behavior_structure_gif.py --session BV-970 --pool-by condition ^
+    --with-video --duration 30 --output-format mp4
+
+:: BV-981 est MCCf/f → nuage = toutes les sessions MCCf/f
+python scripts\behavior_structure_gif.py --session BV-981 --pool-by condition ^
+    --with-video --duration 30 --output-format mp4
+```
+
+Le groupe est celui de la session animée, lu dans sa `metadata.yaml` — pas besoin de le nommer, et ça évite d'animer une trajectoire qui serait hors de son propre nuage. N'importe quelle colonne de ton Excel marche, comme pour `analyze_vame.py`.
+
+**L'ajustement UMAP reste commun à tout le projet** : `--pool-by` implique `--pool-all-sessions`, réutilise tel quel le cache poolé, et ne fait que masquer les points des autres groupes. Le cadrage des axes est en plus figé sur le pool entier, pas sur le nuage filtré — sinon chaque groupe serait zoomé sur lui-même. Un cluster au même endroit est donc le même comportement, et « ce cluster est vide chez les MCCiECKO » se lit d'un coup d'œil.
+
+> **Une condition pour que ça tienne.** Par défaut, `--pool-max-frames 300000` sous-échantillonne les sessions *autres* que celle qui est animée, gardée en full-res. L'ajustement dépend donc de `--session` : deux figures animant deux sessions différentes partent de deux ajustements différents et **ne se superposent pas**. Le script te prévient quand c'est le cas. Pour une série de figures réellement comparables :
+>
+> ```cmd
+> python scripts\behavior_structure_gif.py --session BV-970 --pool-by condition ^
+>     --pool-max-frames 0 --umap-reproducible
+> ```
+>
+> `--pool-max-frames 0` retire le cap (toutes les sessions en full-res, l'ajustement ne dépend plus de la session animée) et `--umap-reproducible` fixe `random_state` (UMAP devient déterministe, au prix du single-thread). Les deux ensemble garantissent un manifold identique d'une figure à l'autre. C'est plus long : à réserver aux figures finales.
+
+Le nom de sortie porte le groupe (`BV-970_manifold_umap_pooled-condition-MCCiECKO_...`), donc deux groupes ne s'écrasent pas.
+
+##### Limiter le nombre de points
+
+Deux caps distincts, qui ne coupent pas au même endroit :
+
+| Flag | Défaut | Ce qu'il limite | Effet |
+|---|---|---|---|
+| `--pool-max-frames` | 300000 | Les frames envoyées à **UMAP** | Le coût du calcul et du cache. La session animée reste **toujours** en full-res (l'animation en a besoin frame par frame) ; les autres sessions sont sous-échantillonnées uniformément. `0` désactive le cap |
+| `--background-max-points` | 80000 | Les points réellement **tracés** | Le poids du fichier et le temps de rendu. Sous-échantillonnage **stratifié par motif**, pour qu'un motif rare ne disparaisse pas du nuage |
+
+En pratique : si UMAP est trop long ou mange trop de RAM, baisse `--pool-max-frames` ; si c'est le GIF qui est lourd ou le rendu matplotlib qui rame, baisse `--background-max-points`. Avec `--pool-by`, le cap d'affichage s'applique **après** le filtre de groupe : tu gardes 80 000 points *du groupe*, pas 80 000 points de tout le dataset dont une fraction du groupe.
+
+```cmd
+:: Figure légère : moins de calcul UMAP et un nuage plus clairsemé
+python scripts\behavior_structure_gif.py --session BV-970 --pool-by condition ^
+    --pool-max-frames 100000 --background-max-points 25000 --duration 20
+```
+
+Le cache est nommé d'après `--pool-max-frames` **et** la session animée — les deux changent les données envoyées à UMAP. Changer l'un ou l'autre force un recalcul complet (5-15 min sur un vrai projet). Fixe-les une bonne fois avant de générer ta série de figures, et vois l'encadré ci-dessus si tu veux que ces figures soient superposables.
+
 ---
 
 ## Parcours B — entraîner un nouveau modèle DLC
@@ -1200,7 +1248,7 @@ default_arenes_coords:
 
 **Visualisations**
 - `motif_gif.py` — GIF/MP4 vidéo + bande motif color-codée
-- `behavior_structure_gif.py` — Manifold VAME style, side-by-side avec la vidéo, mode poolé
+- `behavior_structure_gif.py` — Manifold VAME style, side-by-side avec la vidéo, mode poolé (tout le projet ou un groupe via `--pool-by`)
 
 **Utilitaires transverses**
 - `paths.py` — Résolution des chemins projet-aware (importé par tous les autres)
