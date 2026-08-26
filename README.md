@@ -611,24 +611,9 @@ Ce CSV est lu par toutes les analyses en aval. Sans lui, les figures affichent `
 
 ### Étape 9 — analyses + visualisations
 
-```cmd
-:: Interactif
-python scripts\analyze_vame.py
+À ce stade, chaque frame de chaque session porte un numéro de motif. L'analyse ne calcule plus rien de lourd : elle **recoupe** ces motifs selon les colonnes de ton Excel. Tout se joue donc sur une seule question — *par quoi je regroupe mes sessions ?* — traitée en détail ci-dessous.
 
-:: Ou avec arguments
-python scripts\analyze_vame.py --project-dir D:\EthoFlow\projects\mon-projet
-
-:: Analyses étendues (bouts, spatial, temporal quarters)
-python scripts\analyze_vame.py --project-dir D:\EthoFlow\projects\mon-projet --extended --extended-by group4
-```
-
-Sortie dans `data/vame/analysis/` :
-- **CSV** : `motif_usage.csv`, `motif_usage_long.csv`, `stats_by_motif_*.csv`, `usage_by_category.csv`
-- **Heatmaps groupées** : `heatmap_usage_by_<colonne>.png` (sessions triées par groupe, séparateurs visuels)
-- **Barres + boxplots** : `mean_by_*.png`, `boxplots_top_by_*.png`, `boxplots_by_category_by_*.png`
-- **Extended** : `bout_duration_by_*.png`, `thigmotaxis_by_*.png`, `temporal_by_motif_*.png`
-
-Les stats utilisent Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3 groupes) avec correction Benjamini-Hochberg.
+Tout sort dans `data/vame/analysis/`. Les stats utilisent Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3 groupes), avec correction Benjamini-Hochberg sur l'ensemble des motifs testés.
 
 #### Comment les colonnes de ton Excel deviennent des graphes
 
@@ -686,38 +671,91 @@ python scripts\analyze_vame.py
 ... (idem pour condition, regime_alimentaire, sex, cage, group4)
 ```
 
-Pour chaque axe tu obtiens : une heatmap groupée, un graphe en barres, des boxplots des 6 motifs les plus différenciants, un CSV de stats, et — si tu as rempli les catégories dans `motif_labels.csv` — les mêmes par catégorie ETHOGRAM.
+Chaque axe donne la même série complète de figures — détaillée dans [Quels graphes je vais obtenir ?](#quels-graphes-je-vais-obtenir-) plus bas.
 
 **3. Restreindre à ce qui t'intéresse.** Sur 6 axes ça fait beaucoup de fichiers ; `--group-by` limite :
 
 ```cmd
-:: Un seul axe
 python scripts\analyze_vame.py --group-by captopril
+```
 
-:: Deux axes, chacun avec sa série de graphes
+#### Un axe, deux axes, un croisement : quelle différence ?
+
+C'est le point qui se comprend mal, parce que les trois formes se ressemblent en ligne de commande et ne produisent pas du tout la même chose.
+
+**Un axe = une série de graphes.** C'est l'unité de base. `--group-by captopril` sépare tes 16 sessions en 2 paquets (Captopril / Control) et produit une série complète pour cette découpe.
+
+**Deux axes = deux séries indépendantes, pas un croisement.** C'est le malentendu classique :
+
+```cmd
 python scripts\analyze_vame.py --group-by condition captopril
 ```
 
-**4. Croiser deux colonnes** (design factoriel) avec `--cross` :
+Ça ne fait **pas** une analyse à deux facteurs. Ça fait exactement ce que feraient deux commandes lancées l'une après l'autre : une série qui répond « le génotype change-t-il le comportement ? » (2 groupes de 8), puis une série qui répond « le captopril change-t-il le comportement ? » (2 autres groupes de 8, avec les mêmes sessions redistribuées). Les fichiers ne s'écrasent pas, leur nom porte l'axe (`mean_by_condition.png`, `mean_by_captopril.png`).
+
+**Un croisement = un seul axe composite.** `--cross` fabrique une colonne qui n'existe pas dans ton Excel, en collant les valeurs des deux colonnes :
 
 ```cmd
-:: 4 groupes : MCCf/f_Control, MCCf/f_Captopril, MCCiECKO_Control, MCCiECKO_Captopril
 python scripts\analyze_vame.py --cross condition captopril
-
-:: Croisement + axes simples, et plusieurs croisements
-python scripts\analyze_vame.py --group-by sex --cross condition captopril --cross sex cage
 ```
 
-La colonne composite s'appelle `condition_x_captopril` et les fichiers suivent (`mean_by_condition_x_captopril.png`). Une session dont l'une des deux valeurs manque est exclue de ce croisement uniquement, pas des autres graphes.
+Tes 16 sessions se répartissent alors en 4 paquets de 4 : `MCCf/f_Control`, `MCCf/f_Captopril`, `MCCiECKO_Control`, `MCCiECKO_Captopril`. La colonne s'appelle `condition_x_captopril`, et les fichiers suivent (`mean_by_condition_x_captopril.png`). C'est la découpe qui montre ce que fait le traitement **dans chaque génotype** — invisible sur deux axes séparés, où chaque effet est moyenné sur l'autre facteur.
+
+| | Ce que tu écris | Sessions découpées en | Fichiers produits | La question à laquelle ça répond |
+|---|---|---|---|---|
+| **Un axe** | `--group-by captopril` | 2 groupes de 8 | 1 série `*_by_captopril.*` | Le captopril change-t-il le comportement ? |
+| **Deux axes** | `--group-by condition captopril` | 2 groupes de 8, **puis** 2 autres groupes de 8 | 2 séries indépendantes | Chacun des deux facteurs pris **séparément** |
+| **Croisement** | `--cross condition captopril` | 4 groupes de 4 | 1 série `*_by_condition_x_captopril.*` | À quoi ressemble **chaque combinaison** |
+
+Les formes se combinent — le croisement s'ajoute aux axes simples, et `--cross` est répétable :
+
+```cmd
+python scripts\analyze_vame.py --group-by sex --cross condition captopril --cross sex cage
+:: → 3 séries : sex, condition_x_captopril, sex_x_cage
+```
+
+> **Le croisement n'est pas un test d'interaction.** Sur 4 groupes, le test devient un Kruskal-Wallis, qui répond « au moins un des 4 groupes diffère des autres » — pas « le captopril agit différemment selon le génotype ». Pour trancher une interaction il faut une ANOVA à deux facteurs, que ce script ne fait pas : sers-toi de `motif_usage_long.csv` dans R ou statsmodels. Et surveille les effectifs : croiser deux facteurs à 2 valeurs sur 16 sessions donne 4 groupes de 4, à la limite basse de ce qui se teste (un motif dont un groupe compte moins de 3 sessions est ignoré).
 
 `group4` (génotype × captopril) existe en dur pour rétrocompatibilité avec les analyses déjà produites — c'est exactement l'équivalent de `--cross condition captopril`.
 
-**5. Analyses étendues sur l'axe de ton choix :**
+**`--extended` est d'une autre nature : il ne boucle pas.** Là où `--group-by` répète tout pour chaque axe, les analyses étendues tournent **une seule fois, sur un seul axe**, celui de `--extended-by` (défaut : `condition`). Elles coûtent 5-10 min de plus parce qu'elles relisent le label de **chaque frame**, pas seulement les fréquences par session — c'est ce qui permet de mesurer des durées et une chronologie.
 
 ```cmd
+:: Étendu sur une colonne de l'Excel
 python scripts\analyze_vame.py --extended --extended-by regime_alimentaire
+
+:: Étendu sur un croisement : il faut déclarer le croisement ET le nommer
 python scripts\analyze_vame.py --extended --cross condition captopril --extended-by condition_x_captopril
 ```
+
+#### Quels graphes je vais obtenir ?
+
+**Tu ne choisis pas le type de graphe** — il n'y a pas de `--plot heatmap`. Chaque axe produit toujours la même série complète, et c'est le type de figure qui est choisi *pour* la question qu'il sait montrer. Ce que tu choisis, ce sont les **axes** (`--group-by`, `--cross`) et la profondeur (`--extended`).
+
+Pour un axe `<col>`, quelle qu'en soit la nature (colonne de l'Excel ou croisement) :
+
+| Fichier | Type | Ce qu'il montre | Quand le regarder |
+|---|---|---|---|
+| `heatmap_usage_by_<col>.png` | Heatmap sessions × motifs | Une ligne par session, triée par groupe, bandeau de couleur et séparateur entre groupes | **En premier.** C'est la vue d'ensemble : si une bande verticale change de teinte d'un bloc à l'autre, ce motif distingue tes groupes. Montre aussi les sessions aberrantes, qu'une moyenne cache |
+| `mean_by_<col>.png` | Barres groupées | Fréquence moyenne de chaque motif, une barre par groupe | Pour lire l'amplitude d'un effet repéré sur la heatmap, motif par motif |
+| `boxplots_top_by_<col>.png` | Boxplots | Distribution des **6 motifs les plus différenciants** (plus grand écart de moyenne entre groupes) | Pour juger si l'effet tient à la dispersion ou à deux ou trois sessions extrêmes. Les barres montrent la moyenne, les boxplots la variabilité |
+| `stats_by_motif_<col>.csv` | CSV | Mann-Whitney (2 groupes) ou Kruskal-Wallis (≥3), p-value, q-value BH, moyenne et n par groupe | Pour la significativité. Les 6 motifs des boxplots sont les plus *différents*, pas forcément les plus *significatifs* — ce CSV tranche |
+
+Et **seulement si tu as rempli la colonne `category`** de `motif_labels.csv` à l'étape 8, les trois mêmes vues au niveau des 8 catégories ETHOGRAM plutôt que des 15 motifs : `mean_by_category_by_<col>.png`, `boxplots_by_category_by_<col>.png`, `stats_by_category_by_<col>.csv`. C'est le niveau de lecture qui se met dans un papier — « moins de grooming » se raconte, « moins de motif 7 » non.
+
+Produit une seule fois, indépendamment des axes : `heatmap_usage.png` (toutes sessions en ordre alphabétique, utile en audit), `motif_usage.csv` (tableau sessions × motifs), `motif_usage_long.csv` (format long, une ligne par session × motif — c'est celui à ouvrir dans R ou pandas) et `usage_by_category.csv`.
+
+Avec `--extended`, trois figures de plus, **sur le seul axe `--extended-by`** :
+
+| Fichier | Type | Ce qu'il montre |
+|---|---|---|
+| `bout_duration_by_<col>.png` | Barres | Durée moyenne d'un épisode ininterrompu dans chaque motif. Distingue « la souris fait ça plus souvent » de « elle y reste plus longtemps » — deux effets que la fréquence seule confond |
+| `temporal_by_motif_<col>.png` | Grille de courbes (1 panneau par motif) | L'évolution de chaque motif sur les 4 quarts de la session. Sépare un effet réel d'une simple habituation à l'arène |
+| `thigmotaxis_by_<col>.png` | Barres | Fraction du temps passée au centre de l'arène (via `tail_base`). Moins de centre = plus de thigmotaxie, la mesure d'anxiété classique en open-field |
+
+Chacune a son CSV à côté (`bout_durations_by_<col>.csv`, `temporal_quarters_by_<col>.csv`, `spatial_center_periphery_by_<col>.csv`).
+
+Enfin, ce qui ne sort pas de ce script : le manifold et les GIF de motifs (en fin d'étape ci-dessous), et le dendrogramme de proximité des motifs (`community_dendrogram.py`), qui a remplacé les matrices de transitions — il porte la même information, en plus lisible qu'une matrice 15×15.
 
 **Combien de groupes, combien de sessions ?** Le test statistique s'adapte : 2 groupes → Mann-Whitney, 3+ → Kruskal-Wallis. En dessous de 3 sessions par groupe le motif est ignoré (pas assez pour un test). Un axe à 6 groupes sur 16 sessions donnera des p-values inexploitables — regarde `--list-columns` et vérifie que chaque valeur a assez de sessions avant de conclure quoi que ce soit.
 

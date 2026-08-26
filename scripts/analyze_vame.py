@@ -1219,10 +1219,12 @@ def main() -> None:
                              "empty-arena du dénominateur (le count original "
                              "reste dans la colonne 'count' pour audit).")
     parser.add_argument("--extended", action="store_true",
-                        help="Analyses étendues (~5-10 min supplémentaires) : "
-                             "matrices de transitions par groupe, durée moyenne "
-                             "de bout par motif, dynamique temporelle (4 quarts), "
-                             "analyse spatiale (center/periphery via tail_base).")
+                        help="Analyses étendues (~5-10 min supplémentaires, "
+                             "elles relisent le label de chaque frame) : durée "
+                             "moyenne de bout par motif, dynamique temporelle "
+                             "(4 quarts), analyse spatiale (center/periphery "
+                             "via tail_base). Tourne une seule fois, sur le "
+                             "seul axe --extended-by.")
     parser.add_argument("--extended-by", default="condition",
                         help="Colonne de groupement pour les analyses "
                              "étendues (défaut : condition). N'importe quelle "
