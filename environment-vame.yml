@@ -11,16 +11,12 @@
 #   conda activate vame
 #
 # Vérification :
-#   pip show vame-py
 #   python -c "import torch; print('CUDA:', torch.cuda.is_available())"
-#
-#   Le paquet s'installe sous le nom `vame-py` et s'importe en `vame` :
-#   ni `vame.__version__` (l'attribut n'existe pas) ni
-#   `importlib.metadata.version('vame')` (mauvais nom de distribution) ne
-#   fonctionnent. Au premier `import vame`, VAME logue de lui-même
-#   « Using CUDA — GPU: ... » s'il voit la carte.
-#
 #   Si CUDA: False → python scripts/diagnose_gpu.py --fix
+#
+# Le paquet s'installe sous le nom `vame-py` et s'importe en `vame`.
+# Pour connaître la version : `pip show vame-py` (ni `vame.__version__`
+# ni `importlib.metadata.version('vame')` ne fonctionnent).
 
 name: vame
 channels:
