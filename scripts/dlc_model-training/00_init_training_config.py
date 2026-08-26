@@ -194,15 +194,24 @@ def main() -> None:
     print()
     print(f"✅ Écrit : {target}")
     print()
+    vue = "bottom-view" if sa_choice == "quadruped" else "top-view"
+    from _config import KEYPOINTS_PAR_VUE
+    bodyparts, skeleton = KEYPOINTS_PAR_VUE[superanimal]
+
     print("Étape suivante :")
     print(f"  conda activate dlc")
-    print(f"  python scripts\\dlc_model-training\\01_setup_project.py \\")
+    print(f"  python scripts\\dlc_model-training\\01_setup_project.py ^")
     print(f"      --config-dir {config_dir}")
     print()
+    print("  (--config-dir est optionnel : sans lui, 01 affiche la liste des")
+    print("   dossiers de config trouvés et te demande lequel utiliser.)")
+    print()
     print("Le script 01 va :")
-    print(f"  1. Créer le projet DLC dans {workdir}\\{project_name}\\")
+    print(f"  1. Créer le projet DLC dans {config_dir}\\")
     print(f"     (à côté du _config.py, dans le même dossier — pas de split)")
-    print(f"  2. Écrire automatiquement les 12 bodyparts + skeleton dans config.yaml")
+    print(f"  2. Écrire dans config.yaml les {len(bodyparts)} keypoints "
+          f"{vue} + leurs {len(skeleton)} liaisons :")
+    print(f"     {', '.join(bodyparts)}")
     print(f"  3. Régler numframes2pick = {n_auto_frames}")
     print(f"  4. Extraire les {n_auto_frames} frames k-means")
 
