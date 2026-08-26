@@ -187,3 +187,47 @@ def pipeline_config_path(project: Path) -> Path:
     return project / "configs" / "pipeline_config.yaml"
 
 
+
+
+# ----------------------------------------------------------------------
+# Modèle DLC
+# ----------------------------------------------------------------------
+
+# Noms possibles du fichier de config à la racine d'un projet DeepLabCut.
+# DLC écrit toujours `config.yaml` ; `.yml` est accepté par tolérance.
+DLC_CONFIG_NAMES = ("config.yaml", "config.yml")
+
+
+def normalize_dlc_config(path: str | Path) -> str:
+    """Chemin du `config.yaml` d'un modèle DLC, à partir du dossier OU du fichier.
+
+    Un projet DLC est un dossier dont la racine contient `config.yaml`.
+    Désigner ce dossier est le geste naturel — c'est ce qu'on voit dans
+    l'explorateur, c'est ce que donne « Copier en tant que chemin » — mais
+    tout le pipeline (`analyze_videos`, `check_project_path`,
+    `dlc_config_status`) attend le fichier. Sans ce complément, un modèle
+    parfaitement valide ressort en « introuvable ».
+
+    - dossier contenant `config.yaml`/`config.yml` → ce fichier ;
+    - dossier sans config → `<dossier>/config.yaml` quand même, pour que
+      l'erreur en aval désigne le bon endroit ;
+    - tout le reste (fichier, chemin inexistant) → inchangé.
+    """
+    p = Path(path).expanduser()
+    if p.is_dir():
+        for nom in DLC_CONFIG_NAMES:
+            if (p / nom).is_file():
+                return str(p / nom)
+        return str(p / DLC_CONFIG_NAMES[0])
+    return str(p)
+
+
+def dlc_model_dir(path: str | Path) -> Path:
+    """Racine du projet DLC, à partir du dossier OU de son `config.yaml`.
+
+    Réciproque de `normalize_dlc_config`, pour les outils qui travaillent
+    sur l'arborescence du modèle (`dlc-models/`, `labeled-data/`) plutôt
+    que sur son fichier de config.
+    """
+    p = Path(normalize_dlc_config(path))
+    return p.parent if p.name in DLC_CONFIG_NAMES else p

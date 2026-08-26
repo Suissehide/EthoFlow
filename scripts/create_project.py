@@ -62,6 +62,7 @@ from paths import (  # noqa: E402
     cropped_dir,
     data_dir,
     dlc_output_dir,
+    normalize_dlc_config,
     pipeline_config_path,
     raw_dir,
     results_dir,
@@ -85,10 +86,15 @@ DEFAULT_PROJECTS_ROOT = r"D:\EthoFlow\projects"
 
 
 def build_pipeline_config(kind: str, dlc_config: str | None) -> dict:
-    """Construit la config pipeline du projet selon son type."""
+    """Construit la config pipeline du projet selon son type.
+
+    `dlc_config` accepte le dossier du modèle DLC autant que son
+    `config.yaml` : on stocke toujours le fichier, seul chemin que
+    `analyze_videos` sait lire.
+    """
     config: dict = {}
     if dlc_config:
-        config["dlc_project_config"] = dlc_config
+        config["dlc_project_config"] = normalize_dlc_config(dlc_config)
 
     if kind == "multi":
         config["default_arenes_coords"] = DEFAULT_MULTI_ARENA_COORDS
@@ -160,8 +166,9 @@ def main() -> None:
     parser.add_argument(
         "--dlc-config", type=str, default=None,
         help=(
-            "OPTIONNEL. Chemin absolu vers le config.yaml d'un projet DLC "
-            "déjà entraîné. Écrit dans pipeline_config.yaml comme "
+            "OPTIONNEL. Chemin absolu vers un projet DLC déjà entraîné — "
+            "son dossier ou directement son config.yaml. Écrit dans "
+            "pipeline_config.yaml comme "
             "`dlc_project_config`, lu uniquement par run_dlc_inference.py "
             "--mode custom. Le modèle DLC reste où il est (jamais copié) "
             "et peut servir à autant de projets EthoFlow que tu veux. "
@@ -222,7 +229,8 @@ def main() -> None:
     if dlc_config is None and not args.no_prompt and args.project_dir is None:
         # Ne demande qu'en mode interactif complet, et laisse passer vide
         print()
-        print("Chemin du config.yaml d'un modèle DLC déjà entraîné.")
+        print("Chemin d'un modèle DLC déjà entraîné (son dossier, ou son "
+              "config.yaml).")
         print("Laisse vide si tu ne sais pas encore — éditable plus tard "
               "dans configs/pipeline_config.yaml.")
         dlc_config = prompt("Config DLC", allow_empty=True) or None

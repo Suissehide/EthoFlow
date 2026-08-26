@@ -63,6 +63,7 @@ from paths import (  # noqa: E402
     add_project_dir_arg,
     cleaned_h5_path,
     dlc_output_dir,
+    normalize_dlc_config,
     pipeline_config_path,
     raw_dir,
     resolve_project,
@@ -101,7 +102,7 @@ def load_dlc_project_config(project: Path) -> str:
     dlc_cfg = cfg.get("dlc_project_config")
     if not dlc_cfg:
         raise ValueError(f"dlc_project_config manquant dans {cfg_path}")
-    return dlc_cfg
+    return normalize_dlc_config(dlc_cfg)
 
 
 def find_raw_h5(session_out: Path) -> Path | None:

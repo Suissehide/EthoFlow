@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+import paths
 from lib import project as P
 
 
@@ -274,3 +275,76 @@ def test_projects_root_defaut_vient_des_scripts(tmp_path, monkeypatch):
     monkeypatch.setattr(P, "PREFS_PATH", tmp_path / "absent.yaml")
     import interactive
     assert P.projects_root() == interactive.DEFAULT_PROJECTS_ROOT
+
+
+# ============================================================
+# Dossier du modèle accepté à la place du config.yaml
+# ============================================================
+
+def test_normalize_dlc_config_accepte_un_dossier(tmp_path):
+    """Un projet DLC est un dossier dont la racine contient `config.yaml`.
+    Désigner ce dossier est le geste naturel (c'est ce qu'on voit dans
+    l'explorateur, c'est ce que copie « Copier en tant que chemin ») ; on
+    complète nous-mêmes avec `config.yaml` plutôt que de renvoyer une
+    erreur « introuvable » sur un modèle parfaitement valide."""
+    modele = tmp_path / "souris-bottomview"
+    modele.mkdir()
+    (modele / "config.yaml").write_text("dummy: true")
+    assert paths.normalize_dlc_config(modele) == str(modele / "config.yaml")
+
+
+def test_normalize_dlc_config_laisse_passer_un_config_yaml(tmp_path):
+    modele = tmp_path / "souris" / "config.yaml"
+    modele.parent.mkdir(parents=True)
+    modele.write_text("dummy: true")
+    assert paths.normalize_dlc_config(modele) == str(modele)
+
+
+def test_normalize_dlc_config_accepte_config_yml(tmp_path):
+    modele = tmp_path / "souris"
+    modele.mkdir()
+    (modele / "config.yml").write_text("dummy: true")
+    assert paths.normalize_dlc_config(modele) == str(modele / "config.yml")
+
+
+def test_normalize_dlc_config_dossier_sans_config(tmp_path):
+    """Dossier sans `config.yaml` : on pointe quand même vers le
+    `config.yaml` attendu, pour que le message d'erreur en aval désigne le
+    bon endroit ("config.yaml absent de <ce dossier>") au lieu du dossier."""
+    pas_un_modele = tmp_path / "vide"
+    pas_un_modele.mkdir()
+    assert paths.normalize_dlc_config(pas_un_modele) == str(
+        pas_un_modele / "config.yaml")
+
+
+def test_normalize_dlc_config_chemin_inexistant_inchange(tmp_path):
+    absent = tmp_path / "disparu" / "config.yaml"
+    assert paths.normalize_dlc_config(absent) == str(absent)
+
+
+def test_set_dlc_config_accepte_le_dossier_du_modele(project, tmp_path):
+    """Le geste de l'utilisateur dans la page Projet : coller le chemin du
+    modèle, pas celui du config.yaml. Le statut doit être "ok", pas
+    "introuvable"."""
+    modele = tmp_path / "modeles" / "souris"
+    modele.mkdir(parents=True)
+    (modele / "config.yaml").write_text("dummy: true")
+
+    P.set_dlc_config(project, modele)
+
+    assert P.read_pipeline_config(project)["dlc_project_config"] == str(
+        modele / "config.yaml")
+    assert P.dlc_config_status(project) == ("ok", str(modele / "config.yaml"))
+
+
+def test_dlc_config_path_repare_un_dossier_deja_enregistre(project, tmp_path):
+    """Rétrocompatibilité : une config écrite avant ce correctif (ou à la
+    main) peut contenir le dossier. On la lit comme un config.yaml."""
+    modele = tmp_path / "modeles" / "souris"
+    modele.mkdir(parents=True)
+    (modele / "config.yaml").write_text("dummy: true")
+    (project / "configs" / "pipeline_config.yaml").write_text(
+        yaml.safe_dump({"dlc_project_config": str(modele)}))
+
+    assert P.dlc_config_path(project) == str(modele / "config.yaml")
+    assert P.dlc_config_status(project)[0] == "ok"

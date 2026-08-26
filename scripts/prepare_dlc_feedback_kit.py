@@ -64,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import (  # noqa: E402
     add_project_dir_arg,
     dlc_output_dir,
+    normalize_dlc_config,
     pipeline_config_path,
     raw_dir,
     resolve_project,
@@ -180,7 +181,8 @@ def read_dlc_config_path(project: Path) -> str | None:
         return None
     with open(cfg_path) as f:
         cfg = yaml.safe_load(f) or {}
-    return cfg.get("dlc_project_config")
+    dlc_cfg = cfg.get("dlc_project_config")
+    return normalize_dlc_config(dlc_cfg) if dlc_cfg else None
 
 
 def zip_labeled_data_subset(dlc_project: Path, out_zip: Path,

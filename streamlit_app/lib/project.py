@@ -164,8 +164,14 @@ def read_pipeline_config(project: Path) -> dict:
 
 
 def dlc_config_path(project: Path) -> str | None:
+    """Chemin du `config.yaml` DLC configuré, ou None.
+
+    Normalisé à la lecture : une config écrite avant que `set_dlc_config`
+    ne complète les dossiers (ou éditée à la main) peut contenir la racine
+    du projet DLC — on la lit comme le `config.yaml` qu'elle désigne.
+    """
     value = read_pipeline_config(project).get("dlc_project_config")
-    return str(value) if value else None
+    return _paths.normalize_dlc_config(value) if value else None
 
 
 def dlc_config_status(project: Path) -> tuple[str, str | None]:
@@ -203,7 +209,9 @@ def set_dlc_config(project: Path, dlc_config: str | Path) -> Path:
     """
     cfg_path = _paths.pipeline_config_path(Path(project))
     cfg = read_pipeline_config(project)
-    cfg["dlc_project_config"] = str(dlc_config)
+    # Le dossier du modèle est accepté au même titre que son config.yaml :
+    # c'est ce que l'utilisateur a sous les yeux dans l'explorateur.
+    cfg["dlc_project_config"] = _paths.normalize_dlc_config(dlc_config)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
     cfg_path.write_text(
         yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True),

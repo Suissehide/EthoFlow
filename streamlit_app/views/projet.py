@@ -381,9 +381,11 @@ def _section_modele_dlc(projet: Path) -> None:
     choisi = (st.selectbox("Modèles trouvés", options=options, key="modele_dlc_trouve")
               if options else None)
     libre = champ_chemin(
-        "…ou un chemin de config.yaml", cle="modele_dlc_libre",
+        "…ou un chemin", cle="modele_dlc_libre",
         mode="fichier", extensions=[".yaml", ".yml"],
         titre_dialogue="Choisir le config.yaml du modèle DLC",
+        help="Le dossier du modèle suffit : son `config.yaml` est trouvé "
+             "tout seul. Le fichier lui-même marche aussi.",
     )
     chemin = libre.strip() or choisi
     if chemin:

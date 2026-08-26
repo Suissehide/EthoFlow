@@ -44,7 +44,7 @@ from interactive import (  # noqa: E402
     prompt,
     prompt_existing_path,
 )
-from paths import pipeline_config_path  # noqa: E402
+from paths import dlc_model_dir, pipeline_config_path  # noqa: E402
 
 
 OK = "  ✓"
@@ -227,7 +227,7 @@ def main() -> None:
             cfg = yaml.safe_load(cfg_path.read_text()) or {}
             dlc_cfg = cfg.get("dlc_project_config")
             if dlc_cfg:
-                dlc_dir = Path(dlc_cfg).parent
+                dlc_dir = dlc_model_dir(dlc_cfg)
                 print(f"ℹ  Modèle lu depuis {cfg_path.name} : {dlc_dir}\n")
 
     if dlc_dir is None:
@@ -251,7 +251,8 @@ def main() -> None:
             dlc_dir = prompt_existing_path("Dossier du projet DLC",
                                             must_exist=True)
 
-    ok = diagnose(Path(dlc_dir).resolve(), args.fix, args.no_prompt)
+    # --model-dir accepte aussi le config.yaml : on remonte au dossier.
+    ok = diagnose(dlc_model_dir(dlc_dir).resolve(), args.fix, args.no_prompt)
     sys.exit(0 if ok else 1)
 
 

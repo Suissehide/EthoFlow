@@ -207,7 +207,9 @@ Le modèle DLC et le projet EthoFlow sont **complètement indépendants** :
 - Un même modèle peut être utilisé par autant de projets EthoFlow que tu veux (batches différents, mois différents, expériences différentes)
 - Supprimer un projet EthoFlow ne touche pas au modèle ; re-entraîner le modèle profite immédiatement à tous les projets qui pointent dessus
 
-`--dlc-config` écrit juste une ligne dans `configs/pipeline_config.yaml` :
+`--dlc-config` accepte **le dossier du modèle autant que son `config.yaml`** : `D:\EthoFlow\models\souris-bottomview` et `D:\EthoFlow\models\souris-bottomview\config.yaml` marchent tous les deux — le `config.yaml` à la racine est trouvé tout seul. Idem pour le champ « Modèle DLC » de l'app, pour `diagnose_dlc_model.py --model-dir`, et pour une valeur écrite à la main dans le YAML.
+
+Ce qui est écrit dans `configs/pipeline_config.yaml` est toujours le fichier :
 
 ```yaml
 dlc_project_config: D:\EthoFlow\models\souris-bottomview\config.yaml

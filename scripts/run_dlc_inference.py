@@ -45,6 +45,7 @@ from paths import (  # noqa: E402
     cleaned_h5_path,
     cropped_dir,
     dlc_output_dir,
+    normalize_dlc_config,
     pipeline_config_path,
     raw_dir,
     resolve_project,
@@ -292,7 +293,12 @@ def resolve_dlc_config(project: Path, no_prompt: bool = False) -> str:
             config = yaml.safe_load(f) or {}
 
     dlc_cfg = config.get("dlc_project_config")
-    if dlc_cfg and Path(dlc_cfg).exists():
+    if dlc_cfg:
+        # Le dossier du modèle vaut son config.yaml — c'est le chemin que
+        # l'utilisateur a sous la main, et une config éditée à la main peut
+        # très bien contenir la racine du projet DLC.
+        dlc_cfg = normalize_dlc_config(dlc_cfg)
+    if dlc_cfg and Path(dlc_cfg).is_file():
         return dlc_cfg
 
     # ---- Absent ou cassé : on demande ----
@@ -338,9 +344,9 @@ def resolve_dlc_config(project: Path, no_prompt: bool = False) -> str:
             print("  ⚠ choix invalide")
 
     if chosen is None:
-        chosen = prompt_existing_path(
-            "Chemin du config.yaml DLC", must_exist=True,
-        )
+        chosen = Path(normalize_dlc_config(prompt_existing_path(
+            "Chemin du modèle DLC (dossier ou config.yaml)", must_exist=True,
+        )))
 
     # Mémorise pour les prochaines fois
     config["dlc_project_config"] = str(chosen)
