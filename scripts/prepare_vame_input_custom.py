@@ -224,6 +224,11 @@ def process_session(
                 df, df_clean, qc_bodypart, qc_path,
                 session_id=session_id, stats=stats,
             )
+        except ValueError as e:
+            # Nom de keypoint inconnu : le message porte déjà la liste des
+            # keypoints disponibles, l'afficher tel quel.
+            print(f"  ⚠ graphe de contrôle non généré : {e}")
+            ok = False
         except Exception as e:  # noqa: BLE001 — QC best-effort
             print(f"  ⚠ graphe de contrôle non généré ({type(e).__name__}: {e})")
             ok = False

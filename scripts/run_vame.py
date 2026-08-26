@@ -66,6 +66,8 @@ from paths import (  # noqa: E402
     resolve_project,
     vame_dir,
 )
+from interactive import add_no_prompt_arg, prompt_float, prompt_int  # noqa: E402
+
 
 # Convention : un projet EthoFlow → un projet VAME, à plat dans data/vame/.
 # Le projet VAME EST le dossier `<ethoflow_project>/data/vame/` lui-même
@@ -208,6 +210,39 @@ def detect_pose_ref_index(h5_path: Path) -> list[int]:
 # Commandes
 # ============================================================
 
+def ensure_project_dir_libre(project_dir: Path, force: bool) -> None:
+    """Laisse `project_dir` dans un état où VAME peut créer le projet.
+
+    `vame.init_new_project` teste seulement l'EXISTENCE du dossier :
+
+        if project_path.exists():
+            return projconfigfile, read_config(projconfigfile)
+
+    Un dossier vide lui suffit donc pour croire le projet déjà initialisé,
+    court-circuiter la création et lever « Config file is not found » en
+    lisant un `config.yaml` jamais écrit. Or `create_project.py` crée
+    `data/vame/` vide dans le squelette de tout projet EthoFlow : le
+    premier `setup` tombait systématiquement dedans. On efface donc le
+    dossier vide — il n'y a rien à y perdre, VAME le recrée.
+
+    Un projet réel (dossier non vide) reste protégé : refus, sauf --force.
+    """
+    if not project_dir.exists():
+        return
+    if not any(project_dir.iterdir()):
+        # Vide : vestige du squelette, pas un projet.
+        project_dir.rmdir()
+        return
+    if not force:
+        print(f"❌ Projet VAME déjà présent : {project_dir}\n"
+              f"   Relance avec --force pour écraser (le dossier sera vidé).",
+              file=sys.stderr)
+        sys.exit(1)
+    import shutil
+    print(f"⚠️  --force : suppression de {project_dir}")
+    shutil.rmtree(project_dir)
+
+
 def cmd_setup(args) -> None:
     try:
         import vame
@@ -236,6 +271,11 @@ def cmd_setup(args) -> None:
         print(f"  {v.name}  +  {h.name}")
     if len(pairs) > 5:
         print(f"  ... (+{len(pairs) - 5} autres)")
+
+    # Les questions passent après la découverte des paires (on ne fait pas
+    # répondre à quatre questions pour annoncer ensuite qu'il n'y a rien à
+    # faire) mais avant l'init, qui copie les vidéos et prend des minutes.
+    params = resolve_setup_params(args)
 
     # Auto-rekey : VAME (via movement) attend la clé HDF5 'df_with_missing'.
     # Les .h5 produits avant le fix avaient key='df' et VAME crashe dessus.
@@ -267,17 +307,7 @@ def cmd_setup(args) -> None:
     working_directory = data_dir(project)
     working_directory.mkdir(parents=True, exist_ok=True)
 
-    # Refus d'écraser un projet existant — sauf avec --force, qui supprime
-    # tout le contenu pour rattraper une tentative ratée.
-    if project_dir.exists() and any(project_dir.iterdir()):
-        if not args.force:
-            print(f"❌ Projet VAME déjà présent : {project_dir}\n"
-                  f"   Relance avec --force pour écraser (le dossier sera vidé).",
-                  file=sys.stderr)
-            sys.exit(1)
-        import shutil
-        print(f"⚠️  --force : suppression de {project_dir}")
-        shutil.rmtree(project_dir)
+    ensure_project_dir_libre(project_dir, force=args.force)
 
     videos = [str(v) for v, _ in pairs]
     poses = [str(p) for _, p in pairs]
@@ -335,20 +365,16 @@ def cmd_setup(args) -> None:
             print(f"\nℹ️  {n_renamed} vidéo(s) renommée(s) pour matcher le "
                   f"nom de session attendu par VAME downstream.")
 
-    # Ajuste pose_confidence dans le config.yaml du projet — par défaut VAME le
-    # met à 0.99, ce qui mask la majorité des points SuperAnimal (typiquement
-    # 0.5-0.95). On s'aligne sur notre seuil de pré-cleaning (0.6) pour ne
-    # rejeter que les points dont DLC était vraiment peu sûr.
-    if args.pose_confidence is not None:
-        cfg = vame.read_config(config_path)
-        old = cfg.get("pose_confidence", "?")
-        cfg["pose_confidence"] = args.pose_confidence
-        vame.write_config(config_path, cfg)
-        print(f"\nℹ️  pose_confidence : {old} → {args.pose_confidence}")
+    # Applique les hyperparamètres résolus plus haut. `pose_confidence` en
+    # fait partie : le défaut VAME de 0.99 masque la majorité des points
+    # SuperAnimal (typiquement 0.5-0.95), on s'aligne sur le seuil de
+    # pré-nettoyage de l'étape 6b.
+    print()
+    set_vame_params(project, **params)
 
     print(f"\n✅ Projet VAME créé.\n   config.yaml : {config_path}")
-    print("\nLe `config.yaml` contient les hyperparamètres du modèle. Tu peux\n"
-          "l'éditer avant l'entraînement (taille de fenêtre, learning rate, etc).\n"
+    print("\nLes autres hyperparamètres (learning rate, batch size, zdims...)\n"
+          "sont dans ce `config.yaml`, éditables avant l'entraînement.\n"
           "\nÉtape suivante :  python scripts/run_vame.py align")
 
 
@@ -595,6 +621,89 @@ def cmd_evaluate(args) -> None:
     print("\n✅ Évaluation terminée — vois les figures dans le dossier du projet.")
 
 
+# Hyperparamètres VAME demandés au `setup`. Ce sont ceux qui changent le
+# résultat ou la durée de l'entraînement — les autres (learning rate,
+# batch size, zdims...) restent aux défauts VAME, éditables dans
+# `data/vame/config.yaml` avant `train`.
+#
+# (clé config VAME, défaut, type, question, explication)
+SETUP_PARAMS = [
+    (
+        "n_clusters", 15, int, "Nombre de motifs",
+        "Nombre de motifs — combien de comportements distincts la\n"
+        "segmentation doit produire. C'est le nombre de clips que tu auras\n"
+        "à visionner et nommer à l'étape 8.\n"
+        "  · 15 = défaut VAME, ~1 h de labellisation\n"
+        "  · 30 = plus fin, une demi-journée de labellisation\n"
+        "  · > 40 = tu découpes le même comportement en sous-motifs\n"
+        "Modifiable plus tard : `segment --n-clusters N` crée son propre\n"
+        "dossier de résultats, rien n'est écrasé.",
+    ),
+    (
+        "time_window", 30, int, "Fenêtre temporelle (frames)",
+        "Fenêtre temporelle — la durée que le VAE regarde d'un coup pour\n"
+        "décider d'un motif, en frames. À 30 fps, 30 frames = 1 seconde.\n"
+        "  · plus court (15) = motifs brefs, plus de transitions\n"
+        "  · plus long (60) = motifs amples, les gestes courts se noient",
+    ),
+    (
+        "max_epochs", 500, int, "Epochs max",
+        "Epochs max — la durée d'entraînement du VAE. L'entraînement\n"
+        "s'arrête aussi tout seul s'il converge avant.\n"
+        "  · 500 = défaut VAME, 3-8 h sur GPU\n"
+        "  · 100 = pour un premier essai de bout en bout, en ~1 h",
+    ),
+    (
+        "pose_confidence", 0.6, float, "Seuil de confiance",
+        "Seuil de confiance — VAME masque les points dont la likelihood\n"
+        "DLC est en dessous. Son défaut de 0.99 masque la majorité des\n"
+        "points ; 0.6 s'aligne sur le pré-nettoyage de l'étape 6b.",
+    ),
+]
+
+
+def resolve_setup_params(args) -> dict:
+    """Valeurs à écrire dans le config VAME après l'init.
+
+    Ordre de priorité : flag explicite > réponse à l'invite > défaut VAME.
+    Un flag donné n'est jamais redemandé — sinon un lancement scripté se
+    bloquerait sur `input()`.
+    """
+    no_prompt = bool(getattr(args, "no_prompt", False))
+    out = {}
+    for cle, defaut, typ, question, explication in SETUP_PARAMS:
+        donne = getattr(args, cle, None)
+        if donne is not None:
+            out[cle] = typ(donne)
+            continue
+        demande = prompt_int if typ is int else prompt_float
+        out[cle] = demande(question, defaut, explication, no_prompt)
+    return out
+
+
+def set_vame_params(project: Path, **params) -> None:
+    """Écrit des clés dans le config.yaml du projet VAME, sans toucher au reste.
+
+    Même merge-write que `set_dlc_config` côté EthoFlow : le config VAME
+    contient aussi la liste des sessions et des keypoints, qu'une
+    réécriture complète perdrait.
+    """
+    import yaml as _yaml
+    cfg_path = vame_config_yaml(project)
+    with open(cfg_path) as f:
+        cfg = _yaml.safe_load(f) or {}
+    for cle, valeur in params.items():
+        # vame-py a hésité entre `n_cluster` et `n_clusters` selon les
+        # versions : on écrit sur la clé que le fichier utilise déjà.
+        if cle == "n_clusters" and "n_clusters" not in cfg and "n_cluster" in cfg:
+            cle = "n_cluster"
+        ancien = cfg.get(cle, "?")
+        cfg[cle] = valeur
+        print(f"ℹ  {cle} : {ancien} → {valeur}")
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        _yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
+
+
 def set_n_clusters(project: Path, n: int) -> None:
     """Écrit `n_clusters` dans le config.yaml du projet VAME.
 
@@ -603,17 +712,7 @@ def set_n_clusters(project: Path, n: int) -> None:
     nouveau dossier `results/<session>/<model>/<algo>-<n>/` — les
     résultats précédents ne sont pas écrasés.
     """
-    import yaml as _yaml
-    cfg_path = vame_config_yaml(project)
-    with open(cfg_path) as f:
-        cfg = _yaml.safe_load(f) or {}
-    key = "n_clusters" if "n_clusters" in cfg or "n_cluster" not in cfg \
-        else "n_cluster"
-    old = cfg.get(key)
-    cfg[key] = int(n)
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        _yaml.safe_dump(cfg, f, allow_unicode=True, sort_keys=False)
-    print(f"ℹ  {key} : {old} → {n}  (dans {cfg_path.name})")
+    set_vame_params(project, n_clusters=int(n))
 
 
 def cmd_segment(args) -> None:
@@ -841,10 +940,20 @@ def main() -> None:
     p_setup.add_argument("--no-auto-rekey", action="store_true",
                          help="Ne pas re-clé-er automatiquement les .h5 à la "
                               "clé 'df_with_missing' (par défaut auto-corrigé)")
-    p_setup.add_argument("--pose-confidence", type=float, default=0.6,
+    # Hyperparamètres : donnés en flag ou demandés à l'invite (défauts dans
+    # SETUP_PARAMS). Aucun `default=` ici — c'est `None` qui distingue
+    # « pas donné, à demander » de « donné, ne pas demander ».
+    p_setup.add_argument("--n-clusters", type=int, default=None,
+                         help="Nombre de motifs à produire (défaut 15).")
+    p_setup.add_argument("--time-window", type=int, default=None,
+                         help="Fenêtre temporelle du VAE en frames "
+                              "(défaut 30, soit 1 s à 30 fps).")
+    p_setup.add_argument("--max-epochs", type=int, default=None,
+                         help="Durée max de l'entraînement en epochs (défaut 500).")
+    p_setup.add_argument("--pose-confidence", type=float, default=None,
                          help="Seuil de confiance VAME (lowconf_cleaning) — "
-                              "défaut 0.6, aligné sur notre pré-filtrage. "
-                              "Mets None pour garder le 0.99 par défaut de VAME.")
+                              "défaut 0.6, aligné sur notre pré-filtrage.")
+    add_no_prompt_arg(p_setup)
     copy_grp = p_setup.add_mutually_exclusive_group()
     copy_grp.add_argument("--copy-videos", dest="copy_videos",
                           action="store_const", const=True, default=None,

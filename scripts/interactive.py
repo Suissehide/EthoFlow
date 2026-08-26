@@ -97,6 +97,37 @@ def prompt(question: str, default: str | None = None,
         return val
 
 
+def prompt_number(question: str, default, explain: str | None = None,
+                   no_prompt: bool = False, cast=float):
+    """Demande un nombre en expliquant d'abord ce qu'il commande.
+
+    Un hyperparamètre qu'on subit sans le voir n'est pas un choix : on
+    affiche à quoi il sert, ce que valent les autres valeurs, puis on
+    propose le défaut. `--no-prompt` renvoie le défaut sans rien afficher.
+    """
+    if no_prompt:
+        return default
+    if explain:
+        print()
+        print(explain)
+    while True:
+        raw = prompt(question, default=str(default))
+        try:
+            return cast(raw.replace(",", "."))
+        except ValueError:
+            print(f"  ⚠ entre un nombre (ex : {default})")
+
+
+def prompt_int(question: str, default: int, explain: str | None = None,
+                no_prompt: bool = False) -> int:
+    return prompt_number(question, default, explain, no_prompt, cast=int)
+
+
+def prompt_float(question: str, default: float, explain: str | None = None,
+                  no_prompt: bool = False) -> float:
+    return prompt_number(question, default, explain, no_prompt, cast=float)
+
+
 def prompt_existing_path(question: str, default: str | None = None,
                           must_exist: bool = True,
                           allow_empty: bool = False,

@@ -112,13 +112,45 @@ def _section_setup(projet: Path, etat: dict) -> None:
             "trouvées dans le projet."
         )
 
-    pose_confidence = st.number_input(
-        "`--pose-confidence`", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
-        key="vame_setup_pose_confidence",
-        help="Seuil de confiance VAME — 0.6 aligné sur le pré-filtrage "
-             "EthoFlow (le défaut VAME, 0.99, masque la majorité des "
-             "points SuperAnimal).",
-    )
+    # Les quatre hyperparamètres que `run_vame.py setup` demande à l'invite.
+    # Un job de l'app tourne sans terminal : ils sont réglés ici et la
+    # commande part avec `--no-prompt`, sinon le premier `input()` du
+    # script lèverait EOFError.
+    col_n, col_w = st.columns(2)
+    with col_n:
+        n_clusters = st.number_input(
+            "`--n-clusters`", min_value=2, max_value=200, value=15, step=1,
+            key="vame_setup_n_clusters",
+            help="Nombre de motifs à produire. C'est autant de clips à "
+                 "nommer à l'étape Motifs — 15 se labellisent en ~1 h, 30 "
+                 "en une demi-journée. Modifiable ensuite : chaque valeur "
+                 "a son propre dossier de résultats.",
+        )
+    with col_w:
+        time_window = st.number_input(
+            "`--time-window`", min_value=5, max_value=300, value=30, step=5,
+            key="vame_setup_time_window",
+            help="Durée que le VAE regarde d'un coup, en frames. "
+                 "30 frames = 1 s à 30 fps. Plus court = motifs brefs, "
+                 "plus long = les gestes courts se noient.",
+        )
+    col_e, col_c = st.columns(2)
+    with col_e:
+        max_epochs = st.number_input(
+            "`--max-epochs`", min_value=10, max_value=5000, value=500, step=50,
+            key="vame_setup_max_epochs",
+            help="Durée max de l'entraînement (l'étape 4). 500 = défaut "
+                 "VAME, 3-8 h sur GPU ; 100 pour un premier essai de bout "
+                 "en bout. L'entraînement s'arrête aussi s'il converge avant.",
+        )
+    with col_c:
+        pose_confidence = st.number_input(
+            "`--pose-confidence`", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
+            key="vame_setup_pose_confidence",
+            help="Seuil de confiance VAME — 0.6 aligné sur le pré-filtrage "
+                 "EthoFlow (le défaut VAME, 0.99, masque la majorité des "
+                 "points SuperAnimal).",
+        )
     copie = st.radio(
         "Vidéos dans le projet VAME",
         ["Auto", "Copier (--copy-videos)", "Symlink (--no-copy-videos)"],
@@ -146,7 +178,13 @@ def _section_setup(projet: Path, etat: dict) -> None:
             titre_dialogue="Dossier des vidéos croppées",
         )
 
-    extra: list[str] = ["--pose-confidence", str(pose_confidence)]
+    extra: list[str] = [
+        "--n-clusters", str(int(n_clusters)),
+        "--time-window", str(int(time_window)),
+        "--max-epochs", str(int(max_epochs)),
+        "--pose-confidence", str(pose_confidence),
+        "--no-prompt",
+    ]
     if copie.startswith("Copier"):
         extra.append("--copy-videos")
     elif copie.startswith("Symlink"):

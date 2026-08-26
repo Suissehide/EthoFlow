@@ -200,3 +200,25 @@ def test_segment_champ_n_clusters_champ_libre(tmp_path, monkeypatch):
     champ = [n for n in at.number_input if n.key == "vame_segment_n_clusters"][0]
     assert champ.value == 15
     assert not any("unique par projet" in w.value for w in at.warning)
+
+
+def test_setup_ne_demande_jamais_rien_depuis_l_app(tmp_path, monkeypatch):
+    """`run_vame.py setup` pose désormais quatre questions à l'invite. Un job
+    de l'app tourne sans terminal : sans `--no-prompt`, le premier `input()`
+    lèverait EOFError. Les hyperparamètres se règlent donc dans la page, et
+    la commande porte à la fois leurs valeurs et `--no-prompt`."""
+    projet = _projet(tmp_path)
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    cles = {n.key for n in at.number_input}
+    for attendu in ("vame_setup_n_clusters", "vame_setup_time_window",
+                    "vame_setup_max_epochs", "vame_setup_pose_confidence"):
+        assert attendu in cles, sorted(cles)
+
+    from lib import pipeline as PL
+    args = PL.vame_stage(projet, "setup", extra=[
+        "--n-clusters", "15", "--time-window", "30", "--max-epochs", "500",
+        "--pose-confidence", "0.6", "--no-prompt",
+    ]).args
+    assert "--no-prompt" in args
+    assert args.index("setup") < args.index("--n-clusters")

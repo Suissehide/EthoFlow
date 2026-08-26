@@ -304,8 +304,21 @@ def plot_trajectory_qc(df_before: pd.DataFrame, df_after: pd.DataFrame,
     l'animal sur toute la vidéo ne montre aucun saut anormal de position
     dans l'arène, sans avoir à jeter complètement des points. »
 
-    Returns True si la figure a été écrite.
+    Returns True si la figure a été écrite, False si matplotlib manque.
+    Lève ValueError si `bodypart` n'existe pas dans les données : un nom de
+    keypoint mal orthographié doit s'entendre, pas produire un dossier
+    inchangé où l'utilisateur croit que son `--qc-bodypart` n'a rien fait.
     """
+    # Vérification AVANT l'import matplotlib : une faute de frappe sur le
+    # keypoint ne doit pas être masquée par un backend absent.
+    dispo = sorted(set(group_columns_by_bodypart(df_before))
+                   & set(group_columns_by_bodypart(df_after)))
+    if bodypart not in dispo:
+        raise ValueError(
+            f"keypoint « {bodypart} » absent des données. "
+            f"Keypoints disponibles : {', '.join(dispo) or '(aucun)'}"
+        )
+
     try:
         import matplotlib
         matplotlib.use("Agg")
@@ -314,18 +327,15 @@ def plot_trajectory_qc(df_before: pd.DataFrame, df_after: pd.DataFrame,
         return False
 
     def _xy(d):
-        by_bp = group_columns_by_bodypart(d)
-        if bodypart not in by_bp:
-            return None, None
-        c = by_bp[bodypart]
+        c = group_columns_by_bodypart(d)[bodypart]
         if "x" not in c or "y" not in c:
-            return None, None
+            raise ValueError(
+                f"keypoint « {bodypart} » sans colonnes x/y exploitables"
+            )
         return d[c["x"]].to_numpy(float), d[c["y"]].to_numpy(float)
 
     x0, y0 = _xy(df_before)
     x1, y1 = _xy(df_after)
-    if x0 is None or x1 is None:
-        return False
 
     fig, axes = plt.subplots(1, 2, figsize=(13, 6), sharex=True, sharey=True)
     for ax, (x, y, title) in zip(axes, [
