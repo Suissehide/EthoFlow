@@ -396,6 +396,35 @@ Options utiles pour tous les modes :
 
 Sortie : `data/dlc-output/<session>/<hash>.h5` + éventuellement `_labeled.mp4`.
 
+#### Vérifier visuellement une session
+
+L'inférence en `--mode custom` écrit un `.h5` de prédictions et **rien d'autre** : pas de vidéo annotée. Pour voir ce que le modèle a fait sur une session donnée :
+
+```cmd
+conda activate dlc
+python scripts\relabel_video.py --session BV-970
+```
+
+Sans argument, la session est demandée à l'invite. Il n'y a **aucune ré-inférence** : le `.h5` est relu et les keypoints redessinés par-dessus la vidéo — ~30 s pour 20 min, contre plusieurs minutes de GPU.
+
+Deux vidéos sortent par défaut, et c'est le point important :
+
+| Fichier | Seuil | Ce qu'il montre |
+|---|---|---|
+| `<stem>_labeled_p30.mp4` | 0.3 | Tout ce que le modèle prédit, **y compris ce dont il n'est pas sûr**. C'est là que tu vois une patte qui saute, un point qui colle à un reflet, une confusion gauche/droite |
+| `<stem>_labeled_p60.mp4` | 0.6 | Le défaut DLC : les points peu sûrs sont simplement **effacés de l'image**. Vidéo propre — et c'est bien le problème, elle cache les hésitations |
+
+Regarder la p60 seule donne une fausse impression de qualité : un keypoint absent y est indiscernable d'un keypoint correct. C'est la comparaison des deux qui renseigne. Le seuil est dans le nom, donc les versions cohabitent :
+
+```cmd
+:: Autres seuils, plusieurs sessions
+python scripts\relabel_video.py --sessions BV-970 BV-971 --pcutoffs 0.2 0.5 0.8
+```
+
+**Ne marche qu'avec un modèle DLC configuré** (`--mode custom`) : `create_labeled_video` a besoin du `config.yaml` du projet DLC pour connaître les bodyparts et le skeleton. Les sorties SuperAnimal n'ont pas de projet DLC associé — le script le dit au lieu de planter dans DLC.
+
+Ce que tu regardes, et quoi en faire : si les sauts sont rares et brefs, l'étape 6b les répare. S'ils sont fréquents (>10-15 % des frames réparées au nettoyage) ou si les pattes gauche/droite sont inversées de façon systématique, c'est le modèle qu'il faut reprendre — [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc), en labellisant précisément les frames qui échouent.
+
 ### Étape 6 — préparer les fichiers pour VAME
 
 VAME veut un h5 single-animal par session, sans sauts de tracking aberrants. Cette étape fait **plus qu'un simple seuil de confiance** — recommandation Tony (VAME/LIN) :
@@ -1220,10 +1249,11 @@ default_arenes_coords:
 - `_config.py` — Template versionné (défauts + `DEFAULT_BODYPARTS` + `DEFAULT_SKELETON`)
 - `_load_config.py` — Helper commun pour `--config-dir` : flag, ou menu des dossiers de config trouvés (partagé par tous les scripts numérotés)
 - `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement, tous acceptent `--config-dir` et le demandent s'il manque (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
-- `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent
+- `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent (Parcours B ; l'équivalent projet est `relabel_video.py`)
 
 **DLC inférence**
 - `run_dlc_inference.py` — Inférence DLC (SuperAnimal ou custom)
+- `relabel_video.py` — Régénère les `_labeled.mp4` d'une session à un ou plusieurs seuils de confiance, sans ré-inférence (QC visuel de l'étape 5)
 
 **DLC → VAME prep**
 - `calibrate_scale.py` — Calibre l'échelle px/cm depuis une photo de règle (active la détection de vitesse)

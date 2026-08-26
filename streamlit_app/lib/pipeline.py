@@ -38,6 +38,8 @@ SCRIPT_ENVS: dict[str, str] = {
     # env dlc : importe deeplabcut
     "run_dlc_inference.py": "dlc",
     "prepare_vame_input_custom.py": "dlc",   # dlc.filterpredictions
+    "relabel_video.py": "dlc",               # dlc.create_labeled_video
+    "prepare_dlc_feedback_kit.py": "dlc",    # idem
     # env vame : vame, matplotlib, scipy, umap, sklearn
     "run_vame.py": "vame",
     "analyze_vame.py": "vame",               # matplotlib + scipy

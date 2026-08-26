@@ -69,6 +69,14 @@ from paths import (  # noqa: E402
     raw_dir,
     resolve_project,
 )
+# Le redessin des vidéos annotées vit dans relabel_video.py, qui l'expose
+# aussi en commande autonome. Une seule implémentation du nommage `pXX`
+# et de la réutilisation du .h5 : deux copies divergeraient.
+from relabel_video import (  # noqa: E402
+    find_labeled_video,
+    generate_labeled_video,
+    pcutoff_tag,
+)
 
 
 def get_video_duration_sec(video: Path) -> float | None:
@@ -82,65 +90,6 @@ def get_video_duration_sec(video: Path) -> float | None:
         return float(out.strip())
     except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
         return None
-
-
-def find_labeled_video(session_out: Path, pcutoff_tag: str) -> Path | None:
-    """Cherche un labeled video existant pour un pcutoff donné.
-
-    DLC nomme la sortie <original>_labeled.mp4 et n'encode pas toujours
-    pcutoff dans le nom. On stocke une version renommée pour éviter les
-    collisions entre passes.
-    """
-    for p in session_out.glob(f"*_labeled_{pcutoff_tag}.mp4"):
-        return p
-    # Fallback : nom DLC standard, plus récent
-    candidates = list(session_out.glob("*_labeled.mp4"))
-    if candidates:
-        return max(candidates, key=lambda x: x.stat().st_mtime)
-    return None
-
-
-def generate_labeled_video(dlc_config: str, source_video: Path,
-                             session_out: Path, pcutoff: float) -> Path | None:
-    """Regénère la labeled video au pcutoff demandé.
-
-    Réutilise le .h5 existant (rapide, ~30 s pour 20 min de vidéo). Renomme
-    la sortie en <stem>_labeled_p03.mp4 (ou p06 etc.) pour cohabiter.
-    """
-    try:
-        import deeplabcut as dlc
-    except ImportError:
-        print(f"❌ deeplabcut non trouvé — active `conda activate dlc`",
-              file=sys.stderr)
-        sys.exit(1)
-
-    # Vérifie qu'un .h5 existe (sinon create_labeled_video ne peut rien faire)
-    if not list(session_out.glob("*.h5")):
-        print(f"⚠  {session_out.name} : pas de .h5 DLC, skip labeled video")
-        return None
-
-    print(f"    Régénération labeled video pcutoff={pcutoff}...")
-    dlc.create_labeled_video(
-        dlc_config,
-        [str(source_video)],
-        destfolder=str(session_out),
-        pcutoff=pcutoff,
-        draw_skeleton=True,
-    )
-
-    # DLC vient d'écraser <stem>_labeled.mp4 → on renomme pour tagger le pcutoff
-    tag = f"p{int(pcutoff * 100):02d}"
-    latest = sorted(
-        session_out.glob("*_labeled.mp4"),
-        key=lambda p: p.stat().st_mtime, reverse=True,
-    )
-    if not latest:
-        print(f"    ⚠  DLC n'a pas produit de labeled video")
-        return None
-    labeled = latest[0]
-    tagged = labeled.with_name(f"{labeled.stem}_{tag}.mp4")
-    labeled.rename(tagged)
-    return tagged
 
 
 def extract_clip(video: Path, start_sec: float, duration_sec: float,
@@ -376,7 +325,7 @@ def main() -> None:
             print(f"    ⚠  ffprobe indispo, fallback clip_start=300s")
 
         for pcutoff in args.pcutoffs:
-            tag = f"p{int(pcutoff * 100):02d}"
+            tag = pcutoff_tag(pcutoff)
             if args.skip_labeled_videos:
                 labeled = find_labeled_video(session_out, tag)
                 if labeled is None:
