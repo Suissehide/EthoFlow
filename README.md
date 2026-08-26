@@ -81,24 +81,36 @@ conda env create -f environment-vame.yml        :: env "vame"
 
 Chaque env prend 10-20 min. Ils sont isolés : DLC (torch/DeepLabCut) et VAME ont des dépendances incompatibles, donc **jamais mélanger**.
 
-### 3. Réparer torch pour la GPU — obligatoire sur Windows
+### 3. Vérifier la GPU (côté DLC)
 
 ```cmd
 conda activate dlc
+python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('GPU :', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'N/A')"
+```
+
+**`CUDA: True` + le nom de ta carte** → rien à faire, passe à l'étape 4.
+
+**`CUDA: False` / `GPU : N/A`** → torch a été installé en build CPU. Répare :
+
+```cmd
 python scripts\diagnose_gpu.py --fix
 ```
 
-**Cette étape n'est pas optionnelle et n'est pas à faire une seule fois.** Le fichier `environment-dlc.yml` installe `torch` depuis PyPI, qui sert la **build CPU** sur Windows. Un fichier conda ne peut pas dépendre de l'OS, donc chaque `conda env create -f environment-dlc.yml` — y compris une recréation — repose le problème.
+Le script détecte l'architecture de ta carte, réinstalle torch depuis l'index CUDA adapté (nightly `cu128` pour une RTX 50xx, stable sinon), puis tu relances la vérification ci-dessus.
 
-Le script détecte l'architecture de ta carte et réinstalle depuis l'index CUDA adapté (nightly `cu128` pour une RTX 50xx, stable sinon). Sur Mac il ne fait rien : pas de CUDA.
+<details>
+<summary>Pourquoi ça arrive, et pourquoi pas systématiquement</summary>
 
-Puis vérifie :
+`environment-dlc.yml` demande l'index CUDA de PyTorch **en plus** de PyPI. Les wheels CUDA sont versionnées `2.5.1+cu124` et, en PEP 440, `2.5.1+cu124 > 2.5.1` — à version de base égale, pip prend donc la CUDA. C'est pour ça que ça marche la plupart du temps.
 
-```cmd
-python scripts\diagnose_gpu.py
-```
+Deux cas où ça échoue quand même :
 
-Doit finir par `✅ Rien à faire, l'entraînement utilisera la GPU.` Sinon → [Troubleshooting CUDA](#cuda-non-détectée-torchcudais_available--false).
+- **PyPI publie une version plus récente que l'index CUDA** (2.6.0 vs 2.5.1) : pip prend la plus haute, donc la CPU. C'est du timing, d'où le caractère intermittent.
+- **RTX 50xx (Blackwell, sm_120)** : aucune build stable ne couvre cette architecture, il faut la nightly `cu128`. Un fichier conda ne peut pas la demander.
+
+Dans les deux cas `diagnose_gpu.py --fix` tranche. À refaire après chaque `conda env create` qui retombe sur `CUDA: False` — la vérification ne coûte rien, autant la faire.
+
+</details>
 
 ### 4. Vérifier VAME
 
@@ -464,8 +476,15 @@ Seuil de likelihood [0.7] :
 **Critère d'acceptation** — le script produit un graphe avant/après par session dans `data/dlc-output/_qc_trajectories/`. Le nom du fichier est `<session>_<keypoint>.png`, par exemple `BV-970_tail_base.png` : le graphe ne trace **qu'un seul keypoint**, celui passé à `--qc-bodypart`, et `tail_base` est le défaut. C'est le point le plus stable du corps — il ne disparaît jamais sous l'animal et bouge peu par rapport au centre de masse, donc un saut visible sur sa trajectoire est forcément une erreur de tracking, jamais un vrai mouvement. Le keypoint est dans le nom pour que tu puisses en tracer plusieurs sans écraser le précédent :
 
 ```cmd
-python scripts\prepare_vame_input_custom.py --qc-bodypart paw_front_left
-:: → data/dlc-output/_qc_trajectories/BV-970_paw_front_left.png, à côté du tail_base
+python scripts\prepare_vame_input_custom.py --qc-bodypart front_paw_left
+:: → data/dlc-output/_qc_trajectories/BV-970_front_paw_left.png, à côté du tail_base
+```
+
+Le nom doit être **exactement** celui du modèle DLC (`nose`, `left_ear`, `right_ear`, `front_paw_left/right`, `hind_paw_left/right`, `tail_base/mid/tip`, `center`, `left_flank` pour le modèle par défaut — c'est `front_paw_left`, pas `paw_front_left`). Un nom inconnu ne produit aucun graphe et le dit, en listant les keypoints disponibles :
+
+```
+  ⚠ graphe de contrôle non généré : keypoint « paw_front_left » absent des
+    données. Keypoints disponibles : center, front_paw_left, front_paw_right, ...
 ```
 
 Objectif de Tony :
