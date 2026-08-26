@@ -85,27 +85,70 @@ N_AUTO_FRAMES = 120
 # Anatomie souris (bodyparts + skeleton, écrits dans le config.yaml DLC)
 # ----------------------------------------------------------------------
 
-# 12 keypoints bottom-view / quadrupède générique. Pour du top-view
-# ouvert (pattes non visibles), remplace par une liste plus courte
-# (typiquement nose + ears + center + tail_base + tail_tip).
-DEFAULT_BODYPARTS: list[str] = [
+# Deux jeux de 12 keypoints, un par vue caméra — c'est `SUPERANIMAL_NAME`
+# plus bas qui décide lequel devient DEFAULT_BODYPARTS/DEFAULT_SKELETON.
+# Un seul jeu servi aux deux vues labelliserait des points invisibles :
+# par en dessous on ne voit pas les oreilles, par au-dessus on ne voit ni
+# le menton ni le ventre. Et un keypoint qu'on ne voit pas, on le place au
+# jugé — c'est du bruit d'apprentissage payé au prix fort, une frame à la
+# main à la fois.
+
+# Bottom-view (souris filmée par en dessous, à travers un plancher
+# transparent) : la ligne médiane du dessous est visible sur toute la
+# longueur, les quatre pattes aussi.
+BODYPARTS_BOTTOMVIEW: list[str] = [
     "nose",
-    "left_ear",
-    "right_ear",
+    "chin",
+    "head_center",
+    "chest_center",
+    "belly_center",
+    "tail_base",
+    "tail_mid",
+    "tail_tip",
     "front_paw_left",
     "front_paw_right",
     "hind_paw_left",
     "hind_paw_right",
-    "tail_base",
-    "tail_mid",
-    "tail_tip",
-    "center",
-    "left_flank",
 ]
 
 # Skeleton = liaisons anatomiques entre keypoints. Sert au regroupement
 # multi-animal DLC et au tracking. Format : liste de [kp_A, kp_B].
-DEFAULT_SKELETON: list[list[str]] = [
+# Ici : l'axe du corps du nez à la queue, les pattes avant rattachées au
+# poitrail, les pattes arrière au ventre.
+SKELETON_BOTTOMVIEW: list[list[str]] = [
+    ["nose", "chin"],
+    ["chin", "head_center"],
+    ["head_center", "chest_center"],
+    ["chest_center", "belly_center"],
+    ["belly_center", "tail_base"],
+    ["tail_base", "tail_mid"],
+    ["tail_mid", "tail_tip"],
+    ["chest_center", "front_paw_left"],
+    ["chest_center", "front_paw_right"],
+    ["belly_center", "hind_paw_left"],
+    ["belly_center", "hind_paw_right"],
+]
+
+# Top-view (arène ouverte filmée de dessus) : les oreilles servent de
+# repère d'orientation de la tête, les pattes ne sont visibles que par
+# intermittence — on les garde, DLC gère les points occultés par la
+# likelihood, et le nettoyage de l'étape 6b s'en occupe ensuite.
+BODYPARTS_TOPVIEW: list[str] = [
+    "nose",
+    "left_ear",
+    "right_ear",
+    "center",
+    "left_flank",
+    "tail_base",
+    "tail_mid",
+    "tail_tip",
+    "front_paw_left",
+    "front_paw_right",
+    "hind_paw_left",
+    "hind_paw_right",
+]
+
+SKELETON_TOPVIEW: list[list[str]] = [
     ["nose", "left_ear"],
     ["nose", "right_ear"],
     ["left_ear", "right_ear"],
@@ -120,6 +163,11 @@ DEFAULT_SKELETON: list[list[str]] = [
     ["tail_mid", "tail_tip"],
 ]
 
+KEYPOINTS_PAR_VUE: dict[str, tuple[list[str], list[list[str]]]] = {
+    "superanimal_quadruped": (BODYPARTS_BOTTOMVIEW, SKELETON_BOTTOMVIEW),
+    "superanimal_topviewmouse": (BODYPARTS_TOPVIEW, SKELETON_TOPVIEW),
+}
+
 
 # ----------------------------------------------------------------------
 # Transfer learning (02_train.py)
@@ -133,6 +181,19 @@ DEFAULT_SKELETON: list[list[str]] = [
 #     À privilégier pour un setup vue de dessus où les pattes ne sont
 #     jamais visibles (arène ouverte classique).
 SUPERANIMAL_NAME = "superanimal_quadruped"
+
+# Jeu de keypoints correspondant à la vue choisie ci-dessus. C'est ce que
+# 01_setup_project écrit dans le config.yaml DLC. Pour une anatomie
+# maison, édite le jeu concerné plus haut — ou écrase les deux lignes
+# ci-dessous par tes propres listes.
+try:
+    DEFAULT_BODYPARTS, DEFAULT_SKELETON = KEYPOINTS_PAR_VUE[SUPERANIMAL_NAME]
+except KeyError:
+    raise ValueError(
+        f"SUPERANIMAL_NAME inconnu : {SUPERANIMAL_NAME!r}. "
+        f"Attendus : {', '.join(KEYPOINTS_PAR_VUE)}."
+    ) from None
+
 MODEL_NAME = "hrnet_w32"
 DETECTOR_NAME = "fasterrcnn_resnet50_fpn_v2"
 

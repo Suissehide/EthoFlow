@@ -482,7 +482,7 @@ python scripts\prepare_vame_input_custom.py --qc-bodypart front_paw_left
 :: → data/dlc-output/_qc_trajectories/BV-970_front_paw_left.png, à côté du tail_base
 ```
 
-Le nom doit être **exactement** celui du modèle DLC (`nose`, `left_ear`, `right_ear`, `front_paw_left/right`, `hind_paw_left/right`, `tail_base/mid/tip`, `center`, `left_flank` pour le modèle par défaut — c'est `front_paw_left`, pas `paw_front_left`). Un nom inconnu ne produit aucun graphe et le dit, en listant les keypoints disponibles :
+Le nom doit être **exactement** celui du modèle DLC. En bottom-view : `nose`, `chin`, `head_center`, `chest_center`, `belly_center`, `tail_base/mid/tip`, `front_paw_left/right`, `hind_paw_left/right` — c'est `front_paw_left`, pas `paw_front_left`. En top-view, `left_ear`, `right_ear`, `center` et `left_flank` remplacent le menton, le poitrail et le ventre (voir [B.2](#b2--setup-du-projet-dlc--auto-extraction-de-frames)). Un nom inconnu ne produit aucun graphe et le dit, en listant les keypoints disponibles :
 
 ```
   ⚠ graphe de contrôle non généré : keypoint « paw_front_left » absent des
@@ -500,7 +500,7 @@ Si des sauts subsistent sur le graphe, baisse `--max-speed` (4 m/s) ou monte `--
 - `--px-per-cm 12.5` — override l'échelle sans passer par 6a
 - `--max-speed 4` — plus strict sur les sauts
 - `--no-sticky-detection` — désactive la passe 4
-- `--qc-bodypart center` — trace un autre keypoint dans le graphe de contrôle
+- `--qc-bodypart nose` — trace un autre keypoint dans le graphe de contrôle (`nose` et les quatre pattes existent dans les deux vues ; `center` n'existe qu'en top-view)
 - `--no-qc-plot` — pas de graphes (gagne quelques secondes par session)
 - `--no-prompt` — n'ouvre aucune invite, prend les défauts (pour du batch)
 
@@ -793,8 +793,15 @@ Cette commande fait **tout en une passe** :
 1. Crée le projet DLC. `deeplabcut.create_new_project` nomme toujours son dossier `<nom>-<expérimentateur>-<date>` — le suffixe daté est câblé dans l'API DLC, on ne peut pas lui demander autre chose. Tu as donc, l'espace d'un instant, `D:\EthoFlow\models\souris-bottomview-labo-2026-08-26\` à côté du `souris-bottomview\` que le wizard a créé à l'étape B.1.
 2. **Merge le dossier daté dans le dossier de config**, puis le supprime. Sans ça tu aurais deux dossiers frères pour un seul modèle — l'un avec ton `_config.py`, l'autre avec le projet DLC — et `--config-dir` ne désignerait pas le même endroit que le `config.yaml`. Le merge déplace le contenu, efface le dossier daté devenu vide, et réécrit les chemins absolus à l'intérieur du `config.yaml` (`project_path` et les clés de `video_sets`, qui pointaient encore vers l'ancien nom). Résultat : **un seul dossier par modèle, au nom que tu as choisi** — exactement celui que tu passeras plus tard en `--dlc-config` dans le Parcours A.
 3. **Auto-patche** le `config.yaml` DLC :
-   - Écrit les 12 bodyparts (`nose`, `left_ear`, `right_ear`, `front_paw_left/right`, `hind_paw_left/right`, `tail_base/mid/tip`, `center`, `left_flank`) — modifiable via `DEFAULT_BODYPARTS` dans `_config.py`
-   - Écrit le skeleton anatomique (12 liaisons) — modifiable via `DEFAULT_SKELETON`
+   - Écrit les 12 bodyparts **de la vue choisie au wizard** — modifiable via `BODYPARTS_BOTTOMVIEW` / `BODYPARTS_TOPVIEW` dans `_config.py` :
+
+     | Vue (`SUPERANIMAL_NAME`) | Keypoints |
+     |---|---|
+     | bottom-view (`superanimal_quadruped`) | `nose`, `chin`, `head_center`, `chest_center`, `belly_center`, `tail_base/mid/tip`, `front_paw_left/right`, `hind_paw_left/right` |
+     | top-view (`superanimal_topviewmouse`) | `nose`, `left_ear`, `right_ear`, `center`, `left_flank`, `tail_base/mid/tip`, `front_paw_left/right`, `hind_paw_left/right` |
+
+     Les deux jeux ne sont pas interchangeables : par en dessous les oreilles ne sont pas visibles, par au-dessus le menton et le ventre ne le sont pas. Labelliser un point qu'on ne voit pas revient à le placer au jugé — du bruit d'apprentissage, payé une frame à la main à la fois.
+   - Écrit le skeleton anatomique correspondant (l'axe du corps + les pattes) — modifiable via `SKELETON_BOTTOMVIEW` / `SKELETON_TOPVIEW`
    - Règle `numframes2pick = 120` (ou la valeur `N_AUTO_FRAMES` de ton config)
 4. Lance `dlc.extract_frames` en mode k-means automatique
 
