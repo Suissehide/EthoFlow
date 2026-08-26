@@ -12,12 +12,15 @@
 #
 # Vérification :
 #   pip show vame-py
+#   python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 #
 #   Le paquet s'installe sous le nom `vame-py` et s'importe en `vame` :
 #   ni `vame.__version__` (l'attribut n'existe pas) ni
 #   `importlib.metadata.version('vame')` (mauvais nom de distribution) ne
 #   fonctionnent. Au premier `import vame`, VAME logue de lui-même
 #   « Using CUDA — GPU: ... » s'il voit la carte.
+#
+#   Si CUDA: False → python scripts/diagnose_gpu.py --fix
 
 name: vame
 channels:
@@ -27,4 +30,13 @@ dependencies:
   - python=3.11
   - pip
   - pip:
+    # Même précaution que dans environment-dlc.yml : vame-py tire torch en
+    # dépendance, et sans cet index pip prend la build CPU sur Windows.
+    # Les wheels CUDA sont versionnées `2.5.1+cu124`, supérieures à
+    # `2.5.1` en PEP 440, donc pip les préfère à version de base égale.
+    # Sans effet sur Mac (l'index n'a aucune wheel macOS).
+    #
+    # Ne couvre pas tout : une RTX 50xx (Blackwell, sm_120) exige cu128,
+    # qui n'existe qu'en nightly. D'où la vérification ci-dessus.
+    - --extra-index-url https://download.pytorch.org/whl/cu124
     - vame-py
