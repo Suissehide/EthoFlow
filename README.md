@@ -116,8 +116,19 @@ Dans les deux cas `diagnose_gpu.py --fix` tranche. À refaire après chaque `con
 
 ```cmd
 conda activate vame
-python -c "import vame; print(vame.__version__)"
+python -c "from importlib.metadata import version; print('vame', version('vame'))"
+python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 ```
+
+Le paquet `vame` n'expose pas d'attribut `__version__` — `import vame; print(vame.__version__)` lève `AttributeError`. On passe donc par `importlib.metadata`, qui lit la version depuis les métadonnées d'installation.
+
+Au premier `import vame`, VAME logue lui-même l'état GPU :
+
+```
+INFO --- vame.util.auxiliary : Using CUDA — GPU: NVIDIA GeForce RTX 5080
+```
+
+Cette ligne suffit : si elle apparaît, l'env `vame` voit la GPU. **Les envs sont indépendants** — `vame` peut très bien être en CUDA pendant que `dlc` est en CPU, chacun a son propre torch.
 
 ---
 
@@ -516,37 +527,50 @@ Puis éventuellement `fill_nan_h5.py --root <project>/data/dlc-output` pour bouc
 
 VAME s'entraîne **une fois par projet** (le VAE apprend la structure des poses de tes souris). Compte 3-8h sur GPU pour l'entraînement.
 
+#### Ce que `setup` te demande
+
+Avant de créer le projet, `setup` demande les quatre hyperparamètres qui changent le résultat ou la durée de l'entraînement. Chacun est expliqué à l'invite et arrive avec son défaut — entrée vide = défaut :
+
+| Question | Flag | Défaut | Ce qu'il commande |
+|---|---|---|---|
+| Nombre de motifs | `--n-clusters` | 15 | combien de comportements distincts la segmentation produit, donc combien de clips tu auras à nommer à l'étape 8 |
+| Fenêtre temporelle | `--time-window` | 30 frames | la durée que le VAE regarde d'un coup pour décider d'un motif (30 frames = 1 s à 30 fps) |
+| Epochs max | `--max-epochs` | 500 | la durée d'entraînement — 3-8 h sur GPU ; mets 100 pour un premier essai de bout en bout en ~1 h |
+| Seuil de confiance | `--pose-confidence` | 0.6 | en dessous, VAME masque le point. Son propre défaut (0.99) masquerait la majorité des points ; 0.6 s'aligne sur l'étape 6b |
+
+Les valeurs sont écrites dans `data/vame/config.yaml`, où tu peux les rééditer avant `train`. Donner un flag évite la question correspondante ; `--no-prompt` prend tous les défauts sans rien demander (batch, CI).
+
+**Combien de motifs ?** 15 est le défaut de VAME, pas une contrainte. C'est le nombre de clips que tu devras visionner et nommer à l'étape 8 : 15 motifs se labellisent en une petite heure, 30 en une demi-journée, et au-delà de ~40 sur un jeu de données modeste tu commences à découper le même comportement en sous-motifs quasi identiques. Les analyses en aval acceptent n'importe quelle valeur ; c'est ton temps de labellisation qui est la contrainte.
+
+Rien n'est irréversible : `segment --n-clusters 25` réécrit la valeur et crée **son propre dossier de résultats** (`results/<session>/<model>/hmm-25/` à côté de `hmm-15/`), sans écraser les précédents — tu peux comparer deux granularités sans tout refaire. En revanche `motif_labels.csv` est unique par projet : si tu changes de `n_clusters` après avoir annoté, sauvegarde ton CSV (`motif_labels_hmm15.csv`) et repasse-le plus tard avec `analyze_vame.py --labels`, sinon `--regen-labels` te fabriquera le nouveau squelette par-dessus.
+
+#### Les six commandes
+
 ```cmd
 conda activate vame
-cd D:\EthoFlow
 
-:: Interactif — le projet est demandé une fois, puis chaque sous-commande
-python scripts\run_vame.py setup      :: 1. Init du projet VAME
-python scripts\run_vame.py align      :: 2. Alignement égocentrique des poses
-python scripts\run_vame.py trainset   :: 3. Construction du trainset
-python scripts\run_vame.py train      :: 4. Entraînement du VAE (LONG)
-python scripts\run_vame.py evaluate   :: 5. Courbes de loss, KL divergence
-python scripts\run_vame.py segment    :: 6. Un motif par frame
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet setup      :: 1. Init du projet VAME
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet align      :: 2. Alignement égocentrique des poses
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet trainset   :: 3. Construction du trainset
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet train      :: 4. Entraînement du VAE (LONG)
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet evaluate   :: 5. Courbes de loss, KL divergence
+python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet segment    :: 6. Un motif par frame
 ```
 
-Ou avec arguments :
+Comme partout ailleurs, `--project-dir` est **optionnel** : sans lui, le script liste les projets trouvés et te demande lequel utiliser. Seule contrainte d'écriture : il doit précéder la sous-commande.
 
 ```cmd
-python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet setup
-python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet align
-python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet trainset
-python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet train
-python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet evaluate
-python scripts\run_vame.py --project-dir D:\EthoFlow\projects\mon-projet segment
+python scripts\run_vame.py setup
+python scripts\run_vame.py setup --n-clusters 25 --max-epochs 100   :: sans questions
 ```
 
 Raccourci : `python scripts\run_vame.py all` enchaîne setup → segment d'une traite.
 
-Sortie : `data/vame/results/<session>/<model>/hmm-15/15_hmm_label_<session>.npy` (1 label motif par frame).
+Sortie : `data/vame/results/<session>/<model>/hmm-15/15_hmm_label_<session>.npy` (1 label motif par frame ; `hmm-25/` si tu as demandé 25 motifs).
 
 ### Étape 8 — labelliser les motifs à la main
 
-VAME te donne 15 motifs numérotés 0-14. Il faut les nommer et les catégoriser.
+VAME te donne autant de motifs que le `n_clusters` choisi à l'étape 7, numérotés de 0 à N-1 (0-14 avec le défaut de 15). Il faut les nommer et les catégoriser.
 
 **1. Générer les clips + le fichier de labels** — une seule commande :
 
@@ -585,21 +609,6 @@ Un motif ininterprétable (bruit de tracking, animal hors champ) : mets `artifac
 > `artifact` est aussi accepté dans `category`, parce que cette section l'a longtemps indiqué là et que des CSV annotés ainsi existent. Les deux marchent, `confidence` est l'emplacement canonique — `category` est réservée aux huit valeurs ETHOGRAM, dont `artifact` ne fait pas partie.
 
 Ce CSV est lu par toutes les analyses en aval. Sans lui, les figures affichent `motif_0`, `motif_1`, etc.
-
-#### Faire plus (ou moins) de 15 motifs
-
-15 est le défaut de VAME, pas une contrainte. Le nombre de motifs est le paramètre `n_clusters` du config VAME. Passe-le à la segmentation :
-
-```cmd
-python scripts\run_vame.py segment --n-clusters 25
-python scripts\run_vame.py motif-videos
-```
-
-`--n-clusters` écrit la valeur dans `data/vame/config.yaml` puis segmente. Chaque valeur crée **son propre dossier de résultats** (`results/<session>/<model>/hmm-25/` à côté de `hmm-15/`) : rien n'est écrasé, tu peux comparer deux granularités. En revanche `motif_labels.csv` est unique par projet — si tu changes de `n_clusters` après avoir annoté, sauvegarde ton CSV (`motif_labels_hmm15.csv`) et repasse-le plus tard avec `analyze_vame.py --labels`, sinon `--regen-labels` te fabriquera le nouveau squelette par-dessus.
-
-Pour choisir un nombre plutôt qu'un autre : 15 motifs se labellisent en une petite heure, 30 en une demi-journée, et au-delà de ~40 sur un jeu de données modeste tu commences à découper le même comportement en sous-motifs quasi identiques. Les analyses en aval acceptent n'importe quelle valeur ; c'est ton temps de labellisation qui est la contrainte.
-
-Le nombre est aussi modifiable directement dans `data/vame/config.yaml` (clé `n_clusters`) si tu préfères, avant de relancer `segment` sans argument.
 
 ### Étape 9 — analyses + visualisations
 

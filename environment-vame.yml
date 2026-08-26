@@ -11,7 +11,9 @@
 #   conda activate vame
 #
 # Vérification :
-#   python -c "import vame; print(vame.__version__)"
+#   python -c "from importlib.metadata import version; print(version('vame'))"
+#   (le paquet n'expose pas d'attribut __version__ ; au premier import,
+#    VAME logue lui-même « Using CUDA — GPU: ... » s'il voit la carte)
 
 name: vame
 channels:

@@ -136,6 +136,50 @@ def cuda_install_cmd(tag: str, nightly: bool) -> str:
     )
 
 
+def other_conda_envs() -> list[tuple[str, str]]:
+    """[(nom d'env, chemin de son python)] pour les autres envs conda."""
+    out = []
+    raw = run(["conda", "env", "list"])
+    if not raw:
+        return out
+    here = str(sys.executable).lower()
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.replace("*", " ").split()
+        if len(parts) < 2:
+            continue
+        name, path = parts[0], parts[-1]
+        exe = (f"{path}\\python.exe" if platform.system() == "Windows"
+               else f"{path}/bin/python")
+        if exe.lower() == here or not shutil.os.path.exists(exe):
+            continue
+        out.append((name, exe))
+    return out
+
+
+def scan_other_envs() -> list[tuple[str, str, bool]]:
+    """Cherche un env conda voisin où torch voit déjà la GPU.
+
+    Si `vame` fonctionne pendant que `dlc` échoue, la build installée dans
+    `vame` est la preuve vivante de ce qui marche sur cette machine — plus
+    fiable que n'importe quelle déduction depuis le nom de la carte.
+    """
+    snippet = (
+        "import torch,sys;"
+        "sys.stdout.write(torch.__version__+'|'+str(torch.cuda.is_available()))"
+    )
+    found = []
+    for name, exe in other_conda_envs():
+        out = run([exe, "-c", snippet])
+        if not out or "|" not in out:
+            continue
+        version, avail = out.strip().split("|", 1)
+        found.append((name, version, avail == "True"))
+    return found
+
+
 def apply_fix(tag: str, nightly: bool) -> int:
     """Désinstalle torch et réinstalle depuis le bon index. Renvoie un code.
 
@@ -279,6 +323,22 @@ def main() -> None:
         print("          la première chose à essayer :")
 
     tag, nightly = pick_wheel_index(min_cuda, cuda_max)
+
+    # Un env voisin qui fonctionne vaut mieux qu'une déduction : si `vame`
+    # voit la GPU, sa build est prouvée sur CETTE machine.
+    working = [(n, v) for n, v, ok in scan_other_envs() if ok]
+    if working:
+        print()
+        print("   Autres environnements conda où torch voit déjà la GPU :")
+        for name, version in working:
+            print(f"       · {name} : torch {version}")
+        m = re.search(r"\+(cu\d+)", working[0][1])
+        if m:
+            tag = m.group(1)
+            nightly = "dev" in working[0][1] or tag == "cu128"
+            print(f"   → on vise la même build ({tag}"
+                  f"{', nightly' if nightly else ''}).")
+
     print()
 
     if args.fix:
