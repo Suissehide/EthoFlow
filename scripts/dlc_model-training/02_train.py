@@ -38,9 +38,14 @@ def main() -> None:
 
     import deeplabcut as dlc  # noqa: E402 — après load_config
     from deeplabcut.modelzoo import build_weight_init  # noqa: E402
+    from _dlc_patches import apply_patches  # noqa: E402
     from _config import (  # noqa: E402
         CONFIG, DETECTOR_NAME, EPOCHS, MODEL_NAME, NET_TYPE, SUPERANIMAL_NAME,
     )
+
+    # Sans ça, l'évaluation saute TOUTES les images annotées sur un projet
+    # mono-animal ("DataFrame reshape failed"). Détails dans _dlc_patches.
+    apply_patches()
 
     print(f"Préparation des poids initiaux depuis {SUPERANIMAL_NAME}...")
     weight_init = build_weight_init(
