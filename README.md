@@ -1033,26 +1033,22 @@ Si tu as déjà lancé 01 avec 120 frames sur le pilote, tu peux compenser en ba
 
 #### B.3.2 — Extraction manuelle des frames difficiles
 
-Sur les 200-300 frames cibles, il t'en manque 50-150 à sélectionner à la main. Lance l'extraction manuelle depuis Python :
+Sur les 200-300 frames cibles, il t'en manque 50-150 à sélectionner à la main.
 
 ```cmd
 conda activate dlc
-python
+
+python scripts\dlc_model-training\extract_frames_manual.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
 ```
 
-Puis :
+Le script liste les vidéos du projet avec le nombre de frames déjà extraites pour chacune, te demande lesquelles ouvrir (`all` par défaut), puis lance la GUI **une vidéo à la fois** — tu fermes la fenêtre pour passer à la suivante, et il te dit combien de frames tu as grabbé sur chacune.
 
-```python
-import deeplabcut
-deeplabcut.extract_frames(
-    r"D:\EthoFlow\models\souris-bottomview\config.yaml",
-    mode="manual",   # ← clé : passe le mode automatique kmeans
-    crop=False,
-    userfeedback=False,
-)
-```
+Dans la GUI : slider + flèches gauche/droite pour du frame-par-frame, bouton **« Extract frame »** pour sauvegarder la frame courante.
 
-Une fenêtre s'ouvre par vidéo présente dans le projet, avec un lecteur + slider. Utilise les flèches gauche/droite pour du frame-par-frame, et le bouton **« Grab frames »** pour sauvegarder la frame courante.
+Pour ne rien avoir à choisir : `--all` prend toutes les vidéos, `--videos souris02 souris03` n'en prend que deux (numéro du menu ou nom de vidéo, extension optionnelle). Comme partout dans le Parcours B, `--config-dir` est optionnel — sans lui, le menu des modèles s'affiche.
+
+> **Pourquoi un script plutôt que `deeplabcut.extract_frames(config, mode="manual")`.** En mode `manual`, DLC ignore la liste des vidéos et fait `launch_napari(videos[0])` avant de rendre la main : **seule la vidéo pilote s'ouvre**. Ce n'est pas un réglage qu'on aurait raté — `crop`, `algo` et `userfeedback` ne servent qu'au mode automatique, aucun ne débloque les autres vidéos. Les vidéos ajoutées par `04_add_videos.py` ne sont donc jamais proposées, alors que ce sont précisément elles qui portent la diversité inter-individus qu'on cherche ici. Le script lit `video_sets` du `config.yaml` DLC — la liste qui fait foi, pilote **plus** ajouts — et boucle dessus.
 
 **Comment répartir ton budget manuel** :
 
@@ -1160,19 +1156,14 @@ Workflow :
 
 1. **Regarde toutes tes vidéos analysées** en priorité (pas seulement la pilote). Identifie les patterns d'échec : « les pattes ratent quand elle grimpe le long du mur », « L/R switch pendant les demi-tours rapides », « rearing avec deux pattes cachées mal résolu ».
 2. **Budget total : 50-100 nouvelles frames**, réparties entre les situations problématiques identifiées. Tony est explicite là-dessus : c'est un total, **pas un quota par situation**. Le nombre à extraire dépend de combien de situations distinctes posent problème — 3 patterns d'échec → ~20-30 frames chacun ; 8 patterns → ~10 frames chacun.
-3. **Extrait les frames à la main** dans les vidéos. Depuis Python (env `dlc` actif) :
+3. **Extrait les frames à la main** dans les vidéos, avec le même script qu'à [B.3.2](#b32--extraction-manuelle-des-frames-difficiles) :
 
-   ```python
-   import deeplabcut
-   deeplabcut.extract_frames(
-       r"D:\EthoFlow\models\souris-bottomview\config.yaml",
-       mode="manual",
-       crop=False,
-       userfeedback=False,
-   )
+   ```cmd
+   python scripts\dlc_model-training\extract_frames_manual.py ^
+       --config-dir D:\EthoFlow\models\souris-bottomview
    ```
 
-   Une fenêtre s'ouvre par vidéo — utilise le slider + flèches gauche/droite pour le frame-par-frame, clic « Grab frames » sur chaque moment problématique. Même workflow qu'à B.3.2.
+   Dans le menu, choisis les vidéos où tu as repéré des échecs — la GUI s'ouvre sur chacune à son tour. Slider + flèches gauche/droite pour le frame-par-frame, « Extract frame » sur chaque moment problématique.
 
 4. **Labellise-les** avec la même règle cohérente qu'à B.3.3.
 5. **Ré-audit L/R** :
@@ -1293,6 +1284,7 @@ default_arenes_coords:
 - `_config.py` — Template versionné (défauts + `DEFAULT_BODYPARTS` + `DEFAULT_SKELETON`)
 - `_load_config.py` — Helper commun pour `--config-dir` : flag, ou menu des dossiers de config trouvés (partagé par tous les scripts numérotés)
 - `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement, tous acceptent `--config-dir` et le demandent s'il manque (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
+- `extract_frames_manual.py` — Ouvre la GUI d'extraction manuelle sur **chaque** vidéo du projet à son tour (DLC ne le fait que sur la pilote) — voir [B.3.2](#b32--extraction-manuelle-des-frames-difficiles)
 - `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent (Parcours B ; l'équivalent projet est `relabel_video.py`)
 
 **DLC inférence**
