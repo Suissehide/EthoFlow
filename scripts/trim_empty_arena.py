@@ -4,7 +4,8 @@ session, en miroir sur les .h5 ET les .mp4 — pour que VAME puisse être
 re-segmenté sur des données propres SANS avoir à retrainer le VAE.
 
 Lit validity_per_session.csv (produit par `analyze_vame.py --validity-source`)
-qui contient n_empty_start et n_empty_end par session_full.
+qui contient n_empty_start_frames et n_empty_end_frames par session_full
+(les anciens noms sans suffixe d'unité restent acceptés).
 
 Pour chaque session :
   - Si n_empty_start + n_empty_end == 0 : copie le h5 et la mp4 tels quels.
@@ -148,6 +149,11 @@ def main() -> None:
     args = parser.parse_args()
 
     df_v = pd.read_csv(args.validity_csv)
+    # `analyze_vame.py` suffixe désormais ses colonnes de leur unité
+    # (`n_empty_start_frames`). On accepte les deux orthographes : les
+    # validity_per_session.csv déjà produits restent lisibles.
+    df_v = df_v.rename(columns={"n_empty_start_frames": "n_empty_start",
+                                "n_empty_end_frames": "n_empty_end"})
     needed = {"session_full", "n_empty_start", "n_empty_end"}
     missing = needed - set(df_v.columns)
     if missing:

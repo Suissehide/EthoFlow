@@ -40,7 +40,8 @@ import streamlit as st
 import lib.motif_labels as ML
 import lib.pipeline as PL
 import lib.vame as VA
-from lib.analysis import group_analysis_files, parse_list_columns
+from lib.analysis import (csv_separator, group_analysis_files,
+                          parse_list_columns)
 from lib.config import require_project
 from lib import runner
 from views import _job
@@ -275,7 +276,7 @@ def _tab_lancer(projet: Path, axes: list[dict]) -> None:
 def _apercu_csv(path: Path) -> None:
     st.markdown(f"**{path.name}**")
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(path, sep=csv_separator(path))
     except Exception as e:
         st.error(f"Lecture impossible : {e}")
         return

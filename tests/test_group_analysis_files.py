@@ -5,7 +5,7 @@ exceptions qui glissent le mot `motif` entre `_by_` et l'axe
 (`stats_by_motif_<axe>.csv`, `temporal_by_motif_<axe>.png`), et une poignée
 de fichiers globaux (jamais liés à un axe) : `motif_usage.csv`,
 `motif_usage_long.csv`, `heatmap_usage.png`, `validity_per_session.csv`,
-`usage_by_category.csv`.
+`usage_by_category.csv`, `analysis_global_long.csv`.
 
 Vrais noms observés en lançant `analyze_vame.py` (voir task-17-report.md) :
 heatmap_usage_by_captopril.png, mean_by_captopril.png,
@@ -38,12 +38,27 @@ def test_fichiers_globaux_pas_rattaches_a_un_axe():
     globaux, par_axe, autres = group_analysis_files(_paths(
         "motif_usage.csv", "motif_usage_long.csv", "heatmap_usage.png",
         "validity_per_session.csv", "usage_by_category.csv",
+        "analysis_global_long.csv",
     ))
     assert {p.name for p in globaux} == {
         "motif_usage.csv", "motif_usage_long.csv", "heatmap_usage.png",
         "validity_per_session.csv", "usage_by_category.csv",
+        "analysis_global_long.csv",
     }
     assert par_axe == {}
+    assert autres == []
+
+
+def test_csv_global_nest_pas_pris_pour_un_axe():
+    """`analysis_global_long.csv` empile toutes les mesures de toutes les
+    sessions : il ne dépend d'aucun axe de comparaison, et son nom ne
+    contient pas `_by_` qui pourrait le faire classer ailleurs."""
+    globaux, par_axe, autres = group_analysis_files(
+        _paths("analysis_global_long.csv", "mean_by_condition.png"),
+        axes_connus=["condition"],
+    )
+    assert [p.name for p in globaux] == ["analysis_global_long.csv"]
+    assert list(par_axe) == ["condition"]
     assert autres == []
 
 

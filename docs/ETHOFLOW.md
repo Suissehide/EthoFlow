@@ -655,7 +655,7 @@ python scripts/analyze_vame.py --validity-source data/vame-input/single-enhanced
 
 Heuristique implémentée : un bloc contigu de NaN qui démarre au frame 0 (ou termine au dernier frame), de longueur ≥ `--min-edge-frames` (défaut 25 = 1 s à 25 fps), est classé comme **empty-arena**. Les blocs internes (de quelques secondes à 1-2 min) restent dans l'analyse car ils correspondent à de la **vraie immobilité** de souris que DLC perd temporairement — comportement légitime à conserver.
 
-Output diagnostique : `validity_per_session.csv` (frames empty par session) + colonnes `empty_arena_count` / `empty_arena_fraction` ajoutées à `motif_usage_long.csv` (combien de chaque motif × session tombe dans la zone empty).
+Output diagnostique : `validity_per_session.csv` (frames empty par session) + colonnes `empty_arena_count_frames` / `empty_arena_fraction_prop` ajoutées à `motif_usage_long.csv` (combien de chaque motif × session tombe dans la zone empty).
 
 **Deux modes d'action.**
 

@@ -11,12 +11,25 @@ Pour un projet VAME donné, ce script :
   5. Sauvegarde un CSV et plusieurs plots de comparaison
 
 Sortie : <project>/analysis/
+  - analysis_global_long.csv    : TOUTES les mesures empilées, 1 ligne par
+                                  session × mesure, avec une colonne `unit`
+                                  (séparateur `;`, pour Excel)
   - motif_usage.csv             : usage normalisé de chaque motif par session
   - motif_usage_long.csv        : format long (1 ligne par session × motif)
   - validity_per_session.csv    : (si --validity-source) frames empty-arena par session
   - heatmap_usage.png           : heatmap (sessions × motifs)
   - mean_by_condition.png       : usage moyen par groupe
   - boxplots_top_motifs.png     : distribution des motifs les plus différenciants
+
+Unités
+------
+Chaque mesure porte son unité : dans le libellé des axes des figures
+(« Usage moyen (proportion des frames, 0–1) »), en suffixe des en-têtes de
+CSV (`frequency_prop`, `count_frames`, `mean_duration_s`) et en clair dans
+la colonne `unit` du CSV global. Les colonnes sans unité — identifiants,
+colonnes de l'Excel, p-values et statistiques de test — sortent intactes.
+Voir le bloc « Unités » plus bas : c'est le seul endroit à modifier pour
+ajouter ou renommer une unité.
 
 Choisir ses axes de comparaison
 -------------------------------
@@ -68,9 +81,16 @@ import re
 import sys
 from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")  # pas d'affichage interactif, juste fichiers
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use("Agg")  # pas d'affichage interactif, juste fichiers
+    import matplotlib.pyplot as plt
+except ImportError:
+    # Le module reste importable sans matplotlib — c'est ce qui permet de
+    # tester les helpers d'unités et le CSV global depuis l'env `ethoflow`,
+    # qui n'a que pandas. Seules les figures en dépendent, et main()
+    # s'arrête avec un message clair avant d'en dessiner une.
+    plt = None
 import numpy as np
 import pandas as pd
 import yaml
@@ -89,6 +109,156 @@ from paths import (  # noqa: E402
 # détection legacy uniquement, au cas où un utilisateur aurait encore ce
 # fichier lui traînant.
 CONFIG_POINTER = REPO_ROOT / ".vame_config_path"
+
+
+# ---------------------------------------------------------------------------
+# Unités
+# ---------------------------------------------------------------------------
+# Un seul vocabulaire, utilisé aux trois endroits où l'unité doit se lire :
+# les axes des figures, les en-têtes des CSV par analyse, et la colonne
+# `unit` du CSV global. Ajouter une mesure, c'est déclarer son unité ici —
+# pas répéter « (s) » ou « proportion » dans trois f-strings qui finiront
+# par diverger.
+
+UNIT_PROP = "proportion_frames"   # fraction des frames analysées, 0–1
+UNIT_FRAMES = "frames"            # nombre de frames vidéo
+UNIT_SEC = "s"
+UNIT_BOUTS = "bouts"              # nombre d'épisodes ininterrompus
+UNIT_SESSIONS = "sessions"        # taille d'échantillon d'un test
+UNIT_PX = "px"
+UNIT_CM = "cm"
+
+# Suffixe accolé au nom de colonne à l'export CSV : `frequency` devient
+# `frequency_prop`, `mean_duration` devient `mean_duration_s`. Court à
+# dessein — le nom reste tapable dans R ou pandas.
+_UNIT_SUFFIX = {
+    UNIT_PROP: "prop",
+    UNIT_FRAMES: "frames",
+    UNIT_SEC: "s",
+    UNIT_BOUTS: "bouts",
+    UNIT_SESSIONS: "sessions",
+    UNIT_PX: "px",
+    UNIT_CM: "cm",
+}
+
+# Texte lisible pour un axe de figure — plus bavard que le suffixe CSV,
+# parce qu'un lecteur de figure n'a pas la doc sous les yeux.
+_UNIT_AXIS_TEXT = {
+    UNIT_PROP: "proportion des frames, 0–1",
+    UNIT_FRAMES: "frames",
+    UNIT_SEC: "s",
+    UNIT_BOUTS: "bouts",
+    UNIT_SESSIONS: "sessions",
+    UNIT_PX: "px",
+    UNIT_CM: "cm",
+}
+
+
+def axis_label(texte: str, unit: str) -> str:
+    """Libellé d'axe suffixé de son unité : « Durée d'un bout (s) »."""
+    suffixe = _UNIT_AXIS_TEXT.get(unit)
+    return f"{texte} ({suffixe})" if suffixe else texte
+
+
+def column_with_unit(name: str, unit: str) -> str:
+    """Nom de colonne à l'export, suffixé de son unité.
+
+    Le suffixe n'est ajouté que s'il n'est pas déjà un mot du nom :
+    `n_valid_frames` reste tel quel, `n_empty_start` devient
+    `n_empty_start_frames`. Sans cette règle on écrirait
+    `n_valid_frames_frames`.
+    """
+    suffixe = _UNIT_SUFFIX.get(unit)
+    if not suffixe or suffixe in name.split("_"):
+        return name
+    return f"{name}_{suffixe}"
+
+
+def write_csv_with_units(df: pd.DataFrame, path: Path,
+                         units: dict[str, str],
+                         rename: dict[str, str] | None = None,
+                         index: bool = False) -> None:
+    """Écrit un CSV dont chaque en-tête porte l'unité de sa colonne.
+
+    `rename` s'applique d'abord — il sert aux colonnes dont le nom ne dit
+    pas non plus *de quoi* il s'agit (`mean` → `mean_duration`, produit tel
+    quel par un `.agg(["mean", ...])`). `units` (nom d'après rename →
+    unité) accole ensuite le suffixe.
+
+    Les colonnes absentes de `units` sortent inchangées : identifiants,
+    colonnes de l'Excel, p-values et statistiques de test n'ont pas
+    d'unité, et leur en coller une serait faux.
+    """
+    out = df.rename(columns=rename) if rename else df
+    out = out.rename(columns={c: column_with_unit(c, units[c])
+                              for c in out.columns if c in units})
+    out.to_csv(path, index=index)
+
+
+# Unité de chaque colonne de mesure écrite par le script, fichier par
+# fichier. Ce qui n'y figure pas n'a pas d'unité : identifiants, colonnes
+# recopiées de l'Excel, p-values et statistiques de test.
+_UNITS_USAGE_LONG = {
+    "frequency": UNIT_PROP,
+    "count": UNIT_FRAMES,
+    "empty_arena_count": UNIT_FRAMES,
+    "empty_arena_fraction": UNIT_PROP,
+}
+_UNITS_VALIDITY = {
+    "n_frames_total": UNIT_FRAMES,
+    "n_empty_start": UNIT_FRAMES,
+    "n_empty_end": UNIT_FRAMES,
+    "n_valid_frames": UNIT_FRAMES,
+    "valid_fraction": UNIT_PROP,
+}
+_UNITS_CATEGORY = {"frequency_total": UNIT_PROP}
+_UNITS_TEMPORAL = {"frequency": UNIT_PROP}
+
+# `.agg(["mean", "median", "count"])` produit des colonnes qui ne disent ni
+# de quoi ni en quelle unité. On les renomme avant de suffixer.
+_RENAME_BOUTS = {"mean": "mean_duration", "median": "median_duration",
+                 "count": "n_bouts"}
+_UNITS_BOUTS = {"mean_duration": UNIT_SEC, "median_duration": UNIT_SEC,
+                "n_bouts": UNIT_BOUTS}
+
+
+def units_for_stats(columns) -> dict[str, str]:
+    """Unités des colonnes d'un CSV de stats, dont les noms dépendent des
+    groupes (`mean_Captopril`, `n_MCCf/f`...) et ne peuvent donc pas être
+    listés à l'avance."""
+    units = {"diff": UNIT_PROP}
+    for c in columns:
+        if c.startswith("mean_"):
+            units[c] = UNIT_PROP
+        elif c.startswith("n_"):
+            units[c] = UNIT_SESSIONS
+    return units
+
+
+def load_px_per_cm(project_ethoflow: Path | None) -> float | None:
+    """Échelle caméra du projet, écrite par `calibrate_scale.py`.
+
+    Sert à doubler en centimètres les seules mesures qui sortent en pixels
+    (le rayon d'arène de l'analyse spatiale). None si le projet n'a jamais
+    été calibré — les pixels restent alors la seule unité disponible.
+    """
+    if project_ethoflow is None:
+        return None
+    from paths import pipeline_config_path  # noqa: WPS433
+    cfg_path = pipeline_config_path(project_ethoflow)
+    if not cfg_path.exists():
+        return None
+    try:
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    valeur = cfg.get("px_per_cm")
+    try:
+        valeur = float(valeur)
+    except (TypeError, ValueError):
+        return None
+    return valeur if valeur > 0 else None
 
 
 def get_project_path(arg_project: str | None,
@@ -817,7 +987,8 @@ def plot_transition_matrix(T: np.ndarray, title: str, out_path: Path,
     ax.set_xlabel("Motif suivant")
     ax.set_ylabel("Motif courant")
     ax.set_title(title)
-    fig.colorbar(im, ax=ax, label="P(next | current)")
+    fig.colorbar(im, ax=ax,
+                 label="P(motif suivant | motif courant), 0–1")
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
@@ -857,11 +1028,16 @@ def compute_temporal_quarters(labels_per_frame: np.ndarray,
 
 def compute_spatial_time_in_center(project_ethoflow: Path, session_id: str,
                                     labels_per_frame: np.ndarray,
-                                    center_frac: float = 0.5) -> dict:
+                                    center_frac: float = 0.5,
+                                    px_per_cm: float | None = None) -> dict:
     """Temps en centre par motif à partir du h5 nettoyé (tail_base).
 
     center_frac : fraction du diamètre de l'arène considérée comme "centre"
                   (défaut 0.5 = disque central couvrant 25% de l'aire).
+    px_per_cm   : échelle caméra du projet (`calibrate_scale.py`). Fournie,
+                  le rayon d'arène sort aussi en centimètres — la seule
+                  mesure du script qui ne soit pas déjà dans une unité
+                  physique ou une proportion.
     """
     from paths import cleaned_h5_path
     h5 = cleaned_h5_path(project_ethoflow, session_id)
@@ -897,18 +1073,177 @@ def compute_spatial_time_in_center(project_ethoflow: Path, session_id: str,
     in_center_L = in_center[:L]
     # % dans le centre global + par motif
     result = {
-        "in_center_frac_total": float(np.nanmean(in_center_L)),
+        "in_center_total": float(np.nanmean(in_center_L)),
         "arena_radius_px": float(arena_radius),
     }
+    if px_per_cm:
+        result["arena_radius_cm"] = float(arena_radius) / px_per_cm
     for m in np.unique(labels_L):
         mask = labels_L == m
         n = int(mask.sum())
         if n == 0:
             continue
-        result[f"motif_{int(m)}_in_center_frac"] = (
+        result[f"motif_{int(m)}_in_center"] = (
             float(np.nanmean(in_center_L[mask])) if n > 0 else 0.0
         )
     return result
+
+
+# Colonnes de `motif_usage_long` qui décrivent une mesure, pas la session.
+# Le complément (identifiants + toutes les colonnes de l'Excel) est recopié
+# tel quel sur chaque ligne du CSV global.
+_COLS_MESURE = {
+    "motif", "label", "category", "frequency", "count",
+    "empty_arena_count", "empty_arena_fraction",
+}
+
+# Ordre des colonnes descriptives du CSV global, après les métadonnées.
+_COLS_GLOBAL = ["level", "motif", "label", "category", "metric", "value", "unit"]
+
+
+def _bloc_global(source: pd.DataFrame, value_col: str, *, level: str,
+                 metric: str, unit: str) -> pd.DataFrame:
+    """Une mesure d'un DataFrame source → lignes du CSV global."""
+    bloc = source.copy()
+    bloc["level"] = level
+    bloc["metric"] = metric
+    bloc["unit"] = unit
+    bloc["value"] = bloc[value_col].astype(float)
+    for col in ("motif", "label", "category"):
+        if col not in bloc.columns:
+            bloc[col] = pd.NA
+    return bloc[["session_full"] + _COLS_GLOBAL]
+
+
+def build_global_long(df: pd.DataFrame,
+                      cat_df: pd.DataFrame | None = None,
+                      validity_df: pd.DataFrame | None = None,
+                      bouts_df: pd.DataFrame | None = None,
+                      temporal_df: pd.DataFrame | None = None,
+                      spatial_df: pd.DataFrame | None = None,
+                      ) -> pd.DataFrame:
+    """Empile toutes les mesures par session dans un seul tableau long.
+
+    Une ligne = une session × une mesure, avec son unité en clair dans la
+    colonne `unit`. C'est le fichier à emporter ailleurs (R, statsmodels,
+    Prism) : il se filtre sur `metric` et se pivote sans avoir à ouvrir
+    huit CSV dont les colonnes ne s'appellent pas pareil.
+
+    `level` dit à quoi la mesure se rapporte — un motif, une catégorie
+    ETHOGRAM, ou la session entière — parce que les trois cohabitent et
+    qu'une moyenne qui les mélangerait n'aurait aucun sens.
+
+    Les sources absentes sont ignorées : sans `--extended`, le fichier
+    contient l'usage par motif et par catégorie, rien de plus.
+    """
+    blocs: list[pd.DataFrame] = []
+
+    blocs.append(_bloc_global(df, "frequency", level="motif",
+                              metric="usage", unit=UNIT_PROP))
+    blocs.append(_bloc_global(df, "count", level="motif",
+                              metric="n_frames", unit=UNIT_FRAMES))
+    if "empty_arena_count" in df.columns:
+        blocs.append(_bloc_global(df, "empty_arena_count", level="motif",
+                                  metric="n_frames_empty_arena",
+                                  unit=UNIT_FRAMES))
+
+    if cat_df is not None and not cat_df.empty:
+        blocs.append(_bloc_global(cat_df, "frequency_total", level="category",
+                                  metric="usage", unit=UNIT_PROP))
+
+    if validity_df is not None and not validity_df.empty:
+        v = validity_df.copy()
+        v["n_empty"] = v["n_empty_start"] + v["n_empty_end"]
+        blocs.append(_bloc_global(v, "n_frames_total", level="session",
+                                  metric="n_frames_total", unit=UNIT_FRAMES))
+        blocs.append(_bloc_global(v, "n_empty", level="session",
+                                  metric="n_frames_empty_arena",
+                                  unit=UNIT_FRAMES))
+        blocs.append(_bloc_global(v, "valid_fraction", level="session",
+                                  metric="valid_fraction", unit=UNIT_PROP))
+
+    # --- analyses étendues (--extended) --------------------------------
+    if bouts_df is not None and not bouts_df.empty:
+        # Ré-agrégé par SESSION (le CSV bout_durations_*, lui, agrège par
+        # groupe) : le fichier global ne contient que des mesures par
+        # session, sinon il mélangerait deux niveaux d'observation.
+        par_session = (
+            bouts_df.groupby(["session_full", "motif"])["duration_sec"]
+            .agg(["mean", "median", "count"]).reset_index()
+        )
+        blocs.append(_bloc_global(par_session, "mean", level="motif",
+                                  metric="bout_duration_mean", unit=UNIT_SEC))
+        blocs.append(_bloc_global(par_session, "median", level="motif",
+                                  metric="bout_duration_median", unit=UNIT_SEC))
+        blocs.append(_bloc_global(par_session, "count", level="motif",
+                                  metric="n_bouts", unit=UNIT_BOUTS))
+
+    if temporal_df is not None and not temporal_df.empty:
+        for q, part in temporal_df.groupby("quarter"):
+            blocs.append(_bloc_global(part, "frequency", level="motif",
+                                      metric=f"usage_quarter_{int(q)}",
+                                      unit=UNIT_PROP))
+
+    if spatial_df is not None and not spatial_df.empty:
+        if "in_center_total" in spatial_df.columns:
+            blocs.append(_bloc_global(spatial_df, "in_center_total",
+                                      level="session", metric="time_in_center",
+                                      unit=UNIT_PROP))
+        # Le rayon d'arène sort en cm si le projet est calibré, en px sinon
+        # — une seule ligne dans les deux cas, l'unité le dit.
+        if "arena_radius_cm" in spatial_df.columns:
+            blocs.append(_bloc_global(spatial_df, "arena_radius_cm",
+                                      level="session", metric="arena_radius",
+                                      unit=UNIT_CM))
+        elif "arena_radius_px" in spatial_df.columns:
+            blocs.append(_bloc_global(spatial_df, "arena_radius_px",
+                                      level="session", metric="arena_radius",
+                                      unit=UNIT_PX))
+        motif_cols = [c for c in spatial_df.columns
+                      if c.startswith("motif_") and c.endswith("_in_center")]
+        for col in motif_cols:
+            part = spatial_df[["session_full", col]].copy()
+            part["motif"] = int(col.split("_")[1])
+            blocs.append(_bloc_global(part, col, level="motif",
+                                      metric="time_in_center", unit=UNIT_PROP))
+
+    long_df = pd.concat(blocs, ignore_index=True)
+    # Entier nullable : les lignes de niveau `category` ou `session` n'ont
+    # pas de motif, et un NaN flottant les ferait sortir en « 1.0 ».
+    long_df["motif"] = pd.to_numeric(long_df["motif"],
+                                     errors="coerce").astype("Int64")
+
+    # Les analyses étendues relisent le label de chaque frame et voient donc
+    # aussi les motifs marqués `artifact`, que `build_dataframe` a écartés.
+    # Le fichier global ne garde que les motifs réellement analysés : un
+    # motif sans nom ni catégorie, au milieu des autres, serait moyenné
+    # avec eux par le premier `group_by` venu.
+    motifs_analyses = set(df["motif"].unique())
+    long_df = long_df[long_df["motif"].isna()
+                      | long_df["motif"].isin(motifs_analyses)]
+
+    # Les mesures qui ne viennent pas de `df` (bouts, quarts, spatial)
+    # n'ont ni label ni catégorie : on les reprend du mapping des motifs,
+    # pour que le fichier soit lisible sans jointure supplémentaire.
+    motifs = df.drop_duplicates("motif").set_index("motif")
+    manque = long_df["label"].isna() & long_df["motif"].notna()
+    long_df.loc[manque, "label"] = long_df.loc[manque, "motif"].map(
+        motifs["label"])
+    manque_cat = long_df["category"].isna() & long_df["motif"].notna()
+    long_df.loc[manque_cat, "category"] = long_df.loc[manque_cat, "motif"].map(
+        motifs["category"])
+
+    # Métadonnées de session (identifiants + toutes les colonnes de
+    # l'Excel, facteurs croisés compris) recopiées sur chaque ligne.
+    meta_cols = [c for c in df.columns if c not in _COLS_MESURE]
+    meta = df.drop_duplicates("session_full")[meta_cols]
+    long_df = long_df.merge(meta, on="session_full", how="left")
+
+    ordre = list(dict.fromkeys(meta_cols + _COLS_GLOBAL))
+    return (long_df[ordre]
+            .sort_values(["session_full", "level", "metric", "motif"],
+                         na_position="first")
+            .reset_index(drop=True))
 
 
 def stats_by_motif(df: pd.DataFrame, condition_col: str) -> pd.DataFrame:
@@ -1005,8 +1340,8 @@ def plot_heatmap(df: pd.DataFrame, out_path: Path,
     xtick_labels = [motif_display(int(m), labels) for m in pivot.columns]
     ax.set_xticklabels(xtick_labels, fontsize=8, rotation=45, ha="right")
     ax.set_xlabel("Motif")
-    ax.set_title("Usage par session (proportion de frames)")
-    fig.colorbar(im, ax=ax, label="proportion")
+    ax.set_title(f"Usage par session ({_UNIT_AXIS_TEXT[UNIT_PROP]})")
+    fig.colorbar(im, ax=ax, label=axis_label("Usage", UNIT_PROP))
     fig.tight_layout()
     fig.savefig(out_path, dpi=120)
     plt.close(fig)
@@ -1099,7 +1434,8 @@ def plot_heatmap_grouped(df: pd.DataFrame, group_col: str, out_path: Path,
     ax.set_title(f"Usage par session (regroupé par {group_col})")
 
     # Colorbar à droite (créée sur ax pour être bien alignée)
-    fig.colorbar(im, ax=ax, label="proportion", fraction=0.03, pad=0.02)
+    fig.colorbar(im, ax=ax, label=axis_label("Usage", UNIT_PROP),
+                 fraction=0.03, pad=0.02)
 
     # Légende des groupes en bas
     from matplotlib.patches import Patch
@@ -1129,7 +1465,7 @@ def plot_means_by_condition(df: pd.DataFrame, condition_col: str,
         rotation=45, ha="right", fontsize=8,
     )
     ax.set_xlabel("Motif")
-    ax.set_ylabel("Proportion moyenne")
+    ax.set_ylabel(axis_label("Usage moyen", UNIT_PROP))
     ax.set_title(title)
     ax.legend(title=condition_col, fontsize=8)
     fig.tight_layout()
@@ -1168,7 +1504,7 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
     )
     # Normalise en array 1D pour itérer proprement quelque soit la forme
     axes = np.atleast_1d(axes).flatten()
-    for ax, motif in zip(axes, motifs):
+    for i, (ax, motif) in enumerate(zip(axes, motifs)):
         d = df[df["motif"] == motif]
         data = [d.loc[d[condition_col] == g, "frequency"].values for g in groups]
         ax.boxplot(data, tick_labels=[str(g) for g in groups])
@@ -1181,7 +1517,9 @@ def plot_boxplots(df: pd.DataFrame, condition_col: str, motifs: list[int],
         plt.setp(ax.get_xticklabels(), rotation=rot, ha="right",
                  fontsize=8)
         ax.set_title(motif_display(motif, labels), fontsize=10)
-        ax.set_ylabel("Proportion")
+        # sharey=True : seule la colonne de gauche porte le libellé.
+        if i % ncols == 0:
+            ax.set_ylabel(axis_label("Usage", UNIT_PROP), fontsize=9)
     # Cache les subplots vides (ex : 5 motifs sur grille 2×3 → 1 case vide)
     for ax in axes[len(motifs):]:
         ax.set_visible(False)
@@ -1253,6 +1591,12 @@ def main() -> None:
                              "durée frame → secondes). Défaut : 30.")
     args = parser.parse_args()
 
+    if plt is None:
+        print("❌ matplotlib est introuvable — ce script produit des "
+              "figures.\n   Lance-le dans l'env conda VAME : "
+              "`conda activate vame`.", file=sys.stderr)
+        sys.exit(1)
+
     ethoflow_project = resolve_project(args)
 
     try:
@@ -1268,6 +1612,8 @@ def main() -> None:
         if default_labels.exists():
             args.labels = default_labels
             print(f"ℹ  Labels auto-détectés : {default_labels}")
+
+    px_per_cm = load_px_per_cm(ethoflow_project)
 
     print(f"Projet VAME : {project}")
     seg_files = find_segmentations(project, args.algo, args.n_clusters)
@@ -1386,14 +1732,20 @@ def main() -> None:
     # CSV brut (un fichier par format)
     pivot = df.pivot_table(index="session_full", columns="motif",
                            values="frequency", aggfunc="mean")
-    if labels:
-        # En-têtes lisibles si on a un mapping, ex : "3: grooming"
-        pivot = pivot.rename(columns=lambda m: motif_display(int(m), labels))
+    # En-tête lisible ("3: grooming" plutôt que "3") ET suffixée de son
+    # unité : toutes les cellules de ce tableau sont des proportions.
+    pivot = pivot.rename(
+        columns=lambda m: column_with_unit(motif_display(int(m), labels),
+                                           UNIT_PROP)
+    )
     pivot.to_csv(out_dir / "motif_usage.csv")
-    df.to_csv(out_dir / "motif_usage_long.csv", index=False)
+    write_csv_with_units(df, out_dir / "motif_usage_long.csv",
+                         _UNITS_USAGE_LONG)
     print(f"\n✓ CSV sauvés : {out_dir}/motif_usage.csv et motif_usage_long.csv")
     if not validity_df.empty:
-        validity_df.to_csv(out_dir / "validity_per_session.csv", index=False)
+        write_csv_with_units(validity_df,
+                             out_dir / "validity_per_session.csv",
+                             _UNITS_VALIDITY)
         print(f"✓ Validity par session : {out_dir}/validity_per_session.csv")
 
     # Heatmap "brute" (sessions triées alphabétiquement, aucun regroupement).
@@ -1436,7 +1788,8 @@ def main() -> None:
         stats_df = stats_by_motif(sub, col)
         if not stats_df.empty:
             stats_path = out_dir / f"stats_by_motif_{col}.csv"
-            stats_df.to_csv(stats_path, index=False)
+            write_csv_with_units(stats_df, stats_path,
+                                 units_for_stats(stats_df.columns))
             n_sig = int(stats_df["significant_0.05"].sum())
             test_name = ("Kruskal-Wallis" if sub[col].nunique() > 2
                          else "Mann-Whitney")
@@ -1444,6 +1797,7 @@ def main() -> None:
                   f"({n_sig}/{len(stats_df)} motifs significatifs à q<0.05)")
 
     # Agrégation par catégorie ETHOGRAM si des labels ont fourni des catégories
+    cat_df = pd.DataFrame()
     has_categories = labels and any(
         isinstance(e, dict) and e.get("category") for e in labels.values()
     )
@@ -1451,7 +1805,7 @@ def main() -> None:
         cat_df = aggregate_by_category(df, extra_keys=group_cols)
         if not cat_df.empty:
             cat_path = out_dir / "usage_by_category.csv"
-            cat_df.to_csv(cat_path, index=False)
+            write_csv_with_units(cat_df, cat_path, _UNITS_CATEGORY)
             print(f"✓ Agrégation par catégorie : {cat_path.name}")
 
             # Plots + stats par catégorie × chaque axe de comparaison.
@@ -1474,14 +1828,18 @@ def main() -> None:
                     .mean().unstack(grp_col)
                 )
                 pivot.plot(kind="bar", ax=ax)
-                ax.set_ylabel("Proportion moyenne (somme des motifs par catégorie)")
+                # Le libellé dit déjà l'unité ; que la barre soit la somme
+                # des motifs de la catégorie est dans le titre et le README
+                # — l'écrire ici déborderait du cadre.
+                ax.set_ylabel(axis_label("Usage moyen de la catégorie",
+                                         UNIT_PROP), fontsize=9)
                 ax.set_title(f"Usage par catégorie ETHOGRAM × {grp_title}")
                 ax.set_xlabel("Catégorie")
                 ax.legend(title=grp_col, fontsize=8)
                 plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
                 fig.tight_layout()
                 bar_path = out_dir / f"mean_by_category_by_{grp_col}.png"
-                fig.savefig(bar_path, dpi=120)
+                fig.savefig(bar_path, dpi=120, bbox_inches="tight")
                 plt.close(fig)
                 print(f"✓ Barres catégorie × {grp_col} : {bar_path.name}")
 
@@ -1493,7 +1851,7 @@ def main() -> None:
                 )
                 if len(cats) == 1:
                     axes = [axes]
-                for ax, cat in zip(axes, cats):
+                for i, (ax, cat) in enumerate(zip(axes, cats)):
                     d = sub_cat[sub_cat["category"] == cat]
                     data = [
                         d.loc[d[grp_col] == g, "frequency_total"].values
@@ -1502,7 +1860,9 @@ def main() -> None:
                     ax.boxplot(data, tick_labels=[str(g) for g in groups])
                     plt.setp(ax.get_xticklabels(), rotation=30, ha="right", fontsize=8)
                     ax.set_title(cat, fontsize=10)
-                    ax.set_ylabel("Proportion")
+                    if i == 0:   # sharey=True, cf. boxplots par motif
+                        ax.set_ylabel(axis_label("Usage", UNIT_PROP),
+                                      fontsize=9)
                 fig.suptitle(f"Distribution par catégorie × {grp_title}")
                 fig.tight_layout()
                 box_path = out_dir / f"boxplots_by_category_by_{grp_col}.png"
@@ -1556,7 +1916,9 @@ def main() -> None:
                         stats_cat["p_adj_bh"] = q_full
                         stats_cat["significant_0.05"] = stats_cat["p_adj_bh"] < 0.05
                         stats_path = out_dir / f"stats_by_category_by_{grp_col}.csv"
-                        stats_cat.to_csv(stats_path, index=False)
+                        write_csv_with_units(
+                            stats_cat, stats_path,
+                            units_for_stats(stats_cat.columns))
                         test_name = "Kruskal-Wallis" if is_multi else "Mann-Whitney"
                         n_sig = int(stats_cat["significant_0.05"].sum())
                         print(f"  → Stats {test_name} : {stats_path.name} "
@@ -1567,6 +1929,10 @@ def main() -> None:
     # =========================================================================
     # Analyses étendues (--extended)
     # =========================================================================
+    # Sources supplémentaires du CSV global : remplies ci-dessous quand les
+    # analyses étendues tournent, laissées à None sinon.
+    bouts_df = tmp_df = spatial_df = None
+
     if args.extended:
         group_col = args.extended_by
         if group_col not in df.columns:
@@ -1625,7 +1991,8 @@ def main() -> None:
                 .reset_index()
             )
             bout_csv = out_dir / f"bout_durations_by_{group_col}.csv"
-            bout_summary.to_csv(bout_csv, index=False)
+            write_csv_with_units(bout_summary, bout_csv, _UNITS_BOUTS,
+                                 rename=_RENAME_BOUTS)
             print(f"  ✓ Durées de bout : {bout_csv.name}")
             # Plot
             if "condition" in bout_summary.columns and bout_summary["condition"].nunique() >= 2:
@@ -1633,7 +2000,8 @@ def main() -> None:
                 pivot = bout_summary.groupby(["motif", "condition"])["mean"].first().unstack("condition")
                 pivot.index = [motif_display(int(m), labels) for m in pivot.index]
                 pivot.plot(kind="bar", ax=ax)
-                ax.set_ylabel("Durée moyenne d'un bout (s)")
+                ax.set_ylabel(axis_label("Durée moyenne d'un bout",
+                                        UNIT_SEC))
                 ax.set_title(f"Persistance dans chaque motif (par {group_col})")
                 ax.set_xlabel("Motif")
                 ax.legend(title=group_col, fontsize=8)
@@ -1660,7 +2028,7 @@ def main() -> None:
         if temporal_rows:
             tmp_df = pd.DataFrame(temporal_rows)
             tmp_csv = out_dir / f"temporal_quarters_by_{group_col}.csv"
-            tmp_df.to_csv(tmp_csv, index=False)
+            write_csv_with_units(tmp_df, tmp_csv, _UNITS_TEMPORAL)
             print(f"  ✓ Dynamique temporelle : {tmp_csv.name}")
 
             # Plot par motif : moyenne par quart × groupe
@@ -1679,8 +2047,10 @@ def main() -> None:
                         ax.errorbar(agg.index, agg["mean"], yerr=agg["std"],
                                      marker="o", label=cond, capsize=3)
                     ax.set_title(motif_display(m, labels), fontsize=9)
-                    ax.set_xlabel("Quart de session"); ax.set_xticks([1, 2, 3, 4])
-                    ax.set_ylabel("Freq.", fontsize=8)
+                    ax.set_xlabel("Quart de session (1–4)", fontsize=8)
+                    ax.set_xticks([1, 2, 3, 4])
+                    ax.set_ylabel(axis_label("Usage", UNIT_PROP),
+                                  fontsize=7)
                     ax.legend(fontsize=7)
                 for m in range(n_motifs, len(axes)):
                     axes[m].set_visible(False)
@@ -1695,7 +2065,8 @@ def main() -> None:
         spatial_rows = []
         for sname, s in session_data.items():
             spatial = compute_spatial_time_in_center(
-                ethoflow_project, s["session_id"], s["labels_per_frame"]
+                ethoflow_project, s["session_id"], s["labels_per_frame"],
+                px_per_cm=px_per_cm,
             )
             if spatial:
                 spatial["session_full"] = sname
@@ -1704,27 +2075,57 @@ def main() -> None:
         if spatial_rows:
             spatial_df = pd.DataFrame(spatial_rows)
             spat_csv = out_dir / f"spatial_center_periphery_by_{group_col}.csv"
-            spatial_df.to_csv(spat_csv, index=False)
+            units_spatial = {
+                c: UNIT_PROP for c in spatial_df.columns
+                if c.endswith("_in_center")
+            }
+            # Même nom que la mesure correspondante du CSV global.
+            units_spatial["time_in_center"] = UNIT_PROP
+            units_spatial["arena_radius_px"] = UNIT_PX
+            units_spatial["arena_radius_cm"] = UNIT_CM
+            write_csv_with_units(spatial_df, spat_csv, units_spatial,
+                                 rename={"in_center_total": "time_in_center"})
             print(f"  ✓ Spatial : {spat_csv.name}")
 
             # Barplot thigmotaxie (temps dans le centre) par groupe.
             # Palette étendue à 4 couleurs pour group4.
-            if ("in_center_frac_total" in spatial_df.columns
+            if ("in_center_total" in spatial_df.columns
                     and spatial_df["condition"].nunique() >= 2):
                 fig, ax = plt.subplots(figsize=(max(6, 1.5 * spatial_df["condition"].nunique()), 4))
-                grouped = spatial_df.groupby("condition")["in_center_frac_total"]
+                grouped = spatial_df.groupby("condition")["in_center_total"]
                 means = grouped.mean(); errs = grouped.sem()
                 palette = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"][:len(means)]
                 means.plot(kind="bar", yerr=errs, ax=ax, color=palette, capsize=5)
-                ax.set_ylabel("Fraction du temps dans le centre")
+                ax.set_ylabel(axis_label("Temps passé au centre",
+                                        UNIT_PROP))
                 ax.set_title(f"Thigmotaxie par {group_col} (moins de centre = plus de thigmotaxie)")
                 ax.set_xlabel(group_col)
                 plt.setp(ax.get_xticklabels(), rotation=0)
                 fig.tight_layout()
                 thig_png = out_dir / f"thigmotaxis_by_{group_col}.png"
-                fig.savefig(thig_png, dpi=120)
+                fig.savefig(thig_png, dpi=120, bbox_inches="tight")
                 plt.close(fig)
                 print(f"  ✓ Thigmotaxie : {thig_png.name}")
+
+    # =========================================================================
+    # CSV global : toutes les mesures par session, chacune avec son unité
+    # =========================================================================
+    global_df = build_global_long(
+        df, cat_df=cat_df, validity_df=validity_df,
+        bouts_df=bouts_df, temporal_df=tmp_df, spatial_df=spatial_df,
+    )
+    global_path = out_dir / "analysis_global_long.csv"
+    # Séparateur `;`, comme motif_labels.csv : Excel en locale française
+    # ouvre alors le fichier en colonnes, sans assistant d'import. Les
+    # autres CSV restent en `,` — ils sont relus par le pipeline, pas
+    # ouverts à la main.
+    global_df.to_csv(global_path, index=False, sep=";")
+    print(f"\n✓ CSV global (toutes les mesures, colonne `unit`, "
+          f"séparateur `;`) : {global_path.name} — {len(global_df)} lignes, "
+          f"{global_df['metric'].nunique()} mesures")
+    if not args.extended:
+        print("  ℹ Relance avec --extended pour y ajouter durées de bout, "
+              "quarts de session et temps au centre.")
 
     print(f"\n✅ Analyse terminée. Tout est dans {out_dir}")
 

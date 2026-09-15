@@ -29,6 +29,26 @@ def parse_list_columns(texte: str) -> list[dict]:
     return resultats
 
 
+def csv_separator(path: Path) -> str:
+    """Séparateur d'un CSV d'analyse : `;` ou `,`.
+
+    `analysis_global_long.csv` sort en `;` — Excel en locale française
+    l'ouvre alors en colonnes, sans assistant d'import. Les autres sorties
+    de `analyze_vame.py` restent en `,`.
+
+    Tranché sur la ligne d'en-tête plutôt que sur le nom du fichier : les
+    CSV déjà produits avant ce changement restent lisibles, et un fichier
+    renommé par l'utilisateur aussi. Même heuristique que
+    `analyze_vame.load_motif_labels` sur motif_labels.csv.
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            entete = f.readline()
+    except OSError:
+        return ","
+    return ";" if entete.count(";") > entete.count(",") else ","
+
+
 # ============================================================
 # Regroupement des sorties de analyze_vame par axe de comparaison
 # ============================================================
@@ -40,7 +60,7 @@ def parse_list_columns(texte: str) -> list[dict]:
 _FICHIERS_GLOBAUX = {
     "motif_usage.csv", "motif_usage_long.csv",
     "heatmap_usage.png", "validity_per_session.csv",
-    "usage_by_category.csv",
+    "usage_by_category.csv", "analysis_global_long.csv",
 }
 
 

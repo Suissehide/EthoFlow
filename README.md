@@ -816,7 +816,7 @@ Pour un axe `<col>`, quelle qu'en soit la nature (colonne de l'Excel ou croiseme
 
 Et **seulement si tu as rempli la colonne `category`** de `motif_labels.csv` à l'étape 8, les trois mêmes vues au niveau des 8 catégories ETHOGRAM plutôt que des 15 motifs : `mean_by_category_by_<col>.png`, `boxplots_by_category_by_<col>.png`, `stats_by_category_by_<col>.csv`. C'est le niveau de lecture qui se met dans un papier — « moins de grooming » se raconte, « moins de motif 7 » non.
 
-Produit une seule fois, indépendamment des axes : `heatmap_usage.png` (toutes sessions en ordre alphabétique, utile en audit), `motif_usage.csv` (tableau sessions × motifs), `motif_usage_long.csv` (format long, une ligne par session × motif — c'est celui à ouvrir dans R ou pandas) et `usage_by_category.csv`.
+Produit une seule fois, indépendamment des axes : `heatmap_usage.png` (toutes sessions en ordre alphabétique, utile en audit), `motif_usage.csv` (tableau sessions × motifs), `motif_usage_long.csv` (format long, une ligne par session × motif), `usage_by_category.csv`, et `analysis_global_long.csv` — **toutes** les mesures empilées avec leur unité, en `;`, décrit [plus bas](#analysis_global_longcsv--le-fichier-à-emporter-ailleurs). C'est celui-là qu'on ouvre dans R ou pandas.
 
 Avec `--extended`, trois figures de plus, **sur le seul axe `--extended-by`** :
 
@@ -827,6 +827,68 @@ Avec `--extended`, trois figures de plus, **sur le seul axe `--extended-by`** :
 | `thigmotaxis_by_<col>.png` | Barres | Fraction du temps passée au centre de l'arène (via `tail_base`). Moins de centre = plus de thigmotaxie, la mesure d'anxiété classique en open-field |
 
 Chacune a son CSV à côté (`bout_durations_by_<col>.csv`, `temporal_quarters_by_<col>.csv`, `spatial_center_periphery_by_<col>.csv`).
+
+#### Les unités, et où les lire
+
+Toute mesure produite ici porte son unité, aux trois endroits où on la lit.
+
+**Sur les figures**, dans le libellé de l'axe : `Usage moyen (proportion des frames, 0–1)`, `Durée moyenne d'un bout (s)`, `Quart de session (1–4)`. Un axe catégoriel — motif, catégorie ETHOGRAM, groupe — n'en porte pas : il n'y a rien à y mesurer.
+
+**Dans les en-têtes de CSV**, en suffixe du nom de colonne :
+
+| Suffixe | Unité | Colonnes concernées |
+|---|---|---|
+| `_prop` | proportion des frames analysées, 0–1 | `frequency_prop`, `frequency_total_prop`, `mean_<groupe>_prop`, `diff_prop`, `time_in_center_prop`, `valid_fraction_prop` |
+| `_frames` | nombre de frames vidéo | `count_frames`, `n_empty_start_frames`, `empty_arena_count_frames` |
+| `_s` | secondes | `mean_duration_s`, `median_duration_s` |
+| `_bouts` | nombre d'épisodes ininterrompus | `n_bouts` |
+| `_sessions` | taille d'échantillon du test | `n_<groupe>_sessions` |
+| `_px` / `_cm` | pixels / centimètres | `arena_radius_px`, `arena_radius_cm` |
+
+Les colonnes de `motif_usage.csv` sont suffixées aussi, puisque tout le tableau est en proportions : `0: walking_prop`, `1: grooming_face_prop`…
+
+Une colonne **sans** suffixe n'a pas d'unité : les identifiants, les colonnes recopiées de ton Excel, `p_value`, `p_adj_bh`, `u_stat`/`h_stat`. Et un nom qui dit déjà son unité n'est pas suffixé deux fois — `n_valid_frames` reste `n_valid_frames`.
+
+`arena_radius_cm` n'apparaît que si le projet est calibré (`python scripts\calibrate_scale.py`) : sans échelle, le rayon d'arène ne sort qu'en pixels, qui ne se comparent pas d'un setup caméra à l'autre.
+
+> Ces suffixes sont récents. Un `validity_per_session.csv` produit avant (colonnes `n_empty_start` / `n_empty_end`) reste lu par `trim_empty_arena.py`, qui accepte les deux orthographes.
+
+#### `analysis_global_long.csv` — le fichier à emporter ailleurs
+
+Les autres CSV sont découpés par axe et par type d'analyse ; celui-ci empile **toutes** les mesures par session dans un seul tableau au format long, une ligne par session × mesure, l'unité en clair. **Séparateur `;`** — comme `motif_labels.csv`, pour qu'Excel en locale française l'ouvre en colonnes sans passer par l'assistant d'import (les autres CSV restent en `,`) :
+
+| session_full | mouse_id | condition | … | level | motif | label | category | metric | value | unit |
+|---|---|---|---|---|---|---|---|---|---|---|
+| BV-970 | M12 | MCCiECKO | … | `motif` | 1 | grooming_face | Grooming | `usage` | 0.360 | `proportion_frames` |
+| BV-970 | M12 | MCCiECKO | … | `motif` | 1 | grooming_face | Grooming | `bout_duration_mean` | 0.80 | `s` |
+| BV-970 | M12 | MCCiECKO | … | `motif` | 1 | grooming_face | Grooming | `usage_quarter_3` | 0.400 | `proportion_frames` |
+| BV-970 | M12 | MCCiECKO | … | `category` | | | Grooming | `usage` | 0.360 | `proportion_frames` |
+| BV-970 | M12 | MCCiECKO | … | `session` | | | | `time_in_center` | 0.245 | `proportion_frames` |
+
+- **`level`** dit à quoi la mesure se rapporte : un `motif`, une `category` ETHOGRAM, ou la `session` entière. Ce sont trois niveaux d'observation différents — filtre dessus avant toute moyenne, sinon tu additionnes des motifs avec la catégorie qui les contient déjà.
+- **`metric`** : toujours `usage` et `n_frames`. Avec `--validity-source` s'ajoutent `n_frames_empty_arena`, `n_frames_total` et `valid_fraction` ; avec `--extended`, `bout_duration_mean`, `bout_duration_median`, `n_bouts`, `usage_quarter_1` à `usage_quarter_4`, `time_in_center` et `arena_radius`.
+- **toutes les colonnes de ton Excel** sont recopiées sur chaque ligne, facteurs croisés (`--cross`) compris : le fichier se filtre et se regroupe seul, sans jointure avec quoi que ce soit.
+- les motifs marqués `artifact` n'y sont à aucun niveau, même dans les mesures étendues.
+- les durées de bout y sont agrégées **par session**, pas par groupe comme dans `bout_durations_by_<col>.csv` — un fichier d'observations, pas de résultats.
+
+Le point décimal reste `.` (`0.36`, pas `0,36`), comme dans `motif_labels.csv`. Si ton Excel affiche ces nombres comme du texte, c'est que sa locale attend la virgule décimale : `Données ▸ Convertir` règle la colonne, ou dis-le-moi et je fais sortir le fichier en virgule décimale.
+
+```r
+# R : l'usage par motif, en large, prêt pour une ANOVA
+d <- read.csv("analysis_global_long.csv", sep = ";")
+usage <- subset(d, level == "motif" & metric == "usage")
+large <- reshape(usage[c("session_full", "condition", "label", "value")],
+                 idvar = c("session_full", "condition"),
+                 timevar = "label", direction = "wide")
+```
+
+```python
+# pandas : durée moyenne de bout par groupe et par catégorie
+import pandas as pd
+d = pd.read_csv("analysis_global_long.csv", sep=";")
+bouts = d.query("metric == 'bout_duration_mean'")
+print(bouts.groupby(["condition", "category"])["value"].mean())
+```
 
 Enfin, ce qui ne sort pas de ce script : le manifold et les GIF de motifs (en fin d'étape ci-dessous), et le dendrogramme de proximité des motifs (`community_dendrogram.py`), qui a remplacé les matrices de transitions — il porte la même information, en plus lisible qu'une matrice 15×15.
 
