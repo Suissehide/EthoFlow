@@ -62,6 +62,7 @@ from paths import (  # noqa: E402
     cropped_dir,
     data_dir,
     dlc_output_dir,
+    pick_bottomview_h5,
     raw_dir,
     resolve_project,
     vame_dir,
@@ -85,6 +86,40 @@ def vame_config_yaml(project: Path) -> Path:
 # ============================================================
 # Helpers
 # ============================================================
+
+def ensure_vame_key(h5_path: Path, session_id: str) -> Path:
+    """Renvoie un .h5 portant la clé HDF5 `df_with_missing` qu'attend VAME.
+
+    Les fichiers que le pipeline produit lui-même (`<session>_clean.h5`,
+    `<session>_A*.h5`) sont réécrits en place : on peut les régénérer.
+
+    Un `.h5` brut de DeepLabCut, lui, n'est pas reproductible à moindre
+    coût — c'est des heures de GPU. Depuis que `find_pairs` les accepte
+    directement, un rekey en place détruirait l'original. On écrit donc la
+    version reclée à côté, dans `<session>_vame.h5`, et on laisse le brut
+    intact.
+
+    DLC ≥ 2.x écrit déjà `df_with_missing` (`analyze_videos`), donc le cas
+    courant ne touche à rien et renvoie le chemin d'entrée.
+    """
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from rekey_h5 import is_already_correct, rekey
+
+    if is_already_correct(h5_path):
+        return h5_path
+
+    ours = (h5_path.name == f"{session_id}_clean.h5"
+            or h5_path.stem.startswith(f"{session_id}_A"))
+    if ours:
+        rekey(h5_path)
+        return h5_path
+
+    import shutil
+    target = h5_path.with_name(f"{session_id}_vame.h5")
+    shutil.copy2(h5_path, target)
+    rekey(target)
+    return target
+
 
 def find_pairs(
     dlc_output_root: Path,
@@ -133,9 +168,20 @@ def find_pairs(
             continue  # session déjà résolue en topview
 
         # --- Pattern 2 : bottomview single-animal ---
-        bottom_h5 = session_dir / f"{session_id}_clean.h5"
-        if not bottom_h5.exists():
+        bottom_h5 = pick_bottomview_h5(session_dir, session_id)
+        if bottom_h5 is None:
+            # Un dossier de session sans aucun .h5 : l'inférence DLC n'a pas
+            # tourné (ou a échoué). Un `continue` muet faisait croire à un
+            # dlc-output vide, sans rien dire du dossier.
+            print(f"  ⚠️  {session_id} : aucun .h5 dans {session_dir}",
+                  file=sys.stderr)
             continue
+        if bottom_h5.name != f"{session_id}_clean.h5":
+            # On accepte, mais on le dit : les sauts de tracking que le
+            # nettoyage aurait réparés deviendront de faux motifs.
+            print(f"  ℹ️  {session_id} : pas de {session_id}_clean.h5, "
+                  f"on repart de {bottom_h5.name} (non nettoyé — "
+                  f"lance prepare_vame_input_custom.py pour le QC)")
         if raw_root is None:
             print(f"  ⚠️  {session_id} : .h5 bottomview trouvé mais pas de raw_root "
                   f"pour résoudre la vidéo source", file=sys.stderr)
@@ -262,6 +308,8 @@ def cmd_setup(args) -> None:
               f"   - topview    : {input_dir}/<session>/<session>_A*.h5\n"
               f"                + {crop_dir}/<session>/<session>_A*.mp4\n"
               f"   - bottomview : {input_dir}/<session>/<session>_clean.h5\n"
+              f"                  (à défaut : n'importe quel .h5 du dossier,\n"
+              f"                   dont la sortie brute de DeepLabCut)\n"
               f"                + source_video lu dans {raw_root}/<session>/metadata.yaml",
               file=sys.stderr)
         sys.exit(1)
@@ -279,25 +327,20 @@ def cmd_setup(args) -> None:
 
     # Auto-rekey : VAME (via movement) attend la clé HDF5 'df_with_missing'.
     # Les .h5 produits avant le fix avaient key='df' et VAME crashe dessus.
-    # On corrige en place avant d'appeler init_new_project.
+    # `ensure_vame_key` corrige nos fichiers en place et met les bruts DLC
+    # à l'abri en écrivant une copie reclée (cf. sa docstring).
     if not args.no_auto_rekey:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
         try:
-            from rekey_h5 import is_already_correct, rekey
+            fixed = []
+            for video, h5 in pairs:
+                out = ensure_vame_key(h5, h5.parent.name)
+                if out != h5:
+                    print(f"   ✓ {h5.name} → {out.name} (brut DLC préservé)")
+                fixed.append((video, out))
+            pairs = fixed
         except ImportError as e:
             print(f"⚠️  Impossible d'importer rekey_h5 ({e}), skip auto-rekey",
                   file=sys.stderr)
-        else:
-            to_fix = [h for _, h in pairs if not is_already_correct(h)]
-            if to_fix:
-                print(f"\n🔧 Auto-rekey : {len(to_fix)} fichier(s) à corriger "
-                      f"(ancienne clé 'df' → 'df_with_missing')")
-                for h in to_fix:
-                    status = rekey(h)
-                    if status == "rekeyed":
-                        print(f"   ✓ {h.name}")
-                    else:
-                        print(f"   ⚠️  {h.name} : {status}", file=sys.stderr)
 
     # On veut que `<project>/data/vame/` SOIT le projet VAME (pas un parent
     # qui contient `<project>/data/vame/<name>/`). On obtient ça en passant

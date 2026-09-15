@@ -169,6 +169,35 @@ def cleaned_h5_path(project: Path, session_id: str) -> Path:
     return project / "data" / "dlc-output" / session_id / f"{session_id}_clean.h5"
 
 
+def pick_bottomview_h5(session_dir: Path, session_id: str) -> Path | None:
+    """Le .h5 single-animal à donner à VAME pour cette session, ou None.
+
+    Ordre de préférence, du plus travaillé au plus brut :
+
+    1. `<session>_clean.h5` — sortie de prepare_vame_input_custom.py
+       (filtre médian + seuils + interpolation).
+    2. `*_filtered.h5` — dlc.filterpredictions a tourné sans que le
+       nettoyage complet aille au bout : déjà mieux que le brut.
+    3. n'importe quel autre `.h5` — la sortie brute d'analyze_videos,
+       `<video>DLC_<net>_<proj><shuffle>_<snapshot>.h5`.
+
+    Le nettoyage est de l'assurance qualité, pas une conversion de format
+    obligatoire : on accepte donc le brut, quitte à segmenter des
+    trajectoires encore bruitées. À rang égal on prend le plus récent —
+    c'est déjà la convention de run_dlc_inference.py pour `--video-adapt`,
+    qui écrit la prédiction de base puis la version adaptée sans suffixe
+    distinctif.
+    """
+    clean = session_dir / f"{session_id}_clean.h5"
+    if clean.exists():
+        return clean
+    candidates = [q for q in session_dir.glob("*.h5") if q != clean]
+    if not candidates:
+        return None
+    return max(candidates,
+               key=lambda q: ("filtered" in q.stem, q.stat().st_mtime))
+
+
 def results_dir(project: Path) -> Path:
     return project / "data" / "results"
 
