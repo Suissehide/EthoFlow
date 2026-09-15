@@ -209,7 +209,25 @@ NET_TYPE = "hrnet_w32"
 # Standard settings — recommandation Tony : ne pas modifier les
 # hyperparamètres d'entraînement, la tâche n'est pas assez spécifique
 # pour justifier un tuning au-delà des défauts.
-EPOCHS = 50
+#
+# 200 = le défaut DLC 3, et c'est une valeur qu'il faut garder telle
+# quelle. Le scheduler de learning rate (LRListScheduler, défini dans
+# `pose_estimation_pytorch/config/base/base.yaml` côté DLC) fait tomber
+# le LR de 1e-4 à 1e-5 à l'epoch 160, puis à 1e-6 à l'epoch 190 — des
+# numéros d'epochs ABSOLUS. Or le kwarg `epochs=` de `train_network()`
+# n'écrase que `train_settings.epochs` : il ne re-scale jamais ces
+# milestones. Descendre EPOCHS à 50 ou 100 revient donc à s'arrêter
+# avant toute décroissance du LR — tout le run se fait à 1e-4 et le
+# modèle ne converge jamais finement. Si tu dois vraiment raccourcir,
+# il faut éditer les milestones dans `pytorch_config.yaml` en même
+# temps, sinon le raccourci coûte de la précision, pas juste du temps.
+#
+# Dans l'autre sens il n'y a pas de piège : un EPOCHS trop grand coûte
+# du temps GPU, pas de la précision. DLC garde à part le meilleur
+# snapshot (`snapshot-best-<N>.pt`, sélectionné sur test.mAP évalué
+# tous les 10 epochs) et l'inférence le prend par défaut — même si les
+# dernières epochs sur-apprennent, ce n'est pas elles qui sont servies.
+EPOCHS = 200
 
 
 # ----------------------------------------------------------------------

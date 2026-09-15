@@ -1171,7 +1171,7 @@ python scripts\dlc_model-training\02_train.py ^
     --config-dir D:\EthoFlow\models\souris-bottomview
 ```
 
-Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 50 epochs. Compte **~2-6h sur GPU 16 GB**.
+Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 200 epochs. Compte **~8-24 h sur GPU 16 GB** — c'est un run qu'on lance le soir, pas entre deux réunions.
 
 **Objectif à valider après B.4** — regarde la RMSE de test que DLC imprime :
 
@@ -1182,8 +1182,11 @@ Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAni
 **Notes techniques** :
 
 - Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
-- **50 epochs suffit** pour un premier passage : DLC démarre avec les poids pré-entraînés SuperAnimal-Quadruped, seule la tête décodeur pour tes 12 keypoints custom apprend vraiment.
-- **Quand bumper** : si la loss train est encore clairement en décroissance à 50 epochs, passe à 100 dans `_config.py` (variable `EPOCHS`). Pour les passes de refinement après B.6, garde 20-30 epochs — c'est du fine-tuning.
+- **`EPOCHS = 200`, et n'y touche pas** — c'est le défaut DLC, et le raccourcir casse quelque chose de non évident. Le scheduler de learning rate de DLC (`LRListScheduler`) fait tomber le LR de 1e-4 à 1e-5 à l'**epoch 160**, puis à 1e-6 à l'**epoch 190**. Ces milestones sont des numéros d'epochs absolus, et le kwarg `epochs=` passé par `02_train.py` ne les re-scale pas : il n'écrase que le nombre total d'epochs. Entraîner 50 epochs, ce n'est donc pas « s'arrêter un peu tôt », c'est faire **tout le run à LR constant 1e-4 et ne jamais atteindre la phase de raffinement** — celle qui fait passer la RMSE de « les points sont au bon endroit » à « les points sont précis ».
+- **Si tu dois vraiment raccourcir** (GPU indisponible, deadline), alors il faut descendre les milestones en même temps dans `pytorch_config.yaml` — par exemple `milestones: [70, 90]` pour un run de 100 epochs. Changer `EPOCHS` seul est le piège.
+- **Pas la peine d'avoir peur de sur-entraîner** : DLC sauvegarde à part le meilleur snapshot (`snapshot-best-<N>.pt`), choisi sur la mAP de test évaluée tous les 10 epochs, et c'est celui-là que l'inférence prend par défaut. Un `EPOCHS` généreux coûte du temps GPU, pas de la précision.
+- **La tête décodeur part de zéro** (`with_decoder=False` dans `02_train.py`) : tu récupères les features bas-niveau de SuperAnimal-Quadruped, mais le décodeur pour tes 12 keypoints custom s'entraîne from scratch. Ce n'est pas un fine-tuning léger — raison de plus pour laisser tourner les 200 epochs.
+- **Vérifier que c'est bien convergé** : à la fin, `evaluate_network` sort la RMSE pour chaque snapshot conservé (`snapshotindex: all` dans le `config.yaml`). Si la RMSE s'améliore encore sur les derniers snapshots, le run était court ; si elle plafonne sur les 2-3 derniers, tu es bon. C'est la seule réponse fiable à « est-ce que j'ai assez entraîné ? » — la deviner à l'avance n'a pas de sens, le nombre d'epochs utile dépend de la taille de ton training set (une epoch = une passe sur tes ~250 frames, pas une quantité de calcul fixe).
 - `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w32"` sinon size mismatch au chargement des poids pré-entraînés.
 
 ### B.5 — Appliquer et QC visuel
@@ -1233,7 +1236,7 @@ Workflow :
    python scripts\dlc_model-training\06_check_labels.py ^
        --config-dir D:\EthoFlow\models\souris-bottomview
    ```
-6. **Relance l'entraînement** — important : depuis le snapshot précédent, pas from scratch. DLC le fait par défaut si tu ne changes pas d'`iteration` dans la config. Pour un fine-tuning, baisse `EPOCHS` à 20-30 dans `_config.py` :
+6. **Relance l'entraînement** — avec le même `EPOCHS = 200`, sans rien baisser. Attention à une idée reçue : `02_train.py` **ne reprend pas depuis le snapshot précédent**. Il reconstruit à chaque fois un `weight_init` depuis SuperAnimal-Quadruped, et côté DLC ce `weight_init` est prioritaire sur toute reprise de snapshot (la reprise exigerait un `snapshot_path` explicite, que le script ne passe pas). Chaque passe de refinement est donc un **entraînement complet sur le training set enrichi**, pas un fine-tuning — d'où les 200 epochs, et d'où les ~8-24 h à re-provisionner à chaque itération :
    ```cmd
    python scripts\dlc_model-training\02_train.py ^
        --config-dir D:\EthoFlow\models\souris-bottomview
