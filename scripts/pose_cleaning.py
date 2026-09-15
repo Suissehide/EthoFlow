@@ -11,7 +11,7 @@ Recommandations Tony (VAME/LIN), mail de juillet 2026 :
 Trois méthodes complémentaires implémentées ici :
 
 1. **Cutoff de likelihood** (`mask_low_likelihood`)
-   Le filet grossier. Défaut 0.70 au lieu des 0.30 historiques.
+   Le filet grossier. Défaut 0.60 au lieu des 0.30 historiques.
 
 2. **Détection de vitesse aberrante** (`detect_velocity_outliers`)
    La méthode que Tony privilégie. On convertit les pixels en mètres
@@ -58,9 +58,10 @@ import pandas as pd
 # attrapant les téléportations franches.
 DEFAULT_MAX_SPEED_MS = 5.0
 
-# Likelihood par défaut. Tony recommande ~0.70, à combiner avec les
+# Likelihood par défaut. Tony recommande ~0.70 ; on est un cran plus
+# permissif (0.60) pour moins reconstruire, à combiner avec les
 # détections ci-dessous (et NON comme unique filtre).
-DEFAULT_LIKELIHOOD = 0.70
+DEFAULT_LIKELIHOOD = 0.60
 
 
 def group_columns_by_bodypart(df: pd.DataFrame) -> dict[str, dict[str, tuple]]:

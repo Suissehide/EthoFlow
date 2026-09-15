@@ -7,7 +7,7 @@
        Smooth temporel : tue les jitters d'une-deux frames sans toucher
        aux mouvements réels. Produit un `*_filtered.h5` à côté du brut.
 
-    2. Likelihood < seuil → NaN  (défaut 0.70)
+    2. Likelihood < seuil → NaN  (défaut 0.60)
        La « likelihood » est la confiance que DLC attribue à chaque point,
        entre 0 et 1. Sous le seuil, la position est jugée non fiable :
        elle devient NaN, puis est reconstruite à l'étape 3. Seuil haut =
@@ -69,7 +69,7 @@ from paths import (  # noqa: E402
     resolve_project,
 )
 
-DEFAULT_LIKELIHOOD = 0.70
+DEFAULT_LIKELIHOOD = 0.60
 DEFAULT_MAX_SPEED = 5.0
 
 
@@ -250,7 +250,7 @@ def main() -> None:
     parser.add_argument(
         "--likelihood-threshold", type=float, default=None,
         help="Seuil de confiance DLC en dessous duquel (x,y) deviennent NaN "
-             "(défaut: 0.70, recommandation Tony/LIN). Demandé à l'invite si "
+             "(défaut: 0.60). Demandé à l'invite si "
              "absent. Le cutoff seul n'est qu'un proxy — il est complété par "
              "la détection de vitesse aberrante et de points collants.",
     )
