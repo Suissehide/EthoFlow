@@ -469,12 +469,12 @@ Une fenêtre s'ouvre, tu cliques les deux extrémités de la distance connue, le
 
 **À quoi ça sert.** DLC te rend une position pour chaque keypoint, sur chaque frame, quoi qu'il arrive — y compris quand la patte est cachée sous le corps ou qu'un reflet IR ressemble à une truffe. Le fichier brut contient donc des positions fausses, mêlées aux bonnes. Ce script les repère et les remplace par une position reconstruite à partir des frames voisines. VAME segmente des **trajectoires** : un keypoint qui téléporte à travers l'arène pendant 3 frames crée un faux motif comportemental que tu retrouveras dans tes stats.
 
-**Ce n'est pas obligatoire.** Le pipeline tourne sans : tu peux enchaîner directement sur l'étape 7 avec les `.h5` bruts. Cette étape est de l'assurance qualité, pas une conversion de format. Elle vaut le coup si tes vidéos ont des occlusions (bottom-view avec pattes qui passent sous le corps), un contraste faible, ou si le modèle DLC est encore jeune. Si ton modèle est excellent et tes vidéos propres, elle ne changera presque rien — le résumé de fin (`% utilisables`, nombre de frames réparées) te le dira en une ligne.
+**Ce n'est pas obligatoire.** Le pipeline tourne sans : tu peux enchaîner directement sur l'étape 7 avec les `.h5` bruts. En 1 animal / vidéo, `run_vame.py setup` prend le `<session>_clean.h5` s'il existe, sinon le `.h5` le plus abouti du dossier (`*_filtered.h5` avant la sortie brute de DLC) et te dit lequel il a pris. Cette étape est donc de l'assurance qualité, pas une conversion de format. Elle vaut le coup si tes vidéos ont des occlusions (bottom-view avec pattes qui passent sous le corps), un contraste faible, ou si le modèle DLC est encore jeune. Si ton modèle est excellent et tes vidéos propres, elle ne changera presque rien — le résumé de fin (`% utilisables`, nombre de frames réparées) te le dira en une ligne.
 
 Quatre passes successives par session :
 
 1. **Filtre médian temporel** (`dlc.filterpredictions`, fenêtre 5 frames) — tue les jitters d'une ou deux frames.
-2. **Cutoff de likelihood** (`--likelihood-threshold`, défaut 0.70) — le filet grossier.
+2. **Cutoff de likelihood** (`--likelihood-threshold`, défaut 0.60) — le filet grossier.
 3. **Détection de vitesse aberrante** (`--max-speed`, défaut 5 m/s) — la méthode que Tony privilégie. Convertit chaque déplacement inter-frame en m/s via `px_per_cm` et marque les frames physiquement impossibles. **Indépendant de la likelihood** : attrape aussi les labels *confiants mais faux*. Nécessite l'étape 6a, sinon la passe est silencieusement désactivée.
 4. **Détection de points collants** — repère les coordonnées où un keypoint atterrit anormalement souvent (reflet IR fixe, coin d'arène). Tony : « parfois les labels bruités sautent toujours au même point que l'animal ne peut pas atteindre ». Le script distingue un artefact (frames dispersées dans le temps) d'une immobilité réelle (frames contiguës) et ne touche qu'aux premiers.
 
@@ -488,7 +488,7 @@ python scripts\prepare_vame_input_custom.py
 
 :: Ou avec arguments (rien n'est demandé)
 python scripts\prepare_vame_input_custom.py --project-dir D:\EthoFlow\projects\mon-projet ^
-    --likelihood-threshold 0.70 --max-speed 5
+    --likelihood-threshold 0.60 --max-speed 5
 ```
 
 Sans argument, le script explique chaque seuil avant de le demander :
@@ -500,8 +500,8 @@ la position est jugée non fiable, effacée, puis reconstruite
 par interpolation depuis les frames voisines.
   · plus haut (0.9) = plus sévère, plus de points reconstruits
   · plus bas  (0.3) = plus permissif, on garde des points douteux
-  · 0.7 = recommandation de l'équipe VAME/LIN
-Seuil de likelihood [0.7] :
+  · 0.6 = défaut EthoFlow (VAME/LIN recommande 0.7)
+Seuil de likelihood [0.6] :
 ```
 
 **Critère d'acceptation** — le script produit un graphe avant/après par session dans `data/dlc-output/_qc_trajectories/`. Le nom du fichier est `<session>_<keypoint>.png`, par exemple `BV-970_tail_base.png` : le graphe ne trace **qu'un seul keypoint**, celui passé à `--qc-bodypart`, et `tail_base` est le défaut. C'est le point le plus stable du corps — il ne disparaît jamais sous l'animal et bouge peu par rapport au centre de masse, donc un saut visible sur sa trajectoire est forcément une erreur de tracking, jamais un vrai mouvement. Le keypoint est dans le nom pour que tu puisses en tracer plusieurs sans écraser le précédent :
@@ -542,6 +542,50 @@ python scripts\assign_arenas.py --project-dir D:\EthoFlow\projects\mon-projet --
 ```
 
 Puis éventuellement `fill_nan_h5.py --root <project>/data/dlc-output` pour boucher les NaN résiduels si VAME râle.
+
+#### 6c — Contrôle textuel avant de lancer VAME
+
+Le contrôle visuel (`relabel_video.py`, les graphes de trajectoire de 6b) te montre
+*à quoi ressemble* le tracking. `inspect_session.py` te dit *ce qu'il vaut*, en
+chiffres, sans ouvrir une seule image — c'est ce qu'il faut regarder avant de
+lancer 3-8 h d'entraînement sur des données trouées.
+
+```cmd
+python scripts\inspect_session.py BV-961
+python scripts\inspect_session.py --all
+python scripts\inspect_session.py BV-961 --fps 25
+```
+
+Il couvre les deux voies : en multi-animal un rapport par arène, en 1 animal /
+vidéo un seul rapport — sur le `<session>_clean.h5` s'il existe, sinon le `.h5`
+le plus abouti du dossier (`*_filtered.h5` avant la sortie brute de DLC). Comme
+`run_vame.py setup`, il n'exige donc pas que l'étape 6b ait tourné.
+
+```
+══ BV-961 (dlc-output, fps=25) ══
+
+  ── Single-animal  [BV-961DLC_Resnet50_…_filtered.h5] ──────────────
+    Frames totales            : 600
+    Frames toutes-kp valides  :    540 (90.0%)
+    Frames avec ≥1 kp valide  :    540 (90.0%)
+    Frames totalement vides   :     60 (10.0%)
+    Trous vides (frames consécutives sans détection) :
+      nombre  : 1
+      max     : 60 frames (2.4s @ 25fps)
+    Validité par keypoint (sur 6 kp) :
+      top 3    : nose=90%, chin=90%, head_center=90%
+      bottom 3 : tail_base=90%, front_paw_left=90%, hind_paw_right=90%
+    Verdict : ✅ excellent — VAME va tourner sans souci
+```
+
+**Comment lire le verdict.** Il porte sur la couverture (frames avec ≥1 keypoint
+valide) : ≥ 90 % excellent, ≥ 80 % bon, ≥ 70 % marginal, en dessous insuffisant.
+Regarde surtout deux choses au-delà du verdict : le **max des trous** — un trou de
+plusieurs secondes est une occlusion réelle ou une perte de tracking, et VAME en
+fera un motif à lui tout seul — et le **bottom 3 des keypoints**, qui te dit lequel
+le modèle rate systématiquement (souvent une patte arrière ou la queue distale).
+Un keypoint à 40 % se retire avec `filter_keypoints.py` plutôt que de polluer la
+segmentation.
 
 ### Étape 7 — setup + train + segment VAME
 
@@ -1270,7 +1314,7 @@ default_arenes_coords:
 **Analyses**
 - `analyze_vame.py` — Croise les motifs avec n'importe quelle colonne de ton Excel : CSV + heatmaps + boxplots + stats. `--list-columns` pour voir les axes disponibles, `--group-by` pour choisir, `--cross A B` pour un facteur composite
 - `community_dendrogram.py` — Dendrogramme labellisé des motifs
-- `inspect_session.py` — QC par session (couverture, gaps)
+- `inspect_session.py` — QC textuel par session (couverture, trous, validité par keypoint, verdict VAME) — multi-animal par arène, 1 animal / vidéo sur le `.h5` le plus abouti du dossier
 - `inspect_vame_project.py` — QC d'un projet VAME (.nc files)
 - `diagnose_dlc_model.py` — Diagnostique un modèle DLC qui refuse de servir à l'inférence (projet déplacé, shuffle incohérent, jamais entraîné) et répare
 - `diagnose_gpu.py` — Diagnostique `torch.cuda.is_available() == False` : build CPU, build CUDA trop ancienne pour la carte, driver absent — et donne la commande de réinstallation adaptée
@@ -1402,7 +1446,7 @@ Sur 1M+ points UMAP fitté seul-threadé prend >30 min. Le script cape à `--poo
 
 ### VAME plante avec "no such file: cropped/<session>/<session>_A1.mp4"
 
-Si tu es en multi-animal voie B, VAME veut des vidéos croppées. Lance `crop_arenes.py --all` avant `run_vame.py setup`. Si tu es en 1 animal / vidéo, VAME attend `<session>_clean.h5` dans `dlc-output/<session>/` — vérifie que `prepare_vame_input_custom.py` a bien tourné.
+Si tu es en multi-animal voie B, VAME veut des vidéos croppées. Lance `crop_arenes.py --all` avant `run_vame.py setup`. Si tu es en 1 animal / vidéo, `setup` se rabat sur n'importe quel `.h5` de `dlc-output/<session>/` — s'il n'en trouve aucun, c'est l'inférence DLC (étape 5) qui n'a pas tourné, pas le nettoyage.
 
 ### Metadata avec chemins Windows sur machine Linux (ou inversement)
 
