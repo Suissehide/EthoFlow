@@ -630,6 +630,49 @@ python scripts\run_vame.py setup --n-clusters 25 --max-epochs 100   :: sans ques
 
 Raccourci : `python scripts\run_vame.py all` enchaîne setup → segment d'une traite.
 
+#### Suivre l'entraînement en direct (TensorBoard)
+
+`train` est long (plusieurs heures) et ne t'affiche qu'une barre de progression. Les
+courbes, elles, sont écrites au format TensorBoard dans
+`data/vame/logs/tensorboard/<model_name>/`, epoch par epoch et batch par batch. Pour
+les regarder pendant que ça tourne, ouvre un **second terminal** :
+
+```cmd
+conda activate vame
+tensorboard --logdir D:\EthoFlow\projects\mon-projet\data\vame\logs\tensorboard --port 6006
+```
+
+```bash
+# Linux / macOS
+conda activate vame
+tensorboard --logdir ~/ethoflow/projects/mon-projet/data/vame/logs/tensorboard --port 6006
+```
+
+Puis ouvre <http://localhost:6006>. La page se rafraîchit d'elle-même au fil des epochs.
+
+Les scalaires loggés :
+
+| Scalaire | Ce que tu regardes |
+|---|---|
+| `epoch/train_loss`, `epoch/test_loss` | Les deux qui comptent. Si `test` remonte pendant que `train` descend, tu surapprends |
+| `epoch/train_mse`, `epoch/test_mse` | La reconstruction seule, sans le terme KL |
+| `epoch/train_kl`, `epoch/test_kl`, `epoch/kl_weight` | La divergence KL et la montée du β-annealing (`kl_weight` croît puis plafonne) |
+| `epoch/train_kmeans`, `epoch/test_kmeans` | Le terme de clustering de l'espace latent |
+| `epoch/learning_rate` | Les décrochements du scheduler |
+| `batch/...` | Les mêmes, par batch, pour un tracé plus fin |
+
+Deux détails qui font gagner du temps :
+
+- **Pointe `--logdir` sur le dossier `tensorboard/`, pas sur le sous-dossier du modèle.**
+  TensorBoard superpose alors tous les runs du projet dans la même page — c'est comme
+  ça que tu compares deux jeux d'hyperparamètres.
+- Le binaire `tensorboard` n'existe que dans l'env `vame` (il arrive avec torch) : ni
+  `dlc` ni `ethoflow` ne l'ont, d'où le `conda activate vame`.
+
+Après coup, les mêmes pertes sont sauvées en `.npy` dans `data/vame/model/model_losses/`
+(`train_losses_VAME.npy`, `test_losses_VAME.npy`, `kl_losses_VAME.npy`…) si tu veux les
+retracer toi-même.
+
 Sortie : `data/vame/results/<session>/<model>/hmm-15/15_hmm_label_<session>.npy` (1 label motif par frame ; `hmm-25/` si tu as demandé 25 motifs).
 
 ### Étape 8 — labelliser les motifs à la main
@@ -1189,6 +1232,64 @@ Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAni
 - **Vérifier que c'est bien convergé** : à la fin, `evaluate_network` sort la RMSE pour chaque snapshot conservé (`snapshotindex: all` dans le `config.yaml`). Si la RMSE s'améliore encore sur les derniers snapshots, le run était court ; si elle plafonne sur les 2-3 derniers, tu es bon. C'est la seule réponse fiable à « est-ce que j'ai assez entraîné ? » — la deviner à l'avance n'a pas de sens, le nombre d'epochs utile dépend de la taille de ton training set (une epoch = une passe sur tes ~250 frames, pas une quantité de calcul fixe).
 - `NET_TYPE = "hrnet_w32"` doit matcher `MODEL_NAME = "hrnet_w32"` sinon size mismatch au chargement des poids pré-entraînés.
 
+#### Suivre l'entraînement en direct dans le navigateur
+
+8 à 24 h de GPU sans savoir si la loss descend encore, c'est long. DeepLabCut 3
+n'expose pas de dashboard (son runner ne connaît que `CSVLogger` et un logger
+Weights & Biases) : il écrit chaque epoch dans `learning_stats.csv`, dans le
+dossier `train\` du shuffle. `watch_training.py` lit ce fichier en boucle et le
+sert en courbes, sur une page locale qui se rafraîchit toute seule.
+
+Lance-le dans un **second terminal**, pendant que `02_train.py` tourne dans le
+premier :
+
+```cmd
+python scripts\dlc_model-training\watch_training.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview
+```
+
+```bash
+# Linux / macOS
+python scripts/dlc_model-training/watch_training.py --config-dir ~/ethoflow/models/souris-bottomview
+```
+
+Le navigateur s'ouvre sur <http://localhost:8765>. Comme partout ailleurs,
+`--config-dir` est optionnel : sans lui, le menu des dossiers de config trouvés
+s'affiche. Tu peux aussi viser le projet DLC directement (`--model-dir`) ou un
+CSV précis (`--stats <chemin>`, pratique pour comparer deux shuffles côte à côte).
+
+Ce que la page affiche :
+
+- l'epoch courant sur le total prévu (`137 / 200`), et la dernière valeur de chaque métrique
+- **perte totale train vs eval** en grand — les deux courbes qui décident. Si `eval`
+  remonte pendant que `train` descend, tu surapprends : arrête et repasse par B.3
+- un petit graphe par métrique restante : pertes par tête, `test.rmse`,
+  `test.rmse_pcutoff` (celle de l'objectif ci-dessus), `test.mAP`
+- une pastille **en cours** / **silencieux depuis N s** — un entraînement qui a planté
+  dans l'autre terminal se voit tout de suite
+- au survol d'une courbe : les valeurs de toutes les séries à cet epoch
+- une case **échelle log**, pour continuer à lire la loss quand elle a fondu d'un
+  facteur 100 et que l'échelle linéaire l'écrase contre l'axe
+
+Les deux décrochements de learning rate (epochs 160 et 190, cf. la note `EPOCHS = 200`
+ci-dessus) se lisent en général comme une cassure nette dans la courbe de perte : c'est
+le repère visuel qui dit que la phase de raffinement a bien démarré.
+
+Quelques précisions utiles :
+
+- **Aucune dépendance en plus** : le script est en stdlib et n'importe pas
+  DeepLabCut. Il tourne dans n'importe quel env conda — y compris pendant que `dlc`
+  occupe la GPU — et ne parle à aucun serveur externe.
+- Tu peux le démarrer **avant** l'entraînement : tant que le CSV n'existe pas, la page
+  attend le premier epoch. Le laisser tourner entre deux runs ne coûte rien.
+- `--port 9000` si 8765 est pris, `--host 0.0.0.0` pour regarder depuis une autre
+  machine du réseau, `--no-browser` pour ne pas ouvrir d'onglet, `--refresh 15` pour
+  espacer les relectures.
+- Pour les modèles top-down, le détecteur a son propre `learning_stats_detector.csv` :
+  la page lui fait sa section, sous celle du modèle de pose.
+- Ctrl+C arrête le viewer. L'entraînement, lui, continue — les deux processus sont
+  indépendants.
+
 ### B.5 — Appliquer et QC visuel
 
 ```cmd
@@ -1351,6 +1452,7 @@ default_arenes_coords:
 - `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement, tous acceptent `--config-dir` et le demandent s'il manque (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
 - `extract_frames_manual.py` — Ouvre la GUI d'extraction manuelle sur **chaque** vidéo du projet à son tour (DLC ne le fait que sur la pilote) — voir [B.3.2](#b32--extraction-manuelle-des-frames-difficiles)
 - `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent (Parcours B ; l'équivalent projet est `relabel_video.py`)
+- `watch_training.py` — Sert les courbes d'entraînement (`learning_stats.csv`) dans une page web locale qui se rafraîchit toute seule — à lancer dans un second terminal pendant `02_train.py` (voir [B.4](#b4--premier-entraînement))
 
 **DLC inférence**
 - `run_dlc_inference.py` — Inférence DLC (SuperAnimal ou custom)
