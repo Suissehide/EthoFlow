@@ -1,13 +1,15 @@
 """
 Inspection qualité des fichiers .h5 prêts pour VAME.
 
-Lit les fichiers `data/dlc-output/<session_id>/<session_id>_A*.h5` et imprime
-un bilan détaillé par arène : couverture (frames valides vs trous), distribution
-des trous, validité par keypoint, et un verdict pour VAME.
+Lit les `.h5` de `data/dlc-output/<session_id>/` et imprime un bilan détaillé :
+couverture (frames valides vs trous), distribution des trous, validité par
+keypoint, et un verdict pour VAME.
 
-Marche aussi bien sur les sorties du chemin A (multi-animal + assign_arenas)
-que du chemin B (single-animal cropped) puisque les deux produisent le même
-format de fichier.
+Couvre les deux voies du pipeline :
+  - multi-animal : un rapport par arène (`<session>_A*.h5`)
+  - 1 animal / vidéo : un seul rapport, sur le `<session>_clean.h5` s'il
+    existe, sinon le `.h5` le plus abouti du dossier (`*_filtered.h5` avant
+    la sortie brute de DeepLabCut) — le nettoyage n'est pas un prérequis.
 
 Usage:
     python scripts/inspect_session.py <session_id>
@@ -31,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paths import (  # noqa: E402
     add_project_dir_arg,
     dlc_output_dir,
+    pick_bottomview_h5,
     raw_dir,
     resolve_project,
 )
@@ -144,14 +147,31 @@ def get_session_fps(project: Path, session_id: str, default: float = 25.0) -> fl
     return float(meta.get("camera", {}).get("fps", default))
 
 
+def resolve_h5_files(session_dir: Path, session_id: str) -> list[tuple[str, Path]]:
+    """Les `.h5` à inspecter pour cette session, en `(libellé, chemin)`.
+
+    Topview : un fichier par arène (`<session>_A*.h5`), libellés « Arène A1 ».
+
+    Bottomview : une seule souris par vidéo, donc un seul fichier — celui que
+    `pick_bottomview_h5` retient (`_clean.h5`, sinon `_filtered.h5`, sinon le
+    brut de DeepLabCut). On ne cherchait ici que le motif topview, ce qui
+    rendait le script aveugle à toute une voie du pipeline.
+    """
+    topview = sorted(session_dir.glob(f"{session_id}_A*.h5"))
+    if topview:
+        return [(f"Arène {h.stem.rsplit('_', 1)[-1]}", h) for h in topview]
+    bottom = pick_bottomview_h5(session_dir, session_id)
+    return [("Single-animal", bottom)] if bottom is not None else []
+
+
 def inspect_session(project: Path, session_id: str, input_dir: Path, fps: float | None) -> None:
     session_dir = input_dir / session_id
     if not session_dir.exists():
         raise FileNotFoundError(f"Dossier introuvable : {session_dir}")
 
-    h5_files = sorted(session_dir.glob(f"{session_id}_A*.h5"))
+    h5_files = resolve_h5_files(session_dir, session_id)
     if not h5_files:
-        raise FileNotFoundError(f"Aucun .h5 single-animal dans {session_dir}")
+        raise FileNotFoundError(f"Aucun .h5 exploitable dans {session_dir}")
 
     if fps is None:
         fps = get_session_fps(project, session_id)
@@ -159,10 +179,9 @@ def inspect_session(project: Path, session_id: str, input_dir: Path, fps: float 
     print(f"\n══ {session_id} ({input_dir.name}, fps={fps:.0f}) ══")
 
     overall_coverages = []
-    for h5_path in h5_files:
-        arena = h5_path.stem.rsplit("_", 1)[-1]  # "..._A1" → "A1"
+    for label, h5_path in h5_files:
         stats = analyze_h5(h5_path)
-        print_report(f"Arène {arena}  [{h5_path.name}]", stats, fps)
+        print_report(f"{label}  [{h5_path.name}]", stats, fps)
         cov = stats["frames_some_valid"] / max(stats["n_frames"], 1) * 100
         overall_coverages.append(cov)
 
@@ -177,7 +196,7 @@ def list_sessions(input_dir: Path) -> list[str]:
     return sorted(
         d.name for d in input_dir.iterdir()
         if d.is_dir() and not d.name.startswith(".")
-        and any(d.glob(f"{d.name}_A*.h5"))
+        and resolve_h5_files(d, d.name)
     )
 
 
