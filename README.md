@@ -1222,6 +1222,15 @@ Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAni
 - **RMSE_pcutoff 8-15 px** : marge d'amélioration, mais le modèle est déjà utilisable pour un premier QC
 - **RMSE_pcutoff > 15 px** : problème. Soit tu manques de frames sur des situations spécifiques (cf. B.6 outliers), soit tes labels sont incohérents (relance B.3.4 audit L/R)
 
+**Si l'entraînement plante en route** (`FileExistsError`, coupure de courant, GPU réquisitionnée), n'enchaîne pas directement sur un nouveau run de 200 epochs : évalue d'abord les snapshots déjà écrits, ça prend quelques minutes.
+
+```cmd
+python scripts\dlc_model-training\02_train.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview --eval-only
+```
+
+`--eval-only` ne recrée pas le training dataset — c'est important, `create_training_dataset` régénère le shuffle et fait disparaître les snapshots. Tu obtiens la table RMSE par snapshot et les **images annotées** dans `evaluation-results/iteration-0/.../LabeledImages_*/`. Regarder où le modèle pose réellement les points répond à une question que les métriques seules ne tranchent pas : est-ce que les points sont au bon endroit mais imprécis (→ il manque des epochs), ou dispersés n'importe où (→ il manque des labels, ou ils sont incohérents) ?
+
 **Notes techniques** :
 
 - Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
