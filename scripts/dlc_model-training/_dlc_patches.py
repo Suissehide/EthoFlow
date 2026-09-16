@@ -39,6 +39,31 @@ Correctif : avant de tracer, on réaligne les noms d'individus de la
 vérité terrain sur ceux des prédictions. No-op quand les noms coïncident
 déjà (vrai projet multi-animal) ou quand les deux côtés n'ont pas le même
 nombre d'individus — dans ce cas on laisse DLC gérer.
+
+--------------------------------------------------------------------
+Patch 2 — `FileExistsError` sur le renommage de snapshot (Windows)
+--------------------------------------------------------------------
+Symptôme : l'entraînement tourne des heures puis meurt en plein milieu,
+au moment d'écrire un snapshot :
+
+    Training for epoch 60 done, starting evaluation
+    ...
+    File "...runners\\snapshots.py", line 112, in update
+        current_best.path.rename(new_name)
+    FileExistsError: [WinError 183] Impossible de créer un fichier déjà
+    existant: '...\\snapshot-best-050.pt' -> '...\\snapshot-050.pt'
+
+Cause : quand un nouveau meilleur score apparaît, DLC **rétrograde**
+l'ancien meilleur en le renommant `snapshot-best-050.pt` →
+`snapshot-050.pt`. Or l'epoch 050 a déjà été sauvegardé sous ce nom par
+la sauvegarde périodique. Sous POSIX, `Path.rename` écrase
+silencieusement la cible ; sous Windows, elle lève `FileExistsError`.
+Le code DLC n'a donc jamais été testé sur ce cas — c'est un bug de
+portabilité, pas un problème de ton modèle ni de tes données.
+
+Correctif : on intercepte l'erreur, on supprime la cible, on réessaie.
+C'est exactement le comportement POSIX que DLC attendait. Les deux
+fichiers portent les poids du même epoch, rien n'est perdu.
 """
 from __future__ import annotations
 
@@ -51,6 +76,7 @@ def apply_patches() -> None:
     if _APPLIED:
         return
     _patch_plot_evaluation_results()
+    _patch_snapshot_rename()
     _APPLIED = True
 
 
@@ -128,3 +154,45 @@ def _patch_plot_evaluation_results() -> None:
 
     patched._ethoflow_patched = True
     evaluation.plot_evaluation_results = patched
+
+
+def _patch_snapshot_rename() -> None:
+    """Rend `SnapshotManager.update` tolérant à une cible déjà existante.
+
+    Sous POSIX, `Path.rename` écrase la cible — comportement sur lequel
+    DLC compte pour rétrograder l'ancien meilleur snapshot. Sous Windows
+    elle lève `FileExistsError` et tue l'entraînement en cours. On
+    reproduit le comportement POSIX : supprimer la cible, réessayer.
+    """
+    try:
+        from deeplabcut.pose_estimation_pytorch.runners import snapshots
+    except ImportError as err:
+        print(f"⚠️  Patch snapshot non appliqué ({err})")
+        return
+
+    manager = getattr(snapshots, "TorchSnapshotManager", None) or \
+        getattr(snapshots, "SnapshotManager", None)
+    if manager is None:
+        print("⚠️  Patch snapshot non appliqué (classe introuvable)")
+        return
+
+    original = getattr(manager, "update", None)
+    if original is None or getattr(original, "_ethoflow_patched", False):
+        return
+
+    def patched_update(self, *args, **kwargs):
+        from pathlib import Path
+        try:
+            return original(self, *args, **kwargs)
+        except FileExistsError as err:
+            # os.rename renseigne filename (source) et filename2 (cible)
+            dest = getattr(err, "filename2", None)
+            if not dest or not Path(dest).exists():
+                raise
+            print(f"  [patch] snapshot déjà présent, écrasé : "
+                  f"{Path(dest).name}")
+            Path(dest).unlink()
+            return original(self, *args, **kwargs)
+
+    patched_update._ethoflow_patched = True
+    manager.update = patched_update

@@ -1523,6 +1523,29 @@ python -c "import torch; x = torch.randn(1024,1024,device='cuda'); print(torch.c
 
 **Sans GPU, le pipeline tourne quand même** — DLC et VAME fonctionnent sur CPU, 10 à 50× plus lentement. Pour l'inférence sur quelques vidéos c'est tenable ; pour entraîner un modèle DLC ou le VAE de VAME, il faut une GPU.
 
+### `FileExistsError: [WinError 183]` sur `snapshot-best-0XX.pt` pendant l'entraînement
+
+L'entraînement tourne des heures puis meurt au moment d'écrire un snapshot :
+
+```
+Training for epoch 60 done, starting evaluation
+  File "...runners\snapshots.py", line 112, in update
+    current_best.path.rename(new_name)
+FileExistsError: [WinError 183] ... 'snapshot-best-050.pt' -> 'snapshot-050.pt'
+```
+
+Bug de portabilité de DLC, **sans rapport avec tes données ou ton modèle**. Quand un nouveau meilleur score apparaît, DLC rétrograde l'ancien meilleur en le renommant `snapshot-best-050.pt` → `snapshot-050.pt` — mais l'epoch 050 a déjà été écrit sous ce nom par la sauvegarde périodique. Sous POSIX, `rename` écrase silencieusement ; sous Windows, elle lève. Le cas n'a jamais été testé.
+
+Corrigé par `_dlc_patches.py` (appliqué automatiquement par `02_train.py`) : la cible est supprimée et le renommage réessayé, exactement le comportement POSIX attendu. Les deux fichiers portent les poids du même epoch, rien n'est perdu.
+
+Si tu tournes une version d'EthoFlow antérieure au patch, contournement manuel :
+
+```cmd
+del D:\EthoFlow\models\<modele>\dlc-models-pytorch\iteration-0\<shuffle>\train\snapshot-050.pt
+```
+
+puis relance. **Les epochs déjà faits sont perdus** — le patch existe pour ne pas avoir à en arriver là.
+
 ### « Could not find a shuffle with trainingset fraction 0.95 and index 1 »
 
 **Lance d'abord le diagnostic** — il vérifie tout et répare ce qui est réparable :
