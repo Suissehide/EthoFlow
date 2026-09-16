@@ -30,9 +30,57 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
+def reset_training_artifacts(project_dir: Path) -> None:
+    """Supprime tout ce qu'un run produit, et rien de ce qu'il consomme.
+
+    Ce qui part : `dlc-models-pytorch/` (snapshots + learning_stats.csv),
+    `training-datasets/` (régénéré par create_training_dataset), et
+    `evaluation-results/`.
+
+    Ce qui reste : `labeled-data/` — tes annotations, le seul contenu
+    vraiment coûteux à reproduire —, `config.yaml` et `videos/`.
+
+    Motivation : après un run interrompu, les snapshots de l'ancien run
+    cohabitent avec ceux du nouveau. `evaluate_network` les évalue tous
+    (`snapshotindex: all`) et la table de résultats mélange deux runs.
+    """
+    import shutil
+
+    a_supprimer = [
+        project_dir / "dlc-models-pytorch",
+        project_dir / "dlc-models",
+        project_dir / "training-datasets",
+        project_dir / "evaluation-results",
+    ]
+    preserves = project_dir / "labeled-data"
+    n_labels = 0
+    if preserves.exists():
+        n_labels = sum(len(list(d.glob("CollectedData_*.h5")))
+                       for d in preserves.iterdir() if d.is_dir())
+
+    print("--reset : remise à zéro de l'entraînement")
+    print(f"  conservé : labeled-data/ ({n_labels} fichier(s) "
+          f"d'annotations), config.yaml, videos/")
+    for p in a_supprimer:
+        if not p.exists():
+            continue
+        shutil.rmtree(p)
+        print(f"  supprimé : {p.name}/")
+    print()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_config_dir_arg(parser)
+    parser.add_argument(
+        "--reset", action="store_true",
+        help="Repart d'un entraînement propre : supprime les snapshots, "
+             "learning_stats.csv et les résultats d'évaluation de "
+             "l'itération courante avant de réentraîner. NE TOUCHE PAS à "
+             "labeled-data/ (tes annotations), config.yaml ni videos/. "
+             "À utiliser après un run interrompu, pour ne pas mélanger "
+             "les snapshots de deux runs.",
+    )
     parser.add_argument(
         "--eval-only", action="store_true",
         help="N'entraîne pas : évalue les snapshots déjà présents et "
@@ -54,6 +102,14 @@ def main() -> None:
     # Sans ça, l'évaluation saute TOUTES les images annotées sur un projet
     # mono-animal ("DataFrame reshape failed"). Détails dans _dlc_patches.
     apply_patches()
+
+    if args.reset:
+        if args.eval_only:
+            print("❌ --reset et --eval-only sont contradictoires : le "
+                  "premier efface ce que le second veut évaluer.",
+                  file=sys.stderr)
+            sys.exit(1)
+        reset_training_artifacts(Path(CONFIG).parent)
 
     if args.eval_only:
         # create_training_dataset régénère le shuffle et fait disparaître

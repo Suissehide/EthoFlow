@@ -1231,6 +1231,15 @@ python scripts\dlc_model-training\02_train.py ^
 
 `--eval-only` ne recrée pas le training dataset — c'est important, `create_training_dataset` régénère le shuffle et fait disparaître les snapshots. Tu obtiens la table RMSE par snapshot et les **images annotées** dans `evaluation-results/iteration-0/.../LabeledImages_*/`. Regarder où le modèle pose réellement les points répond à une question que les métriques seules ne tranchent pas : est-ce que les points sont au bon endroit mais imprécis (→ il manque des epochs), ou dispersés n'importe où (→ il manque des labels, ou ils sont incohérents) ?
 
+Puis, pour repartir sur un run propre :
+
+```cmd
+python scripts\dlc_model-training\02_train.py ^
+    --config-dir D:\EthoFlow\models\souris-bottomview --reset
+```
+
+`--reset` supprime `dlc-models-pytorch/`, `training-datasets/` et `evaluation-results/`, puis réentraîne. Il **ne touche pas à `labeled-data/`** — tes annotations, la seule chose vraiment coûteuse à reproduire — ni à `config.yaml` ni à `videos/`. Sans `--reset`, les snapshots de l'ancien run cohabitent avec ceux du nouveau et `evaluate_network` (en `snapshotindex: all`) te sort une table qui mélange les deux.
+
 **Notes techniques** :
 
 - Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
