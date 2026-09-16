@@ -1240,6 +1240,32 @@ python scripts\dlc_model-training\02_train.py ^
 
 `--reset` supprime `dlc-models-pytorch/`, `training-datasets/` et `evaluation-results/`, puis réentraîne. Il **ne touche pas à `labeled-data/`** — tes annotations, la seule chose vraiment coûteuse à reproduire — ni à `config.yaml` ni à `videos/`. Sans `--reset`, les snapshots de l'ancien run cohabitent avec ceux du nouveau et `evaluate_network` (en `snapshotindex: all`) te sort une table qui mélange les deux.
 
+#### Savoir *quels* keypoints posent problème
+
+La RMSE globale dit si le modèle est bon, pas où il échoue. Et l'écart entre `rmse` et `rmse_pcutoff` (souvent un facteur 20-30) vient rarement de tous les keypoints à parts égales :
+
+```cmd
+python scripts\dlc_model-training\keypoint_errors.py ^
+    --model-dir D:\EthoFlow\models\souris-bottomview
+```
+
+```
+keypoint        n   %>seuil      rmse   rmse_seuil   médiane
+------------------------------------------------------------
+paw_fr        200    100.0%      40.1        40.14     40.06
+nose          200    100.0%       4.5         4.48      3.72
+paw_fl        200     39.5%     314.4         4.09    120.16
+------------------------------------------------------------
+TOTAL         800     84.9%     158.5        22.09      5.86
+```
+
+Deux profils, deux conclusions opposées :
+
+- **`rmse` énorme, `rmse_seuil` basse** (`paw_fl`) — le modèle ne voit pas le point une partie du temps et le signale par une confiance basse. Comportement sain : le cutoff de l'étape 6b les écartera. Attendu en bottom-view pour les pattes qui passent sous le corps. En dessous de ~20 % au-dessus du seuil, envisage de retirer le keypoint des features VAME (`filter_keypoints.py`).
+- **`rmse_seuil` élevée** (`paw_fr`) — le modèle se trompe **en étant confiant**. Aucun filtrage ne rattrapera ça. C'est la signature d'inversions gauche/droite dans les labels (relance l'audit B.3.4) ou d'une situation absente du training set (B.6).
+
+Le script pointe lui-même les keypoints des deux catégories. `--pcutoff 0.3` pour voir ce que donnerait un seuil plus permissif, `--out erreurs.csv` pour exporter.
+
 **Notes techniques** :
 
 - Recommandation Tony : **ne pas modifier les hyperparamètres**. La tâche (12 keypoints sur souris) n'est pas assez spécifique pour justifier un tuning au-delà des défauts.
@@ -1470,6 +1496,7 @@ default_arenes_coords:
 - `01_setup_project.py` → `06_check_labels.py` — Workflow d'entraînement, tous acceptent `--config-dir` et le demandent s'il manque (voir [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc))
 - `extract_frames_manual.py` — Ouvre la GUI d'extraction manuelle sur **chaque** vidéo du projet à son tour (DLC ne le fait que sur la pilote) — voir [B.3.2](#b32--extraction-manuelle-des-frames-difficiles)
 - `create_labeled_video.py` — Régénère la vidéo annotée à un pcutoff différent (Parcours B ; l'équivalent projet est `relabel_video.py`)
+- `keypoint_errors.py` — RMSE et taux de confiance **par keypoint** : distingue « invisible et signalé comme tel » (sain) de « faux en étant confiant » (à corriger)
 - `watch_training.py` — Sert les courbes d'entraînement (`learning_stats.csv`) dans une page web locale qui se rafraîchit toute seule — à lancer dans un second terminal pendant `02_train.py` (voir [B.4](#b4--premier-entraînement))
 
 **DLC inférence**
