@@ -128,28 +128,89 @@ def main() -> None:
     print()
     print(tab.round(2).to_string())
 
-    # Verdict : on compare la médiane GLOBALE, pas keypoint par keypoint —
-    # un modèle qui ne reconnaît pas la vidéo est perdu partout à la fois.
-    med = float(lik.stack().median())
     print()
-    if med > 0.6:
-        print(f"✅ Confiance médiane {med:.2f} — le modèle reconnaît cette "
-              f"vidéo.")
-    elif med > 0.3:
-        print(f"⚠  Confiance médiane {med:.2f} — utilisable, mais le modèle "
-              f"hésite.")
-        print("   Ajoute des frames de cette vidéo au training set (B.6).")
-    else:
-        print(f"❌ Confiance médiane {med:.2f} — le modèle ne reconnaît pas "
-              f"cette vidéo.")
-        print("   Baisser le pcutoff n'y changera rien : il n'y a pas de "
-              "bonne prédiction cachée sous le seuil.")
-        print("   Vérifie d'abord que cette vidéo vient du MÊME setup que "
-              "tes frames labellisées")
-        print("   (caméra, objectif, éclairage IR, hauteur, résolution). "
-              "Si oui, il faut labelliser")
-        print("   des frames de cette vidéo — le training set ne couvre pas "
-              "ce qu'elle montre.")
+    verdict(tab, lik)
+
+
+def paires_gauche_droite(keypoints) -> list[tuple[str, str]]:
+    """Apparie les keypoints symétriques (front_paw_left/right, etc.)."""
+    paires = []
+    for k in keypoints:
+        s = str(k)
+        if s.endswith("_left"):
+            jumeau = s[: -len("_left")] + "_right"
+            if jumeau in set(str(x) for x in keypoints):
+                paires.append((s, jumeau))
+    return paires
+
+
+def verdict(tab: pd.DataFrame, lik: pd.DataFrame) -> None:
+    """Commente le tableau — par groupe de keypoints, pas globalement.
+
+    Une médiane globale n'a pas de sens ici : un modèle peut être bon sur
+    l'axe du corps et aveugle sur la queue. Les actions à prendre ne sont
+    pas les mêmes, donc on les sépare.
+    """
+    med_col, seuil_col = "mediane", ">0.3"
+
+    # Asymétrie gauche/droite : l'anatomie est symétrique, donc un écart
+    # marqué entre les deux côtés vient des labels, pas de l'animal.
+    asym = []
+    for g, d in paires_gauche_droite(tab.index):
+        if g not in tab.index or d not in tab.index:
+            continue
+        a, b = tab.loc[g, seuil_col], tab.loc[d, seuil_col]
+        haut, bas = max(a, b), min(a, b)
+        if haut > 10 and haut > 2 * max(bas, 0.5):
+            asym.append((g, a, d, b))
+    concernes_asym = {k for g, _, d, _ in asym for k in (g, d)}
+
+    morts = tab[(tab[med_col] < 0.15) | (tab[seuil_col] < 5)]
+    faibles = tab[(tab[med_col] >= 0.15) & (tab[med_col] < 0.45)
+                  & (tab[seuil_col] >= 5)]
+    bons = tab[tab[med_col] >= 0.45]
+    # Un keypoint muet dont le symétrique fonctionne n'est pas invisible :
+    # c'est un problème d'annotation. Le retirer masquerait la cause.
+    a_retirer = [k for k in morts.index if str(k) not in concernes_asym]
+
+    if len(bons):
+        print(f"✅ Fiables ({len(bons)}) : {', '.join(map(str, bons.index))}")
+    if len(faibles):
+        print(f"⚠  Incertains ({len(faibles)}) : "
+              f"{', '.join(map(str, faibles.index))}")
+        print("   Récupérables : ajoute des frames dans les situations où "
+              "ils échouent (étape B.6).")
+    if len(morts):
+        print(f"❌ Jamais détectés ({len(morts)}) : "
+              f"{', '.join(map(str, morts.index))}")
+    if a_retirer:
+        print(f"   Invisibles sur cette vue (aucun symétrique qui "
+              f"fonctionne) : {', '.join(map(str, a_retirer))}")
+        print("   Aucun seuil ne les récupère — retire-les des features "
+              "VAME :")
+        print("     python scripts/filter_keypoints.py")
+
+    if asym:
+        print()
+        print("⚠  Asymétrie gauche/droite :")
+        for g, a, d, b in asym:
+            print(f"     {g} {a:.0f}% au-dessus de 0.3  vs  {d} {b:.0f}%")
+        print("   L'animal est symétrique : cet écart vient des "
+              "annotations, pas de la souris.")
+        print("   Lance l'audit L/R avant d'ajouter quoi que ce soit au "
+              "training set :")
+        print("     python scripts/dlc_model-training/06_check_labels.py")
+
+    # Conséquence directe sur l'étape 6b — le seuil par défaut y est 0.70.
+    print()
+    utilisables = int(((lik > 0.7).mean() * 100 > 20).sum())
+    if utilisables < len(tab) / 2:
+        print(f"ℹ  Pour l'étape 6b : seuls {utilisables} keypoint(s) sur "
+              f"{len(tab)} dépassent 0.70 plus de 20 % du temps.")
+        print("   Le seuil par défaut de prepare_vame_input_custom.py (0.70) "
+              "mettrait presque tout en NaN.")
+        print("   Baisse-le (--likelihood-threshold 0.3) OU réduis le jeu de "
+              "keypoints aux plus fiables.")
 
 
 if __name__ == "__main__":
