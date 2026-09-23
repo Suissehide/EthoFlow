@@ -30,6 +30,94 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
+def paires_symetriques(bodyparts: list[str]) -> list[list[int]]:
+    """Indices des keypoints symétriques, d'après leurs noms `_left`/`_right`."""
+    index = {bp: i for i, bp in enumerate(bodyparts)}
+    paires = []
+    for bp, i in index.items():
+        if bp.endswith("_left"):
+            jumeau = bp[: -len("_left")] + "_right"
+            if jumeau in index:
+                paires.append([i, index[jumeau]])
+    return sorted(paires)
+
+
+def trouver_pytorch_config(project_dir: Path) -> Path | None:
+    """pytorch_config.yaml du shuffle le plus récemment créé."""
+    candidats = list(project_dir.glob(
+        "dlc-models-pytorch/iteration-*/*/train/pytorch_config.yaml"))
+    if not candidats:
+        return None
+    return max(candidats, key=lambda p: p.stat().st_mtime)
+
+
+def corriger_hflip(project_dir: Path, bodyparts: list[str]) -> None:
+    """Empêche l'augmentation miroir d'enseigner la confusion gauche/droite.
+
+    Le problème : retourner une image horizontalement transforme
+    visuellement une patte gauche en patte droite. Si les paires
+    symétriques ne sont pas déclarées, l'étiquette, elle, ne suit pas —
+    le réseau reçoit donc la consigne explicite que « gauche » et
+    « droite » désignent la même chose, et il l'apprend très bien.
+
+    Le symptôme final est sans ambiguïté : les deux marqueurs d'une paire
+    tombent sur le même pixel à l'inférence, et le côté qui perd l'argmax
+    récolte une confiance proche de zéro. Aucune quantité de frames
+    supplémentaires ne corrige ça, puisque c'est l'entraînement lui-même
+    qui enseigne la confusion.
+
+    Deux réparations, par ordre de préférence :
+      1. déclarer les symétries, si le schéma de config les accepte —
+         le miroir devient alors une augmentation valide et utile ;
+      2. sinon désactiver le miroir. On perd de la diversité
+         d'augmentation, ce qui est toujours préférable à une
+         supervision contradictoire.
+    """
+    import yaml as _yaml
+
+    cfg_path = trouver_pytorch_config(project_dir)
+    if cfg_path is None:
+        print("⚠  pytorch_config.yaml introuvable — vérification hflip "
+              "sautée.")
+        return
+
+    cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    train = (cfg.get("data") or {}).get("train")
+    if not isinstance(train, dict) or "hflip" not in train:
+        print("ℹ  Pas d'augmentation hflip dans ce config — rien à faire.")
+        return
+
+    hflip = train["hflip"]
+    paires = paires_symetriques(bodyparts)
+
+    if isinstance(hflip, dict):
+        cle_sym = next((k for k in hflip if "symmetr" in k.lower()), None)
+        if cle_sym and paires:
+            if hflip.get(cle_sym):
+                print(f"ℹ  hflip : symétries déjà déclarées "
+                      f"({hflip[cle_sym]}).")
+                return
+            hflip[cle_sym] = paires
+            action = (f"symétries déclarées sur {len(paires)} paire(s) "
+                      f"→ {cle_sym}={paires}")
+        else:
+            train["hflip"] = False
+            action = ("désactivé (le schéma n'expose pas de champ de "
+                      "symétries)")
+    elif hflip:
+        train["hflip"] = False
+        action = "désactivé (était actif, sans symétries possibles)"
+    else:
+        print("ℹ  hflip déjà désactivé — rien à faire.")
+        return
+
+    cfg_path.write_text(
+        _yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    print(f"✓ Augmentation miroir corrigée : {action}")
+    print(f"  ({cfg_path.relative_to(project_dir)})")
+
+
 def reset_training_artifacts(project_dir: Path) -> None:
     """Supprime tout ce qu'un run produit, et rien de ce qu'il consomme.
 
@@ -84,6 +172,13 @@ def main() -> None:
              "les snapshots de deux runs.",
     )
     parser.add_argument(
+        "--keep-hflip", action="store_true",
+        help="Laisse l'augmentation miroir telle quelle. Par défaut le "
+             "script déclare les paires symétriques (ou désactive le "
+             "miroir), sans quoi le réseau apprend que gauche et droite "
+             "désignent le même point.",
+    )
+    parser.add_argument(
         "--eval-only", action="store_true",
         help="N'entraîne pas : évalue les snapshots déjà présents et "
              "produit les images annotées. Quelques minutes. À utiliser "
@@ -134,6 +229,15 @@ def main() -> None:
             weight_init=weight_init,
             net_type=NET_TYPE,  # IMPORTANT : doit matcher MODEL_NAME des poids
         )
+
+        # create_training_dataset vient de (re)générer pytorch_config.yaml :
+        # c'est le seul moment où la correction tient, avant l'entraînement.
+        if not args.keep_hflip:
+            import yaml as _yaml
+            bodyparts = (_yaml.safe_load(Path(CONFIG).read_text(
+                encoding="utf-8")) or {}).get("bodyparts") or []
+            corriger_hflip(Path(CONFIG).parent, list(bodyparts))
+            print()
 
         print(f"Entraînement ({EPOCHS} epochs, transfer learning actif)...")
         dlc.train_network(
