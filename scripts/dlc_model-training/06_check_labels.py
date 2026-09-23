@@ -67,6 +67,9 @@ PAWS = [
 ]
 
 
+DEFAULT_MARGIN_PX = 15.0
+
+
 def cross_sign_vec(
     paw_x: np.ndarray,
     paw_y: np.ndarray,
@@ -74,28 +77,56 @@ def cross_sign_vec(
     tail_y: np.ndarray,
     nose_x: np.ndarray,
     nose_y: np.ndarray,
+    margin_px: float = DEFAULT_MARGIN_PX,
 ) -> np.ndarray:
-    """Signe du produit vectoriel 2D (axe tail→nose) × (vecteur tail→paw).
+    """Côté du corps où se trouve la patte : +1, -1, 0 (indéterminé), NaN.
 
-    Retourne +1, -1, 0, ou NaN par frame. Le signe en soi n'a pas de
-    sémantique fixée (dépend du sens y-down de l'image) — on s'en sert juste
-    comme indicateur "côté A / côté B" et on calibre via la mode dans main().
+    Le signe en soi n'a pas de sémantique fixée (il dépend du sens y-down
+    de l'image) — il sert d'indicateur « côté A / côté B », calibré par la
+    mode statistique dans main().
+
+    `margin_px` est ce qui rend le test exploitable. Le produit vectoriel
+    brut donne un signe même quand la patte est à 2 px de l'axe corps :
+    le côté n'y veut alors rien dire, et le signe bascule au moindre
+    mouvement naturel ou à 3 px d'imprécision de clic. Les pattes AVANT
+    sont presque sur l'axe nez↔queue la majorité du temps, donc un test
+    sans marge les signale en permanence — un faux positif structurel,
+    pas une erreur d'annotation.
+
+    On normalise donc le produit vectoriel par la longueur de l'axe, ce
+    qui donne la **distance perpendiculaire signée en pixels**, et on ne
+    tranche que si la patte est franchement d'un côté.
     """
     ax = nose_x - tail_x
     ay = nose_y - tail_y
     px = paw_x - tail_x
     py = paw_y - tail_y
     cross = ax * py - ay * px
-    # np.sign propage NaN — c'est ce qu'on veut
-    result = np.sign(cross)
-    # Frames pile-poil sur l'axe (norme ~0) → side indéterminée
-    result = np.where(np.abs(cross) < 1e-6, 0, result)
-    return result
+    longueur = np.sqrt(ax ** 2 + ay ** 2)
+    # Distance perpendiculaire à l'axe, en pixels (NaN propagés)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        distance = np.where(longueur > 1e-6, cross / longueur, np.nan)
+    signe = np.sign(distance)
+    # Trop près de l'axe → le côté n'a pas de sens, on s'abstient
+    return np.where(np.abs(distance) < margin_px, 0, signe)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_config_dir_arg(parser)
+    parser.add_argument(
+        "--margin", type=float, default=DEFAULT_MARGIN_PX,
+        help=f"Distance minimale à l'axe du corps, en px, pour qu'une "
+             f"patte soit jugée d'un côté (défaut : {DEFAULT_MARGIN_PX}). "
+             f"En dessous, le côté est indéterminé et la frame n'est pas "
+             f"signalée. Monte-le si le rapport est noyé de faux positifs "
+             f"sur les pattes avant.",
+    )
+    parser.add_argument(
+        "--skip-images", action="store_true",
+        help="Ne régénère pas les images annotées via dlc.check_labels "
+             "(long). Utile pour re-jouer l'audit avec une autre marge.",
+    )
     args = parser.parse_args()
     load_config(args)
 
@@ -106,19 +137,24 @@ def main() -> None:
     # ------------------------------------------------------------------
     import deeplabcut as dlc
 
-    print("Génération des images annotées via dlc.check_labels...")
-    print("  Sortie : <PROJECT>/labeled-data/<video>_labeled/\n")
-    try:
-        dlc.check_labels(CONFIG, visualizeindividuals=False)
-    except TypeError:
-        # Signature plus ancienne
-        dlc.check_labels(CONFIG)
-    print("✅ Images générées.\n")
+    if args.skip_images:
+        print("--skip-images : images annotées non régénérées.\n")
+    else:
+        print("Génération des images annotées via dlc.check_labels...")
+        print("  Sortie : <PROJECT>/labeled-data/<video>_labeled/\n")
+        try:
+            dlc.check_labels(CONFIG, visualizeindividuals=False)
+        except TypeError:
+            # Signature plus ancienne
+            dlc.check_labels(CONFIG)
+        print("✅ Images générées.\n")
 
     # ------------------------------------------------------------------
     # 2) Charge tous les CollectedData et calcule les sides par paw
     # ------------------------------------------------------------------
     all_rows: list[dict] = []
+    couverture: dict[str, int] = {}
+    total_frames = [0]
 
     for vdir in sorted((PROJECT_DIR / "labeled-data").iterdir()):
         if not vdir.is_dir() or vdir.name.endswith("_labeled"):
@@ -146,9 +182,18 @@ def main() -> None:
             paw: cross_sign_vec(
                 col(paw, "x"), col(paw, "y"),
                 tail_x, tail_y, nose_x, nose_y,
+                margin_px=args.margin,
             )
             for paw in PAWS
         }
+
+        # Couverture : un keypoint qu'on n'annote qu'une fois sur trois
+        # donne un modèle qui le rate deux fois sur trois. C'est la
+        # première chose à vérifier devant une asymétrie L/R à l'inférence.
+        for bp in df.columns.get_level_values("bodyparts").unique():
+            n_ok = int((~np.isnan(col(bp, "x"))).sum())
+            couverture[bp] = couverture.get(bp, 0) + n_ok
+        total_frames[0] += len(df)
 
         for i, idx in enumerate(df.index):
             frame_name = idx[-1] if isinstance(idx, tuple) else str(idx)
@@ -161,15 +206,57 @@ def main() -> None:
     print(f"Frames labellisées chargées : {len(df_all)}\n")
 
     # ------------------------------------------------------------------
+    # 2bis) Couverture des labels par keypoint
+    # ------------------------------------------------------------------
+    # Une asymétrie de performance gauche/droite à l'inférence s'explique
+    # plus souvent par une asymétrie de COUVERTURE que par des inversions :
+    # une patte qu'on n'annote que quand elle est bien visible produit un
+    # modèle qui ne sait pas la trouver le reste du temps.
+    if couverture:
+        print("=== Couverture des labels par keypoint ===")
+        n_tot = max(total_frames[0], 1)
+        for bp, n in sorted(couverture.items(), key=lambda kv: kv[1]):
+            pct = 100.0 * n / n_tot
+            alerte = "  ← peu couvert" if pct < 50 else ""
+            print(f"  {bp:<18} {n:>4}/{n_tot}  ({pct:5.1f} %){alerte}")
+
+        ecarts = []
+        for paw in PAWS:
+            if not paw.endswith("_left"):
+                continue
+            droite = paw[: -len("_left")] + "_right"
+            if droite not in couverture or paw not in couverture:
+                continue
+            g, d = couverture[paw], couverture[droite]
+            if max(g, d) > 1.5 * max(min(g, d), 1):
+                ecarts.append((paw, g, droite, d))
+        if ecarts:
+            print()
+            print("  ⚠ Asymétrie de couverture gauche/droite :")
+            for g_nom, g, d_nom, d in ecarts:
+                print(f"      {g_nom} {g} labels  vs  {d_nom} {d} labels")
+            print("    Le modèle sera d'autant moins bon sur le côté le "
+                  "moins annoté. Si tu sautes")
+            print("    une patte quand elle est peu visible, annote-la "
+                  "quand même (position estimée)")
+            print("    ou pas du tout des deux côtés — l'asymétrie est "
+                  "pire que l'absence.")
+        print()
+
+    # ------------------------------------------------------------------
     # 3) Calibration : pour chaque paw, side dominante = mode statistique
     # ------------------------------------------------------------------
-    print("=== Calibration : side dominante par paw ===")
+    print(f"=== Calibration : side dominante par paw "
+          f"(marge {args.margin:.0f} px) ===")
     expected: dict[str, int] = {}
     for paw in PAWS:
-        signs = df_all[paw].dropna()
-        signs = signs[signs != 0]
+        brut = df_all[paw].dropna()
+        signs = brut[brut != 0]
+        n_indetermine = len(brut) - len(signs)
         if len(signs) == 0:
-            print(f"  {paw}: aucune frame avec tail_base + nose + {paw} labellisés")
+            print(f"  {paw}: aucune frame exploitable "
+                  f"({n_indetermine} trop près de l'axe, "
+                  f"marge {args.margin:.0f} px)")
             continue
         counts = Counter(signs.astype(int))
         most, n_most = counts.most_common(1)[0]
@@ -180,6 +267,8 @@ def main() -> None:
             f"  {paw}: side dominante = {int(most):+d}  "
             f"({n_most}/{len(signs)} = {match_pct:.0f}%)  "
             f"→ {n_minority} frame(s) du côté minoritaire"
+            + (f", {n_indetermine} trop près de l'axe"
+               if n_indetermine else "")
         )
     print()
 
