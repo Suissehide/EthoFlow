@@ -121,6 +121,12 @@ def main() -> None:
         CONFIG, OUTLIER_ALGORITHM, OUTLIER_EPSILON, OUTLIER_NUMFRAMES,
         PROJECT_DIR, RESULTS_DIR, TRAINING_VIDEOS_FOR_REFINE,
     )
+    try:
+        from _config import OUTLIER_P_BOUND  # noqa: E402
+    except ImportError:
+        # _config.py antérieur à l'ajout du paramètre (config généré par
+        # une ancienne version du wizard 00).
+        OUTLIER_P_BOUND = 0.6
 
     if not TRAINING_VIDEOS_FOR_REFINE:
         print("⚠ TRAINING_VIDEOS_FOR_REFINE est vide dans _config.py")
@@ -148,10 +154,15 @@ def main() -> None:
         print("\n❌ Aucune vidéo prête. Lance 03_apply.py d'abord.")
         sys.exit(1)
 
+    # Chaque algorithme n'utilise QUE son propre seuil : afficher celui
+    # qui ne sert pas embrouille le diagnostic quand rien n'est extrait.
+    seuil = (f"  p_bound (confiance) : {OUTLIER_P_BOUND}"
+             if OUTLIER_ALGORITHM == "uncertain"
+             else f"  epsilon (px)        : {OUTLIER_EPSILON}")
     print(
         f"\nExtraction d'outliers sur {len(ready)} vidéo(s) :\n"
         f"  algo                : {OUTLIER_ALGORITHM}\n"
-        f"  epsilon (px)        : {OUTLIER_EPSILON}\n"
+        f"{seuil}\n"
         f"  max frames / vidéo  : {OUTLIER_NUMFRAMES}\n"
     )
 
@@ -181,6 +192,7 @@ def main() -> None:
             [str(video)],
             outlieralgorithm=OUTLIER_ALGORITHM,
             epsilon=OUTLIER_EPSILON,
+            p_bound=OUTLIER_P_BOUND,  # sinon DLC applique 0.01, trop bas
             extractionalgorithm="kmeans",
             automatic=True,  # pas de GUI à ce stade — juste extraction
             destfolder=str(out_dir),  # va chercher le .h5 dans result-videos/
@@ -191,10 +203,24 @@ def main() -> None:
         if added > 0:
             print(f"   ✅ {added} frame(s) ajoutée(s) dans labeled-data/{video.stem}/\n")
         else:
+            if OUTLIER_ALGORITHM == "uncertain":
+                cause = (
+                    f"     - p_bound trop bas ({OUTLIER_P_BOUND}) : aucune "
+                    f"prédiction n'est en dessous.\n"
+                    f"       Attention au contresens — « 0 outlier » ne veut "
+                    f"pas dire « tout va bien ».\n"
+                    f"       Si la vidéo annotée est vide, c'est l'inverse : "
+                    f"les confiances sont basses\n"
+                    f"       mais toutes au-dessus du seuil. Vérifie avec :\n"
+                    f"         python scripts/dlc_model-training/"
+                    f"inspect_predictions.py --model-dir {PROJECT_DIR}\n"
+                )
+            else:
+                cause = (f"     - epsilon trop strict ({OUTLIER_EPSILON} px) : "
+                         f"peu de jumps détectés\n")
             print(
                 f"   ⚠ Aucune frame extraite. Causes possibles :\n"
-                f"     - epsilon trop strict ({OUTLIER_EPSILON} px) : peu de jumps détectés\n"
-                f"     - pas assez d'outliers à likelihood basse\n"
+                f"{cause}"
                 f"     - .h5 non trouvé dans {out_dir} (regarde les logs DLC ci-dessus)\n"
             )
 

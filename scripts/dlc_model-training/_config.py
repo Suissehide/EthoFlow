@@ -305,7 +305,19 @@ OUTLIER_ALGORITHM = "uncertain"
 
 # Seuil de "jump" en pixels au-dessus duquel un mouvement inter-frame
 # est considéré anormal. Sur 1024×1080, 50 px est un compromis.
+# N'a d'effet QUE si OUTLIER_ALGORITHM == "jump".
 OUTLIER_EPSILON = 50
+
+# Seuil de confiance sous lequel une prédiction est jugée incertaine.
+# N'a d'effet QUE si OUTLIER_ALGORITHM == "uncertain".
+#
+# Le défaut DLC (0.01) est beaucoup trop bas en pratique : un modèle qui
+# ne reconnaît pas une vidéo sort des confiances entre 0.05 et 0.3, donc
+# rien ne passe sous 0.01 et l'extraction renvoie « 0 outlier » — ce qui
+# se lit à tort comme « tout va bien ». 0.6 aligne la détection sur le
+# pcutoff d'affichage : est déclaré incertain ce qui ne serait pas
+# affiché dans la vidéo annotée.
+OUTLIER_P_BOUND = 0.6
 
 # Nombre max de frames extraites PAR VIDÉO. Garde-fou pour éviter
 # d'extraire des centaines de frames à la volée.
