@@ -173,16 +173,52 @@ def per_keypoint_errors(df_gt: pd.DataFrame, df_pred: pd.DataFrame,
     return pd.concat([df, pd.DataFrame([total])], ignore_index=True)
 
 
+def dossiers_evaluation(model_dir: Path) -> list[Path]:
+    """Dossiers de résultats d'évaluation, quel que soit le backend.
+
+    DLC suffixe ses dossiers selon le backend : `evaluation-results` pour
+    TensorFlow, `evaluation-results-pytorch` pour le backend torch de
+    DLC 3.x. On ne peut pas deviner lequel existe, donc on prend les deux.
+    """
+    return [d for d in sorted(model_dir.glob("evaluation-results*"))
+            if d.is_dir()]
+
+
 def find_predictions(model_dir: Path) -> Path | None:
-    """Fichier de prédictions le plus récent dans evaluation-results/."""
-    root = model_dir / "evaluation-results"
-    if not root.exists():
-        return None
-    candidats = [p for p in root.rglob("*.h5")
-                 if "results" not in p.stem.lower()]
+    """Fichier de prédictions le plus récent, tous dossiers d'éval confondus.
+
+    On écarte les `*-results.h5` : ce sont les tableaux de métriques
+    agrégées (une ligne par snapshot), pas les prédictions par image.
+    """
+    candidats = []
+    for root in dossiers_evaluation(model_dir):
+        candidats += [p for p in root.rglob("*.h5")
+                      if not p.stem.lower().endswith("-results")]
     if not candidats:
         return None
     return max(candidats, key=lambda p: p.stat().st_mtime)
+
+
+def diagnostic_absence(model_dir: Path) -> str:
+    """Message d'erreur qui montre ce qui existe réellement sur le disque."""
+    dossiers = dossiers_evaluation(model_dir)
+    if not dossiers:
+        return (f"   Aucun dossier evaluation-results* dans {model_dir}.\n"
+                f"   L'évaluation n'a jamais tourné.")
+    lignes = [f"   Dossiers trouvés : "
+              f"{', '.join(d.name for d in dossiers)}"]
+    for d in dossiers:
+        fichiers = sorted(p.name for p in d.rglob("*") if p.is_file())
+        if not fichiers:
+            lignes.append(f"     {d.name}/ : vide")
+            continue
+        lignes.append(f"     {d.name}/ contient :")
+        lignes += [f"       · {f}" for f in fichiers[:8]]
+        if len(fichiers) > 8:
+            lignes.append(f"       … et {len(fichiers) - 8} autre(s)")
+    lignes.append("   Si un .h5 de prédictions figure ci-dessus, passe-le "
+                  "directement avec --predictions.")
+    return "\n".join(lignes)
 
 
 def load_ground_truth(model_dir: Path) -> pd.DataFrame:
@@ -234,11 +270,12 @@ def main() -> None:
     model_dir = choisir_modele(args.model_dir)
     pred_path = args.predictions or find_predictions(model_dir)
     if pred_path is None:
-        print(f"❌ Aucune prédiction dans {model_dir / 'evaluation-results'}.\n"
-              f"   Lance d'abord :\n"
-              f"     python scripts/dlc_model-training/02_train.py "
-              f"--config-dir {model_dir} --eval-only",
+        print(f"❌ Aucun fichier de prédictions trouvé pour {model_dir.name}.",
               file=sys.stderr)
+        print(diagnostic_absence(model_dir), file=sys.stderr)
+        print(f"\n   Si l'évaluation n'a pas tourné :\n"
+              f"     python scripts/dlc_model-training/02_train.py "
+              f"--config-dir {model_dir} --eval-only", file=sys.stderr)
         sys.exit(1)
 
     print(f"Modèle       : {model_dir.name}")

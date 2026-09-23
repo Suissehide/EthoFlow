@@ -43,6 +43,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -50,6 +51,68 @@ from interactive import DEFAULT_MODELS_ROOT, prompt, prompt_existing_path  # noq
 
 
 SEUILS = (0.1, 0.3, 0.6, 0.9)
+
+
+def coordonnees(df: pd.DataFrame, coord: str) -> pd.DataFrame:
+    """Colonnes x ou y, indexées par nom de keypoint."""
+    names = list(df.columns.names or [])
+    if "coords" in names:
+        sub = df.xs(coord, level="coords", axis=1)
+    else:
+        sub = df.loc[:, [c for c in df.columns if c[-1] == coord]]
+        sub.columns = pd.MultiIndex.from_tuples([c[:-1] for c in sub.columns])
+    if isinstance(sub.columns, pd.MultiIndex):
+        niveau = ("bodyparts" if "bodyparts" in (sub.columns.names or [])
+                  else sub.columns.nlevels - 1)
+        sub.columns = sub.columns.get_level_values(niveau)
+    return sub.astype(float)
+
+
+def test_superposition(df: pd.DataFrame, paires: list[tuple[str, str]],
+                        seuil_px: float = 20.0) -> pd.DataFrame:
+    """Les marqueurs gauche et droite tombent-ils au même endroit ?
+
+    C'est le test qui sépare deux causes très différentes d'une
+    performance asymétrique :
+
+      · **Superposition** — le modèle pose les deux marqueurs sur la MÊME
+        patte. Il voit bien une patte, mais ne sait pas décider laquelle
+        c'est. Normal en vue de dessous : une patte gauche et une patte
+        droite sont visuellement identiques, seule leur position relative
+        au corps les distingue. Plus de frames n'y change pas
+        grand-chose ; c'est la tâche qui est ambiguë.
+
+      · **Non-détection** — le marqueur du côté faible part ailleurs, loin
+        de son jumeau. Là, le modèle ne trouve simplement pas la patte,
+        et des frames supplémentaires dans ces situations aident.
+
+    La distance est rapportée en pixels ET en pourcentage de la longueur
+    du corps (nez → base de la queue), qui ne dépend ni du zoom ni de la
+    résolution.
+    """
+    x, y = coordonnees(df, "x"), coordonnees(df, "y")
+
+    echelle = np.nan
+    if "nose" in x.columns and "tail_base" in x.columns:
+        corps = np.hypot(x["nose"] - x["tail_base"], y["nose"] - y["tail_base"])
+        echelle = float(np.nanmedian(corps))
+
+    lignes = []
+    for g, d in paires:
+        if g not in x.columns or d not in x.columns:
+            continue
+        dist = np.hypot(x[g] - x[d], y[g] - y[d]).to_numpy(float)
+        dist = dist[~np.isnan(dist)]
+        if not dist.size:
+            continue
+        med = float(np.median(dist))
+        lignes.append({
+            "paire": f"{g} ↔ {d}",
+            "distance_med_px": med,
+            "pct_corps": 100.0 * med / echelle if echelle == echelle else np.nan,
+            f"pct_sous_{seuil_px:.0f}px": 100.0 * float((dist < seuil_px).mean()),
+        })
+    return pd.DataFrame(lignes)
 
 
 def likelihoods(df: pd.DataFrame) -> pd.DataFrame:
@@ -120,7 +183,8 @@ def main() -> None:
               file=sys.stderr)
         sys.exit(1)
 
-    lik = likelihoods(pd.read_hdf(h5))
+    df = pd.read_hdf(h5)
+    lik = likelihoods(df)
     tab = resume(lik)
 
     print(f"Fichier : {Path(h5).name}")
@@ -128,8 +192,9 @@ def main() -> None:
     print()
     print(tab.round(2).to_string())
 
+    sup = test_superposition(df, paires_gauche_droite(tab.index))
     print()
-    verdict(tab, lik)
+    verdict(tab, lik, sup)
 
 
 def paires_gauche_droite(keypoints) -> list[tuple[str, str]]:
@@ -144,7 +209,8 @@ def paires_gauche_droite(keypoints) -> list[tuple[str, str]]:
     return paires
 
 
-def verdict(tab: pd.DataFrame, lik: pd.DataFrame) -> None:
+def verdict(tab: pd.DataFrame, lik: pd.DataFrame,
+             sup: pd.DataFrame | None = None) -> None:
     """Commente le tableau — par groupe de keypoints, pas globalement.
 
     Une médiane globale n'a pas de sens ici : un modèle peut être bon sur
@@ -195,11 +261,34 @@ def verdict(tab: pd.DataFrame, lik: pd.DataFrame) -> None:
         print("⚠  Asymétrie gauche/droite :")
         for g, a, d, b in asym:
             print(f"     {g} {a:.0f}% au-dessus de 0.3  vs  {d} {b:.0f}%")
-        print("   L'animal est symétrique : cet écart vient des "
+        print("   L'animal est symétrique : l'écart vient du modèle ou des "
               "annotations, pas de la souris.")
-        print("   Lance l'audit L/R avant d'ajouter quoi que ce soit au "
-              "training set :")
-        print("     python scripts/dlc_model-training/06_check_labels.py")
+        if sup is not None and len(sup):
+            print()
+            print(sup.round(1).to_string(index=False))
+            proches = sup[sup.filter(like="pct_sous_").iloc[:, 0] > 40]
+            if len(proches):
+                print()
+                print("   → Les deux marqueurs tombent souvent au MÊME "
+                      "endroit : le modèle voit la patte")
+                print("     mais ne sait pas de quel côté elle est. En vue "
+                      "de dessous, une patte gauche et")
+                print("     une patte droite sont visuellement identiques — "
+                      "seule leur position relative")
+                print("     au corps les distingue. Ajouter des frames aide "
+                      "peu ; c'est la tâche qui est")
+                print("     ambiguë. Pour VAME, mieux vaut travailler sans "
+                      "distinction L/R.")
+            else:
+                print()
+                print("   → Les marqueurs sont éloignés l'un de l'autre : ce "
+                      "n'est pas une confusion L/R,")
+                print("     le modèle ne trouve pas la patte du côté faible. "
+                      "Vérifie d'abord l'audit des")
+                print("     labels, puis ajoute des frames dans ces "
+                      "situations :")
+                print("       python scripts/dlc_model-training/"
+                      "06_check_labels.py")
 
     # Conséquence directe sur l'étape 6b — le seuil par défaut y est 0.70.
     print()

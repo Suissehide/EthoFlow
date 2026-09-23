@@ -46,11 +46,13 @@ def reset_training_artifacts(project_dir: Path) -> None:
     """
     import shutil
 
+    # DLC suffixe ses dossiers selon le backend (`-pytorch` pour DLC 3.x),
+    # donc on balaie les deux conventions plutôt que d'en supposer une.
     a_supprimer = [
         project_dir / "dlc-models-pytorch",
         project_dir / "dlc-models",
         project_dir / "training-datasets",
-        project_dir / "evaluation-results",
+        *sorted(project_dir.glob("evaluation-results*")),
     ]
     preserves = project_dir / "labeled-data"
     n_labels = 0
