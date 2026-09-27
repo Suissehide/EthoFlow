@@ -148,6 +148,28 @@ def reset_training_artifacts(project_dir: Path) -> None:
         n_labels = sum(len(list(d.glob("CollectedData_*.h5")))
                        for d in preserves.iterdir() if d.is_dir())
 
+    # Un modèle entraîné représente 8 à 24 h de GPU. S'il existe, on ne le
+    # supprime pas sans le dire explicitement : l'utilisateur lance souvent
+    # --reset en pensant « nettoyer », pas « jeter le modèle ».
+    snapshots = []
+    for racine in ("dlc-models-pytorch", "dlc-models"):
+        d = project_dir / racine
+        if d.exists():
+            snapshots += list(d.rglob("snapshot-*.pt"))
+            snapshots += list(d.rglob("snapshot-*.index"))
+    if snapshots:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        from interactive import confirm  # noqa: E402
+
+        print(f"⚠  {len(snapshots)} snapshot(s) entraîné(s) vont être "
+              f"supprimés — le modèle sera à réentraîner de zéro "
+              f"(8-24 h de GPU).")
+        for s in sorted(snapshots)[-3:]:
+            print(f"     · {s.name}")
+        if not confirm("   Continuer ?", default="n"):
+            print("Annulé — rien n'a été supprimé.")
+            sys.exit(0)
+
     print("--reset : remise à zéro de l'entraînement")
     print(f"  conservé : labeled-data/ ({n_labels} fichier(s) "
           f"d'annotations), config.yaml, videos/")
