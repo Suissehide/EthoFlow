@@ -179,6 +179,7 @@ def main() -> None:
     # (par défaut DLC les cherche à côté de la vidéo).
     # Le dossier des nouvelles frames extraites par DLC :
     labeled_data_root = PROJECT_DIR / "labeled-data"
+    total_ajoutees = [0]
 
     for video in ready:
         out_dir = RESULTS_DIR / video.stem
@@ -200,6 +201,7 @@ def main() -> None:
 
         after = len(list(labeled_dir.glob("*.png"))) if labeled_dir.exists() else 0
         added = after - before
+        total_ajoutees[0] += max(added, 0)
         if added > 0:
             print(f"   ✅ {added} frame(s) ajoutée(s) dans labeled-data/{video.stem}/\n")
         else:
@@ -223,6 +225,29 @@ def main() -> None:
                 f"{cause}"
                 f"     - .h5 non trouvé dans {out_dir} (regarde les logs DLC ci-dessus)\n"
             )
+
+    # Sans frame extraite, il n'y a rien à raffiner ni à fusionner. Et
+    # `merge_datasets` n'est pas neutre quand il ne fusionne rien : il
+    # incrémente quand même l'itération du projet, après quoi DLC cherche
+    # un modèle pour une itération qui n'a jamais été entraînée et refuse
+    # de servir l'inférence (« Could not find a shuffle […] Known
+    # shuffles: none »). Le modèle est intact, mais le projet ne le voit
+    # plus — et le message d'erreur n'oriente pas du tout vers la cause.
+    if total_ajoutees[0] == 0:
+        print(
+            "Aucune frame extraite au total — il n'y a rien à raffiner.\n"
+            "\n"
+            "⚠ Ne lance PAS `dlc.merge_datasets(CONFIG)` maintenant : sans\n"
+            "  correction à fusionner, il se contenterait d'incrémenter\n"
+            "  l'itération du projet, et l'inférence échouerait ensuite avec\n"
+            "  « Could not find a shuffle ». Réparation, le cas échéant :\n"
+            "      python scripts/diagnose_dlc_model.py --model-dir "
+            f"{PROJECT_DIR} --fix\n"
+            "\n"
+            "Commence par comprendre pourquoi rien n'est ressorti (voir\n"
+            "les causes indiquées plus haut).\n"
+        )
+        return
 
     print(
         "Étapes suivantes :\n"
