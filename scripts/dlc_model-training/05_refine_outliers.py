@@ -93,23 +93,39 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _load_config import add_config_dir_arg, completer_videos, load_config  # noqa: E402
 
 
-def compter_machinelabels(labeled_dir: Path) -> int:
-    """Nombre de frames en attente de correction dans un dossier de labels.
+def compter_machinelabels(labeled_dir: Path) -> tuple[int, int]:
+    """(frames prédites, frames réellement nouvelles) dans un dossier.
 
     Les machinelabels sont les prédictions du modèle sur les frames
-    extraites : c'est exactement ce que `refine_labels` propose de
-    corriger. Leur nombre est le seul indicateur fiable de « y a-t-il
-    quelque chose à raffiner ? », contrairement au nombre de PNG, qui ne
-    bouge pas quand kmeans re-sélectionne les mêmes frames.
+    extraites : c'est ce que `refine_labels` propose de corriger. Mais
+    seules celles qui ne sont PAS déjà annotées à la main apportent
+    quelque chose.
+
+    Le recouvrement est la règle plutôt que l'exception : kmeans est
+    déterministe, donc sur une vidéo déjà minée il re-sélectionne
+    exactement les mêmes centroïdes — c'est-à-dire les frames qu'on a
+    labellisées au tour précédent. On obtient alors des prédictions sur
+    du déjà-fait, et les sauvegarder dans la GUI écrase de vraies
+    annotations par des prédictions d'un modèle encore faible.
     """
     fichiers = sorted(labeled_dir.glob("machinelabels-iter*.h5"))
     if not fichiers:
-        return 0
+        return 0, 0
     try:
         import pandas as pd
-        return len(pd.read_hdf(fichiers[-1]))
+        machine = pd.read_hdf(fichiers[-1])
     except Exception:
-        return 0
+        return 0, 0
+
+    deja = set()
+    for h5 in labeled_dir.glob("CollectedData_*.h5"):
+        try:
+            import pandas as pd
+            deja |= {str(i) for i in pd.read_hdf(h5).index}
+        except Exception:
+            continue
+    nouvelles = sum(1 for i in machine.index if str(i) not in deja)
+    return len(machine), nouvelles
 
 
 def update_numframes2pick(project_config_path: Path, n: int) -> int:
@@ -238,18 +254,28 @@ def main() -> None:
         # frames. Le compte ne bouge pas alors que tout s'est bien passé.
         # Ce qui compte vraiment, c'est le nombre de frames en attente de
         # correction, c'est-à-dire les lignes des machinelabels.
-        en_attente = compter_machinelabels(labeled_dir)
-        total_ajoutees[0] += en_attente
-        if added > 0:
-            print(f"   ✅ {added} nouvelle(s) frame(s) — {en_attente} en "
-                  f"attente de raffinement dans labeled-data/{video.stem}/\n")
-        elif en_attente > 0:
-            print(f"   ℹ  Aucune nouvelle frame : kmeans a re-sélectionné "
-                  f"les mêmes que la dernière fois.\n"
-                  f"      {en_attente} frame(s) restent à corriger dans "
-                  f"labeled-data/{video.stem}/.\n"
-                  f"      Pour en obtenir d'autres : monte OUTLIER_NUMFRAMES, "
-                  f"ou ajoute d'autres vidéos (--videos).\n")
+        predites, nouvelles = compter_machinelabels(labeled_dir)
+        total_ajoutees[0] += nouvelles
+        if nouvelles > 0:
+            print(f"   ✅ {nouvelles} frame(s) à corriger dans "
+                  f"labeled-data/{video.stem}/"
+                  + (f"  ({predites - nouvelles} déjà annotée(s) à la main, "
+                     f"ignorée(s))" if predites > nouvelles else "") + "\n")
+        elif predites > 0:
+            print(f"   ⚠ Les {predites} frame(s) prédites sont TOUTES déjà "
+                  f"annotées à la main — rien à gagner ici.\n"
+                  f"     kmeans est déterministe : sur une vidéo déjà minée, "
+                  f"il re-choisit les mêmes\n"
+                  f"     frames que celles que tu as labellisées au tour "
+                  f"précédent.\n"
+                  f"     Ne sauvegarde PAS les machinelabels dans la GUI : tu "
+                  f"remplacerais tes annotations\n"
+                  f"     par les prédictions du modèle. Supprime-les :\n"
+                  f"       del {labeled_dir}\\machinelabels-iter*.h5\n"
+                  f"     Pour de vraies nouvelles frames, passe par d'autres "
+                  f"vidéos :\n"
+                  f"       python scripts/dlc_model-training/04_add_videos.py "
+                  f"--videos <...>\n")
         else:
             if OUTLIER_ALGORITHM == "uncertain":
                 cause = (
