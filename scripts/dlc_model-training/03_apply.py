@@ -21,7 +21,7 @@ from pathlib import Path
 
 # Insère le dossier du script en tête de sys.path pour trouver _load_config
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _load_config import add_config_dir_arg, load_config  # noqa: E402
+from _load_config import add_config_dir_arg, completer_videos, load_config  # noqa: E402
 
 
 def main() -> None:
@@ -36,8 +36,10 @@ def main() -> None:
         RESULTS_DIR, VIDEOS_TO_ANALYZE,
     )
 
-    if not VIDEOS_TO_ANALYZE:
-        print("⚠ VIDEOS_TO_ANALYZE est vide dans _config.py")
+    videos = completer_videos(VIDEOS_TO_ANALYZE, "VIDEOS_TO_ANALYZE")
+    if not videos:
+        print("⚠ Aucune vidéo à analyser : VIDEOS_TO_ANALYZE est vide dans\n"
+              "   _config.py, et aucune autre liste n'en déclare.")
         return
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -45,7 +47,7 @@ def main() -> None:
     print(f"  pcutoff vidéo annotée : {LABELED_VIDEO_PCUTOFF}")
     print(f"  vidéo annotée         : {'oui' if MAKE_LABELED_VIDEO else 'non'}\n")
 
-    for video in VIDEOS_TO_ANALYZE:
+    for video in videos:
         if not video.exists():
             print(f"⚠ Vidéo introuvable, skip : {video}")
             continue

@@ -90,7 +90,7 @@ import yaml
 
 # Insère le dossier du script en tête de sys.path pour trouver _load_config
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _load_config import add_config_dir_arg, load_config  # noqa: E402
+from _load_config import add_config_dir_arg, completer_videos, load_config  # noqa: E402
 
 
 def compter_machinelabels(labeled_dir: Path) -> int:
@@ -155,7 +155,8 @@ def main() -> None:
     # `--videos` prime sur _config.py : miner une vidéo de plus ne doit pas
     # demander d'éditer un fichier de config.
     videos_cibles = ([Path(v) for v in args.videos] if args.videos
-                     else list(TRAINING_VIDEOS_FOR_REFINE))
+                     else completer_videos(TRAINING_VIDEOS_FOR_REFINE,
+                                            "TRAINING_VIDEOS_FOR_REFINE"))
     if not videos_cibles:
         print("⚠ Aucune vidéo à traiter.\n"
               "   Passe --videos <chemin> [<chemin> ...], ou renseigne\n"

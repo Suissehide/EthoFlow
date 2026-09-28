@@ -55,6 +55,52 @@ def add_config_dir_arg(parser: argparse.ArgumentParser) -> None:
     add_no_prompt_arg(parser)
 
 
+def toutes_les_videos() -> list[Path]:
+    """Toutes les vidéos déclarées dans le `_config.py` courant.
+
+    Le config expose historiquement quatre listes — `PILOT_VIDEO`,
+    `VIDEOS_TO_ANALYZE` (lue par 03), `ADDITIONAL_VIDEOS` (lue par 04) et
+    `TRAINING_VIDEOS_FOR_REFINE` (lue par 05). Chaque script ne lisait que
+    la sienne, si bien qu'ajouter une vidéo dans la mauvaise n'avait aucun
+    effet, sans le moindre message.
+
+    Ajouter une vidéo quelque part veut dire « je veux qu'elle serve » :
+    on renvoie donc l'union, dédoublonnée en conservant l'ordre, filtrée
+    sur les fichiers qui existent réellement.
+    """
+    import _config as cfg  # noqa: E402 — après load_config()
+
+    vues: list[Path] = []
+    for nom in ("PILOT_VIDEO", "VIDEOS_TO_ANALYZE", "ADDITIONAL_VIDEOS",
+                "TRAINING_VIDEOS_FOR_REFINE"):
+        valeur = getattr(cfg, nom, None)
+        if valeur is None:
+            continue
+        for v in ([valeur] if isinstance(valeur, (str, Path)) else valeur):
+            p = Path(v)
+            if p.exists() and p not in vues:
+                vues.append(p)
+    return vues
+
+
+def completer_videos(liste, etiquette: str) -> list[Path]:
+    """Complète la liste d'un script avec les vidéos des autres listes.
+
+    Signale ce qui est ajouté plutôt que de le faire en silence : la
+    surprise inverse (« j'ai analysé 5 vidéos sans te le dire ») serait
+    aussi désagréable que celle qu'on corrige.
+    """
+    retenues = [Path(v) for v in (liste or []) if Path(v).exists()]
+    extras = [v for v in toutes_les_videos() if v not in retenues]
+    if extras:
+        print(f"ℹ  {len(extras)} vidéo(s) déclarée(s) ailleurs dans "
+              f"_config.py s'ajoutent à {etiquette} :")
+        for v in extras:
+            print(f"     · {v.name}")
+        print()
+    return retenues + extras
+
+
 def load_config(args_or_dir) -> Path:
     """Résout le dossier de config et l'insère en tête de `sys.path`.
 
