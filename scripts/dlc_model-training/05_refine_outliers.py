@@ -93,6 +93,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
+def compter_machinelabels(labeled_dir: Path) -> int:
+    """Nombre de frames en attente de correction dans un dossier de labels.
+
+    Les machinelabels sont les prédictions du modèle sur les frames
+    extraites : c'est exactement ce que `refine_labels` propose de
+    corriger. Leur nombre est le seul indicateur fiable de « y a-t-il
+    quelque chose à raffiner ? », contrairement au nombre de PNG, qui ne
+    bouge pas quand kmeans re-sélectionne les mêmes frames.
+    """
+    fichiers = sorted(labeled_dir.glob("machinelabels-iter*.h5"))
+    if not fichiers:
+        return 0
+    try:
+        import pandas as pd
+        return len(pd.read_hdf(fichiers[-1]))
+    except Exception:
+        return 0
+
+
 def update_numframes2pick(project_config_path: Path, n: int) -> int:
     """Met à jour `numframes2pick` dans le config.yaml du projet.
 
@@ -113,6 +132,11 @@ def update_numframes2pick(project_config_path: Path, n: int) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_config_dir_arg(parser)
+    parser.add_argument(
+        "--videos", nargs="+", default=None, metavar="CHEMIN",
+        help="Vidéos à miner, en remplacement de TRAINING_VIDEOS_FOR_REFINE. "
+             "Chacune doit déjà avoir été analysée par 03_apply.py.",
+    )
     args = parser.parse_args()
     load_config(args)
 
@@ -128,14 +152,20 @@ def main() -> None:
         # une ancienne version du wizard 00).
         OUTLIER_P_BOUND = 0.6
 
-    if not TRAINING_VIDEOS_FOR_REFINE:
-        print("⚠ TRAINING_VIDEOS_FOR_REFINE est vide dans _config.py")
+    # `--videos` prime sur _config.py : miner une vidéo de plus ne doit pas
+    # demander d'éditer un fichier de config.
+    videos_cibles = ([Path(v) for v in args.videos] if args.videos
+                     else list(TRAINING_VIDEOS_FOR_REFINE))
+    if not videos_cibles:
+        print("⚠ Aucune vidéo à traiter.\n"
+              "   Passe --videos <chemin> [<chemin> ...], ou renseigne\n"
+              "   TRAINING_VIDEOS_FOR_REFINE dans ton _config.py.")
         return
 
     # Vérifie que chaque vidéo a bien été analysée (.h5 doit exister)
     print("Vérification des prédictions existantes...\n")
     ready: list[Path] = []
-    for video in TRAINING_VIDEOS_FOR_REFINE:
+    for video in videos_cibles:
         if not video.exists():
             print(f"⚠ skip : vidéo introuvable {video}")
             continue
@@ -201,9 +231,24 @@ def main() -> None:
 
         after = len(list(labeled_dir.glob("*.png"))) if labeled_dir.exists() else 0
         added = after - before
-        total_ajoutees[0] += max(added, 0)
+        # Le nombre de PNG ajoutés ne suffit pas à juger : kmeans est
+        # déterministe, donc relancer l'extraction sur la même vidéo avec
+        # le même `numframes2pick` re-sélectionne EXACTEMENT les mêmes
+        # frames. Le compte ne bouge pas alors que tout s'est bien passé.
+        # Ce qui compte vraiment, c'est le nombre de frames en attente de
+        # correction, c'est-à-dire les lignes des machinelabels.
+        en_attente = compter_machinelabels(labeled_dir)
+        total_ajoutees[0] += en_attente
         if added > 0:
-            print(f"   ✅ {added} frame(s) ajoutée(s) dans labeled-data/{video.stem}/\n")
+            print(f"   ✅ {added} nouvelle(s) frame(s) — {en_attente} en "
+                  f"attente de raffinement dans labeled-data/{video.stem}/\n")
+        elif en_attente > 0:
+            print(f"   ℹ  Aucune nouvelle frame : kmeans a re-sélectionné "
+                  f"les mêmes que la dernière fois.\n"
+                  f"      {en_attente} frame(s) restent à corriger dans "
+                  f"labeled-data/{video.stem}/.\n"
+                  f"      Pour en obtenir d'autres : monte OUTLIER_NUMFRAMES, "
+                  f"ou ajoute d'autres vidéos (--videos).\n")
         else:
             if OUTLIER_ALGORITHM == "uncertain":
                 cause = (
