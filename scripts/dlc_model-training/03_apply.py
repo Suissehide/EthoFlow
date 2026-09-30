@@ -33,7 +33,7 @@ def main() -> None:
     import deeplabcut as dlc  # noqa: E402
     from _config import (  # noqa: E402
         CONFIG, LABELED_VIDEO_PCUTOFF, MAKE_LABELED_VIDEO,
-        RESULTS_DIR, VIDEOS_TO_ANALYZE,
+        PROJECT_DIR, RESULTS_DIR, VIDEOS_TO_ANALYZE,
     )
 
     videos = completer_videos(VIDEOS_TO_ANALYZE, "VIDEOS_TO_ANALYZE")
@@ -41,6 +41,18 @@ def main() -> None:
         print("⚠ Aucune vidéo à analyser : VIDEOS_TO_ANALYZE est vide dans\n"
               "   _config.py, et aucune autre liste n'en déclare.")
         return
+
+    # Date du modèle : toute prédiction antérieure vient d'un modèle
+    # précédent, même si son nom de fichier est identique.
+    snapshots = sorted((PROJECT_DIR / "dlc-models-pytorch").rglob("snapshot-*.pt"),
+                       key=lambda p: p.stat().st_mtime) \
+        if (PROJECT_DIR / "dlc-models-pytorch").exists() else []
+    snapshot_mtime = snapshots[-1].stat().st_mtime if snapshots else 0.0
+    if snapshots:
+        import datetime as _dt
+        quand = _dt.datetime.fromtimestamp(snapshot_mtime).strftime(
+            "%d/%m %H:%M")
+        print(f"Modèle daté du {quand} ({snapshots[-1].name})")
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Résultats dans : {RESULTS_DIR}")
@@ -59,6 +71,24 @@ def main() -> None:
 
         print(f"→ {video.name}")
         print(f"   sortie : {out_dir.relative_to(RESULTS_DIR.parent)}")
+
+        # Piège silencieux : DLC nomme ses sorties d'après le snapshot
+        # (`<video>DLC_..._snapshot_best-170.h5`) et saute les vidéos
+        # « déjà analysées ». Après un réentraînement, si le nouveau
+        # meilleur snapshot retombe sur le même numéro d'epoch — ce qui
+        # arrive très bien —, le nom de fichier est identique et DLC
+        # conserve les prédictions de l'ANCIEN modèle. On croit alors
+        # mesurer le nouveau modèle et on lit les chiffres du précédent.
+        perimes = [p for p in out_dir.glob("*.h5")
+                   if p.stat().st_mtime < snapshot_mtime]
+        if perimes:
+            print(f"   ⚠ {len(perimes)} prédiction(s) antérieure(s) au "
+                  f"modèle actuel — supprimées pour forcer le recalcul :")
+            for p in perimes:
+                print(f"       · {p.name}")
+                p.unlink()
+                for jumeau in out_dir.glob(p.stem + ".*"):
+                    jumeau.unlink()
 
         # Inférence : produit le .h5 et le .csv dans out_dir
         # snapshot_index=-1 force le dernier snapshot par numéro d'epoch
