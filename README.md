@@ -1211,10 +1211,29 @@ Audit géométrique qui détecte les frames où left/right paws ont probablement
 
 ```cmd
 python scripts\dlc_model-training\02_train.py ^
-    --config-dir D:\EthoFlow\models\souris-bottomview
+    --config-dir D:\EthoFlow\models\souris-bottomview ^
+    --crop-size 768 --batch-size 3
 ```
 
-Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 200 epochs. Compte **~8-24 h sur GPU 16 GB** — c'est un run qu'on lance le soir, pas entre deux réunions.
+Fait le split train/test (95/5 par défaut), transfer learning depuis **SuperAnimal-Quadruped** (HRNet-w32 backbone), entraîne 200 epochs. Compte **~24-48 h sur GPU 16 GB** avec ces réglages — c'est un run qu'on lance le soir, pas entre deux réunions.
+
+**`--crop-size 768 --batch-size 3` ne sont pas optionnels en bottom-view.** Le défaut DLC entraîne sur des fenêtres de 448 px, alors qu'une souris queue comprise en fait ~550 (700 au 90e centile). Avec 448 :
+
+- la **queue** sort du cadre dans la majorité des échantillons — `tail_mid` et `tail_tip` ne sont jamais appris ;
+- une fenêtre centrée vers l'arrière **perd la tête**, donc l'orientation qui seule permet de décider qu'une patte est la gauche — les **pattes arrière** finissent fusionnées au même pixel, alors que les avant, voisines de la tête, s'en sortent.
+
+Le lot passe de 8 à 3 pour compenser : la mémoire GPU varie comme le carré de la fenêtre (768² / 448² ≈ 2,9). Ça coûte du temps par epoch, pas de la qualité.
+
+Sans `--crop-size`, le script mesure ton animal sur tes annotations et affiche la taille recommandée avant d'entraîner — utile si ta caméra ou ton arène changent :
+
+```
+   Animal (annotations) : 571 px de médiane, 709 px au 90e centile
+   Fenêtre d'entraînement : 448 px
+   ⚠ La fenêtre est plus petite que l'animal […]
+     Recommandé : --crop-size 768  (≈ ×2.9 de mémoire GPU, baisse le batch_size si ça déborde)
+```
+
+Surveille `GPU: xxxx/16302.6 MiB` au premier epoch : au-dessus de ~14 000, coupe et relance en `--batch-size 2`.
 
 **Objectif à valider après B.4** — regarde la RMSE de test que DLC imprime :
 
@@ -1235,8 +1254,11 @@ Puis, pour repartir sur un run propre :
 
 ```cmd
 python scripts\dlc_model-training\02_train.py ^
-    --config-dir D:\EthoFlow\models\souris-bottomview --reset
+    --config-dir D:\EthoFlow\models\souris-bottomview ^
+    --reset --crop-size 768 --batch-size 3
 ```
+
+`--crop-size` et `--batch-size` sont à repasser **à chaque** entraînement : `create_training_dataset` régénère `pytorch_config.yaml` avec les défauts DLC (448 px, lot de 8), donc un réglage fait au run précédent ne survit pas.
 
 `--reset` supprime `dlc-models-pytorch/`, `training-datasets/` et `evaluation-results/`, puis réentraîne. Il **ne touche pas à `labeled-data/`** — tes annotations, la seule chose vraiment coûteuse à reproduire — ni à `config.yaml` ni à `videos/`. Sans `--reset`, les snapshots de l'ancien run cohabitent avec ceux du nouveau et `evaluate_network` (en `snapshotindex: all`) te sort une table qui mélange les deux.
 
@@ -1384,7 +1406,8 @@ Workflow :
 6. **Relance l'entraînement** — avec le même `EPOCHS = 200`, sans rien baisser. Attention à une idée reçue : `02_train.py` **ne reprend pas depuis le snapshot précédent**. Il reconstruit à chaque fois un `weight_init` depuis SuperAnimal-Quadruped, et côté DLC ce `weight_init` est prioritaire sur toute reprise de snapshot (la reprise exigerait un `snapshot_path` explicite, que le script ne passe pas). Chaque passe de refinement est donc un **entraînement complet sur le training set enrichi**, pas un fine-tuning — d'où les 200 epochs, et d'où les ~8-24 h à re-provisionner à chaque itération :
    ```cmd
    python scripts\dlc_model-training\02_train.py ^
-       --config-dir D:\EthoFlow\models\souris-bottomview
+       --config-dir D:\EthoFlow\models\souris-bottomview ^
+       --crop-size 768 --batch-size 3
    ```
 
 #### Option B — Auto-detect via DLC (complément)
@@ -1624,7 +1647,7 @@ Trois causes possibles, toutes détectées en amont par le script.
 
 - **Aucune frame extraite** → reprends au [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc) depuis `01_setup_project.py`
 - **Frames extraites mais pas labellisées** → labellise dans la GUI (`deeplabcut.launch_dlc()`), puis `02_train.py`
-- **Frames labellisées, entraînement pas lancé** → `02_train.py --config-dir <dossier du modèle>`
+- **Frames labellisées, entraînement pas lancé** → `02_train.py --config-dir <dossier du modèle> --crop-size 768 --batch-size 3`
 
 Si tu voulais en fait utiliser un **autre** modèle déjà entraîné, corrige le pointeur :
 
