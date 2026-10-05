@@ -256,89 +256,32 @@ def find_labeled_video(project_ethoflow: Path, session: str,
     silence la vidéo à 0.6 montrerait moins de points que prévu, et on
     en tirerait de mauvaises conclusions sur le modèle.
     """
-    dossiers = dossiers_videos_annotees(project_ethoflow, session)
-    if not dossiers:
-        print(f"    · aucun dossier de vidéos annotées trouvé pour {session}",
-              file=sys.stderr)
+    out = dlc_output_dir(project_ethoflow) / session
+    if not out.exists():
+        print(f"    · pas de dossier {out}", file=sys.stderr)
         return None
 
-    # Deux conventions de nommage coexistent : relabel_video.py écrit
-    # `<stem>_labeled_p30.mp4`, create_labeled_video.py (côté modèle DLC)
-    # laisse DLC écrire `<stem>_p30_labeled.mp4`. On accepte les deux.
     if pcutoff is not None:
         tag = f"p{int(round(pcutoff * 100)):02d}"
-        motifs = [f"*_labeled_{tag}.mp4", f"*_{tag}_labeled.mp4"]
-    else:
-        motifs = ["*labeled*.mp4"]
+        trouves = sorted(out.glob(f"*_labeled_{tag}.mp4"),
+                         key=lambda p: p.stat().st_mtime)
+        if trouves:
+            return trouves[-1]
+        print(f"    · aucune vidéo annotée à pcutoff={pcutoff} dans {out}.\n"
+              f"    · Génère-la avec :\n"
+              f"        python scripts/relabel_video.py --session {session} "
+              f"--pcutoffs {pcutoff}", file=sys.stderr)
+        return None
 
-    trouves = sorted({p for d in dossiers for m in motifs for p in d.glob(m)},
+    trouves = sorted(out.glob("*_labeled*.mp4"),
                      key=lambda p: p.stat().st_mtime)
     if trouves:
         return trouves[-1]
-
-    quoi = f"à pcutoff={pcutoff}" if pcutoff is not None else "(*labeled*.mp4)"
-    print(f"    · aucune vidéo annotée {quoi} dans :", file=sys.stderr)
-    for d in dossiers:
-        print(f"        {d}", file=sys.stderr)
-    print(f"    · Génère-la avec :\n"
+    print(f"    · aucune vidéo annotée (*_labeled*.mp4) dans {out}.\n"
+          f"    · Génère-la avec :\n"
           f"        python scripts/relabel_video.py --session {session} "
-          f"--pcutoffs {pcutoff if pcutoff is not None else 0.3}\n"
-          f"    · ou passe un chemin explicite avec --source-video",
-          file=sys.stderr)
+          f"--pcutoffs 0.3", file=sys.stderr)
     return None
-
-
-def dossiers_videos_annotees(project_ethoflow: Path, session: str) -> list[Path]:
-    """Dossiers où une vidéo annotée de la session peut se trouver.
-
-    Deux endroits selon l'outil qui l'a produite :
-      · `data/dlc-output/<session>/` — inférence du projet
-        (run_dlc_inference.py, relabel_video.py) ;
-      · `<modèle DLC>/result-videos/<nom de la vidéo source>/` — inférence
-        faite depuis le parcours d'entraînement (03_apply.py,
-        create_labeled_video.py). Le modèle est lu dans
-        `dlc_project_config` du pipeline_config.yaml, le nom de dossier
-        est celui de la vidéo source sans extension (970.mp4 → 970/).
-    """
-    import yaml
-
-    dossiers = []
-    d = dlc_output_dir(project_ethoflow) / session
-    if d.exists():
-        dossiers.append(d)
-
-    cfg_path = project_ethoflow / "configs" / "pipeline_config.yaml"
-    source = find_source_video_silencieux(project_ethoflow, session)
-    if cfg_path.exists() and source is not None:
-        try:
-            cfg = yaml.safe_load(cfg_path.read_text()) or {}
-        except Exception:
-            cfg = {}
-        dlc_cfg = cfg.get("dlc_project_config")
-        if dlc_cfg:
-            d = Path(dlc_cfg).parent / "result-videos" / source.stem
-            if d.exists():
-                dossiers.append(d)
-    return dossiers
-
-
-def find_source_video_silencieux(project_ethoflow: Path, session: str
-                                  ) -> Path | None:
-    """Chemin source_video de la metadata, sans exiger qu'il existe.
-
-    Seul son nom sert ici (pour retrouver result-videos/<nom>/) : la vidéo
-    brute peut très bien être sur un disque débranché alors que sa version
-    annotée est disponible ailleurs.
-    """
-    import yaml
-    meta_path = raw_dir(project_ethoflow) / session / "metadata.yaml"
-    if not meta_path.exists():
-        return None
-    try:
-        src = (yaml.safe_load(meta_path.read_text()) or {}).get("source_video")
-    except Exception:
-        return None
-    return Path(src) if src else None
 
 
 # Même palette que motif_gif.py pour cohérence

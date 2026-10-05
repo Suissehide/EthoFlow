@@ -968,16 +968,14 @@ python scripts\community_dendrogram.py --project-dir D:\EthoFlow\projects\mon-pr
 
 **`--labeled-video`** remplace le panneau vidéo brut par la vidéo annotée par DLC — utile pour voir à la fois le squelette et la position dans le manifold, et repérer un motif qui ne serait en fait qu'un artefact de tracking. Il implique `--with-video`.
 
-- `--labeled-video` seul prend la vidéo annotée la plus récente, cherchée dans `data/dlc-output/<session>/` (inférence du projet) **et** dans `<modèle DLC>/result-videos/<vidéo>/` (inférence du parcours d'entraînement, `03_apply.py` / `create_labeled_video.py`) ;
+- `--labeled-video` seul prend la vidéo annotée la plus récente de `data/dlc-output/<session>/` ;
 - `--labeled-video 0.3` prend **exactement** celle produite à ce seuil, sans retomber sur une autre — sinon tu pourrais croire regarder la version à 0.3 en voyant celle à 0.6.
 
-Les deux conventions de nommage sont reconnues (`_labeled_p30.mp4` et `_p30_labeled.mp4`). Si elle n'existe pas encore :
+Si elle n'existe pas encore :
 
 ```cmd
 python scripts\relabel_video.py --session BV-970 --pcutoffs 0.3
 ```
-
-Pour une vidéo rangée ailleurs, `--source-video <chemin>` accepte n'importe quel fichier, annoté ou non.
 
 La vidéo annotée a exactement les mêmes frames que la source (DLC redessine par-dessus, sans couper), donc la synchronisation avec le manifold est conservée.
 
