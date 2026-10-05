@@ -30,6 +30,116 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _load_config import add_config_dir_arg, load_config  # noqa: E402
 
 
+def envergure_animal(project_dir: Path, percentile: float = 90.0
+                      ) -> tuple[float, float] | None:
+    """(médiane, centile) de l'envergure de l'animal dans les annotations.
+
+    L'envergure est la plus grande distance entre deux keypoints d'une
+    même frame. Elle dit la taille minimale que doit avoir la fenêtre
+    d'entraînement pour contenir l'animal entier.
+
+    Pourquoi ça compte au-delà du cadrage : un réseau ne peut décider
+    qu'une patte est la gauche qu'en la situant par rapport à
+    l'orientation tête-queue. Si la fenêtre ne contient pas la tête, la
+    question n'a pas de réponse dans l'image, et l'entraînement pousse le
+    réseau vers la position moyenne des deux pattes. Les keypoints
+    proches de la tête n'en souffrent pas ; ceux de l'autre extrémité,
+    si.
+    """
+    import numpy as np
+    import pandas as pd
+
+    fichiers = sorted((project_dir / "labeled-data").glob(
+        "*/CollectedData_*.h5"))
+    if not fichiers:
+        return None
+    try:
+        df = pd.concat([pd.read_hdf(f) for f in fichiers])
+    except Exception:
+        return None
+
+    scorer = df.columns.get_level_values(0)[0]
+    bps = list(dict.fromkeys(df.columns.get_level_values("bodyparts")))
+    xs = np.column_stack([df[(scorer, b, "x")].to_numpy(float) for b in bps])
+    ys = np.column_stack([df[(scorer, b, "y")].to_numpy(float) for b in bps])
+
+    # Envergure = diagonale de la boîte englobante des keypoints visibles.
+    with np.errstate(invalid="ignore"):
+        largeur = np.nanmax(xs, axis=1) - np.nanmin(xs, axis=1)
+        hauteur = np.nanmax(ys, axis=1) - np.nanmin(ys, axis=1)
+    env = np.hypot(largeur, hauteur)
+    env = env[np.isfinite(env)]
+    if not env.size:
+        return None
+    return float(np.median(env)), float(np.percentile(env, percentile))
+
+
+def crop_recommande(envergure_centile: float, marge: float = 1.1) -> int:
+    """Taille de fenêtre couvrant l'envergure, arrondie à un multiple de 32.
+
+    Le multiple de 32 n'est pas cosmétique : `auto_padding` du config DLC
+    impose `pad_width_divisor: 32`, donc une valeur qui n'en est pas un
+    serait de toute façon rembourrée.
+    """
+    import math
+    return int(math.ceil(envergure_centile * marge / 32) * 32)
+
+
+def verifier_crop(project_dir: Path, taille_voulue: int | None = None) -> None:
+    """Compare la fenêtre d'entraînement à la taille réelle de l'animal.
+
+    Signale toujours, applique seulement si `taille_voulue` est donnée :
+    agrandir la fenêtre augmente la mémoire GPU avec le carré de la
+    taille, et faire déborder un entraînement de 24 h sans prévenir
+    serait pire que le problème qu'on corrige.
+    """
+    import yaml as _yaml
+
+    cfg_path = trouver_pytorch_config(project_dir)
+    if cfg_path is None:
+        return
+    cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    crop = ((cfg.get("data") or {}).get("train") or {}).get("crop_sampling")
+    if not isinstance(crop, dict):
+        return
+    actuel = int(min(crop.get("width", 0), crop.get("height", 0)) or 0)
+
+    mesure = envergure_animal(project_dir)
+    if mesure is None:
+        return
+    mediane, centile = mesure
+    recommande = crop_recommande(centile)
+
+    print(f"   Animal (annotations) : {mediane:.0f} px de médiane, "
+          f"{centile:.0f} px au 90e centile")
+    print(f"   Fenêtre d'entraînement : {actuel} px")
+
+    if taille_voulue is None:
+        if actuel and actuel < centile:
+            facteur = (recommande / actuel) ** 2
+            print(f"   ⚠ La fenêtre est plus petite que l'animal : les "
+                  f"keypoints des extrémités")
+            print(f"     (queue, pattes arrière) en sortent souvent, et "
+                  f"avec eux la tête qui sert")
+            print(f"     de référence d'orientation — d'où des gauche/droite "
+                  f"indécidables.")
+            print(f"     Recommandé : --crop-size {recommande}  "
+                  f"(≈ ×{facteur:.1f} de mémoire GPU, baisse le batch_size "
+                  f"si ça déborde)")
+        else:
+            print(f"   ✓ La fenêtre contient l'animal entier.")
+        return
+
+    crop["width"] = int(taille_voulue)
+    crop["height"] = int(taille_voulue)
+    cfg_path.write_text(
+        _yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    print(f"   ✓ Fenêtre portée à {taille_voulue} px "
+          f"(couvre {'le' if taille_voulue >= centile else 'une partie du'} "
+          f"90e centile)")
+
+
 def paires_symetriques(bodyparts: list[str]) -> list[list[int]]:
     """Indices des keypoints symétriques, d'après leurs noms `_left`/`_right`."""
     index = {bp: i for i, bp in enumerate(bodyparts)}
@@ -194,6 +304,15 @@ def main() -> None:
              "les snapshots de deux runs.",
     )
     parser.add_argument(
+        "--crop-size", type=int, default=None, metavar="N",
+        help="Taille de la fenêtre d'entraînement (crop_sampling), en px. "
+             "Doit contenir l'animal ENTIER : sinon les keypoints des "
+             "extrémités en sortent, et la tête qui sert de référence "
+             "d'orientation aussi, ce qui rend gauche/droite indécidable. "
+             "Sans ce flag, le script mesure l'animal et affiche la valeur "
+             "recommandée sans rien changer. Mémoire GPU ∝ N².",
+    )
+    parser.add_argument(
         "--keep-hflip", action="store_true",
         help="Laisse l'augmentation miroir telle quelle. Par défaut le "
              "script déclare les paires symétriques (ou désactive le "
@@ -260,6 +379,8 @@ def main() -> None:
                 encoding="utf-8")) or {}).get("bodyparts") or []
             corriger_hflip(Path(CONFIG).parent, list(bodyparts))
             print()
+        verifier_crop(Path(CONFIG).parent, args.crop_size)
+        print()
 
         print(f"Entraînement ({EPOCHS} epochs, transfer learning actif)...")
         dlc.train_network(
