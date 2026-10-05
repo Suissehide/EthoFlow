@@ -263,32 +263,29 @@ def verdict(tab: pd.DataFrame, lik: pd.DataFrame,
             print(f"     {g} {a:.0f}% au-dessus de 0.3  vs  {d} {b:.0f}%")
         print("   L'animal est symétrique : l'écart vient du modèle ou des "
               "annotations, pas de la souris.")
-        if sup is not None and len(sup):
-            print()
-            print(sup.round(1).to_string(index=False))
-            proches = sup[sup.filter(like="pct_sous_").iloc[:, 0] > 40]
-            if len(proches):
-                print()
-                print("   → Les deux marqueurs tombent souvent au MÊME "
-                      "endroit : le modèle voit la patte")
-                print("     mais ne sait pas de quel côté elle est. En vue "
-                      "de dessous, une patte gauche et")
-                print("     une patte droite sont visuellement identiques — "
-                      "seule leur position relative")
-                print("     au corps les distingue. Ajouter des frames aide "
-                      "peu ; c'est la tâche qui est")
-                print("     ambiguë. Pour VAME, mieux vaut travailler sans "
-                      "distinction L/R.")
+
+    # Toujours affiché, indépendamment de l'asymétrie : des confiances
+    # équilibrées n'impliquent pas des positions distinctes. Le modèle peut
+    # être également sûr des deux marqueurs tout en les posant au même
+    # endroit — la fusion se voit alors à l'œil sur la vidéo annotée, mais
+    # aucun chiffre de confiance ne la trahit.
+    if sup is not None and len(sup):
+        print()
+        print("Séparation gauche/droite :")
+        print(sup.round(1).to_string(index=False))
+        col = sup.filter(like="pct_sous_").columns[0]
+        for _, r in sup.iterrows():
+            if r[col] > 40:
+                print(f"   ❌ {r['paire']} : marqueurs confondus "
+                      f"{r[col]:.0f} % du temps "
+                      f"({r['pct_corps']:.1f} % du corps).")
+            elif r["pct_corps"] < 8:
+                print(f"   ⚠  {r['paire']} : séparation faible "
+                      f"({r['pct_corps']:.1f} % du corps) — à vérifier à "
+                      f"l'œil sur la vidéo annotée.")
             else:
-                print()
-                print("   → Les marqueurs sont éloignés l'un de l'autre : ce "
-                      "n'est pas une confusion L/R,")
-                print("     le modèle ne trouve pas la patte du côté faible. "
-                      "Vérifie d'abord l'audit des")
-                print("     labels, puis ajoute des frames dans ces "
-                      "situations :")
-                print("       python scripts/dlc_model-training/"
-                      "06_check_labels.py")
+                print(f"   ✅ {r['paire']} : bien séparés "
+                      f"({r['pct_corps']:.1f} % du corps).")
 
     # Conséquence directe sur l'étape 6b — le seuil par défaut y est 0.70.
     print()
