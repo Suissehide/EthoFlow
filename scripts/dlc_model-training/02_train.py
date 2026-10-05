@@ -140,6 +140,42 @@ def verifier_crop(project_dir: Path, taille_voulue: int | None = None) -> None:
           f"90e centile)")
 
 
+def regler_batch_size(project_dir: Path, taille: int) -> None:
+    """Écrit batch_size dans pytorch_config.yaml, où qu'il se trouve.
+
+    Agrandir la fenêtre d'entraînement multiplie la mémoire par le carré
+    du facteur ; réduire le lot dans la même proportion la ramène au
+    niveau initial. Le compromis est du temps par epoch, pas de la
+    qualité : un lot plus petit converge aussi bien, parfois mieux.
+
+    La clé vit selon les versions à la racine ou sous `train_settings` /
+    `runner`, d'où la recherche plutôt qu'un chemin en dur.
+    """
+    import yaml as _yaml
+
+    cfg_path = trouver_pytorch_config(project_dir)
+    if cfg_path is None:
+        return
+    cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+
+    def poser(noeud) -> bool:
+        if isinstance(noeud, dict):
+            if "batch_size" in noeud:
+                ancien = noeud["batch_size"]
+                noeud["batch_size"] = int(taille)
+                print(f"   ✓ batch_size : {ancien} → {taille}")
+                return True
+            return any(poser(v) for v in noeud.values())
+        return False
+
+    if poser(cfg):
+        cfg_path.write_text(
+            _yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+            encoding="utf-8")
+    else:
+        print("   ⚠ batch_size introuvable dans pytorch_config.yaml")
+
+
 def paires_symetriques(bodyparts: list[str]) -> list[list[int]]:
     """Indices des keypoints symétriques, d'après leurs noms `_left`/`_right`."""
     index = {bp: i for i, bp in enumerate(bodyparts)}
@@ -313,6 +349,13 @@ def main() -> None:
              "recommandée sans rien changer. Mémoire GPU ∝ N².",
     )
     parser.add_argument(
+        "--batch-size", type=int, default=None, metavar="N",
+        help="Taille de lot. À baisser quand on agrandit --crop-size : la "
+             "mémoire GPU varie comme le carré de la fenêtre, et comme le "
+             "lot. Passer de 448 à 768 px se compense en divisant le lot "
+             "par 3. Coûte du temps par epoch, pas de la qualité.",
+    )
+    parser.add_argument(
         "--keep-hflip", action="store_true",
         help="Laisse l'augmentation miroir telle quelle. Par défaut le "
              "script déclare les paires symétriques (ou désactive le "
@@ -380,6 +423,8 @@ def main() -> None:
             corriger_hflip(Path(CONFIG).parent, list(bodyparts))
             print()
         verifier_crop(Path(CONFIG).parent, args.crop_size)
+        if args.batch_size:
+            regler_batch_size(Path(CONFIG).parent, args.batch_size)
         print()
 
         print(f"Entraînement ({EPOCHS} epochs, transfer learning actif)...")
