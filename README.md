@@ -957,10 +957,27 @@ python scripts\motif_gif.py --project-dir D:\EthoFlow\projects\mon-projet --sess
 python scripts\behavior_structure_gif.py --session BV-970 ^
     --pool-all-sessions --with-video --duration 30 --output-format mp4
 
+:: Idem avec la vidéo ANNOTÉE (keypoints DLC dessinés) au lieu de la brute
+python scripts\behavior_structure_gif.py --session BV-970 ^
+    --pool-all-sessions --labeled-video 0.3 --duration 30 --output-format mp4
+
 :: Dendrogramme des communautés de motifs avec labels lisibles
 python scripts\community_dendrogram.py
 python scripts\community_dendrogram.py --project-dir D:\EthoFlow\projects\mon-projet --group MCCiECKO
 ```
+
+**`--labeled-video`** remplace le panneau vidéo brut par la vidéo annotée par DLC — utile pour voir à la fois le squelette et la position dans le manifold, et repérer un motif qui ne serait en fait qu'un artefact de tracking. Il implique `--with-video`.
+
+- `--labeled-video` seul prend la vidéo annotée la plus récente de `data/dlc-output/<session>/` ;
+- `--labeled-video 0.3` prend **exactement** celle produite à ce seuil, sans retomber sur une autre — sinon tu pourrais croire regarder la version à 0.3 en voyant celle à 0.6.
+
+Si elle n'existe pas encore :
+
+```cmd
+python scripts\relabel_video.py --session BV-970 --pcutoffs 0.3
+```
+
+La vidéo annotée a exactement les mêmes frames que la source (DLC redessine par-dessus, sans couper), donc la synchronisation avec le manifold est conservée.
 
 ##### Un manifold par groupe expérimental
 

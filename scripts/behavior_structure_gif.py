@@ -51,6 +51,13 @@ Usage :
         --project-dir <...> --session BV-970 \\
         --with-video --start 120 --duration 30 --output-format mp4
 
+    # Même chose avec la vidéo ANNOTÉE par DLC (keypoints dessinés) : on
+    # voit le squelette pendant que le point parcourt le manifold. Avec un
+    # seuil, prend exactement la version produite par relabel_video.py.
+    python scripts/behavior_structure_gif.py \\
+        --project-dir <...> --session BV-970 \\
+        --labeled-video 0.3 --start 120 --duration 30 --output-format mp4
+
     # Manifold POOLÉ sur toutes les sessions du projet (référentiel commun).
     # ~5-15 min pour fit UMAP sur ~1M points. Le cache est nommé par session
     # ANIMÉE (elle seule est gardée en full-res, ce qui change les données
@@ -79,7 +86,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from interactive import prompt_session  # noqa: E402
-from paths import add_project_dir_arg, raw_dir, resolve_project, vame_dir  # noqa: E402
+from paths import (  # noqa: E402
+    add_project_dir_arg, dlc_output_dir, raw_dir, resolve_project, vame_dir,
+)
 
 
 def _read_metadata(project_ethoflow: Path, session: str) -> dict:
@@ -231,6 +240,48 @@ def find_source_video(project_ethoflow: Path, session: str) -> Path | None:
               file=sys.stderr)
         return None
     return p
+
+
+def find_labeled_video(project_ethoflow: Path, session: str,
+                        pcutoff: float | None) -> Path | None:
+    """Vidéo annotée DLC (keypoints dessinés) de la session.
+
+    Cherchée dans `data/dlc-output/<session>/`, où `run_dlc_inference.py`
+    et `relabel_video.py` l'écrivent. Elle a les mêmes frames que la
+    vidéo source — DLC redessine par-dessus sans couper ni ré-échantillonner
+    —, donc l'indexation du panneau reste alignée sur les labels VAME.
+
+    `pcutoff` donné → correspondance stricte sur `*_labeled_pXX.mp4`. On
+    ne retombe PAS sur une autre version : demander 0.3 et recevoir en
+    silence la vidéo à 0.6 montrerait moins de points que prévu, et on
+    en tirerait de mauvaises conclusions sur le modèle.
+    """
+    out = dlc_output_dir(project_ethoflow) / session
+    if not out.exists():
+        print(f"    · pas de dossier {out}", file=sys.stderr)
+        return None
+
+    if pcutoff is not None:
+        tag = f"p{int(round(pcutoff * 100)):02d}"
+        trouves = sorted(out.glob(f"*_labeled_{tag}.mp4"),
+                         key=lambda p: p.stat().st_mtime)
+        if trouves:
+            return trouves[-1]
+        print(f"    · aucune vidéo annotée à pcutoff={pcutoff} dans {out}.\n"
+              f"    · Génère-la avec :\n"
+              f"        python scripts/relabel_video.py --session {session} "
+              f"--pcutoffs {pcutoff}", file=sys.stderr)
+        return None
+
+    trouves = sorted(out.glob("*_labeled*.mp4"),
+                     key=lambda p: p.stat().st_mtime)
+    if trouves:
+        return trouves[-1]
+    print(f"    · aucune vidéo annotée (*_labeled*.mp4) dans {out}.\n"
+          f"    · Génère-la avec :\n"
+          f"        python scripts/relabel_video.py --session {session} "
+          f"--pcutoffs 0.3", file=sys.stderr)
+    return None
 
 
 # Même palette que motif_gif.py pour cohérence
@@ -503,6 +554,14 @@ def main() -> None:
                              "afficher dans le panneau. Ignore ce qui est "
                              "dans metadata.yaml (utile quand le drive de "
                              "recording n'est plus mappé à la même lettre).")
+    parser.add_argument("--labeled-video", nargs="?", type=float,
+                        const=-1.0, default=None, metavar="PCUTOFF",
+                        help="Affiche la vidéo ANNOTÉE par DLC (keypoints "
+                             "dessinés) au lieu de la vidéo brute. Seul : la "
+                             "plus récente de data/dlc-output/<session>/. "
+                             "Avec un seuil (ex : --labeled-video 0.3) : "
+                             "exactement celle produite à ce pcutoff par "
+                             "relabel_video.py. Implique --with-video.")
     parser.add_argument("--pool-all-sessions", action="store_true",
                         help="Calcule le manifold sur TOUTES les sessions "
                              "du projet (référentiel commun) au lieu de la "
@@ -547,6 +606,8 @@ def main() -> None:
                              "(5-10x plus lent). Utile pour un run final "
                              "de publication ; à éviter en exploration.")
     args = parser.parse_args()
+    if args.labeled_video is not None:
+        args.with_video = True  # demander la vidéo annotée = vouloir le panneau
 
     try:
         import matplotlib
@@ -696,7 +757,7 @@ def main() -> None:
         except ImportError:
             print("⚠  OpenCV absent, --with-video ignoré", file=sys.stderr)
         else:
-            # Priorité : --source-video CLI, sinon metadata.yaml
+            # Priorité : --source-video CLI > --labeled-video > metadata.yaml
             if args.source_video is not None:
                 if args.source_video.exists():
                     src_video = args.source_video
@@ -705,10 +766,15 @@ def main() -> None:
                     print(f"⚠  --source-video={args.source_video} n'existe pas",
                           file=sys.stderr)
                     src_video = None
+            elif args.labeled_video is not None:
+                seuil = None if args.labeled_video < 0 else args.labeled_video
+                src_video = find_labeled_video(project, args.session, seuil)
+                if src_video is not None:
+                    print(f"    Vidéo annotée : {src_video.name}")
             else:
                 src_video = find_source_video(project, args.session)
             if src_video is None:
-                print(f"⚠  source_video introuvable pour {args.session}, "
+                print(f"⚠  vidéo introuvable pour {args.session}, "
                       f"--with-video ignoré (voir raison ci-dessus)",
                       file=sys.stderr)
             else:
