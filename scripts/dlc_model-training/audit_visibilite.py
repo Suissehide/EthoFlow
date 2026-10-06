@@ -53,24 +53,60 @@ KEYPOINTS_DEFAUT = ["hind_paw_left", "hind_paw_right"]
 PROFONDEUR_DEFAUT = 15.0
 
 
-def carte_profondeur(gris: np.ndarray) -> np.ndarray | None:
-    """Profondeur de chaque pixel dans la silhouette (0 hors silhouette).
+ANCRES = ["belly_center", "chest_center", "head_center", "tail_base"]
+MARGE_PX = 80
 
-    Otsu sépare la souris sombre du plancher clair ; on garde la plus
-    grande composante (les coins et repères de l'arène peuvent aussi être
-    sombres), puis une transformée de distance donne, pour chaque pixel
-    de la souris, la distance au pixel de fond le plus proche.
+
+def carte_profondeur(gris: np.ndarray, points: dict[str, tuple[float, float]]
+                      ) -> tuple[np.ndarray, int, int] | None:
+    """Profondeur de chaque pixel dans la silhouette, autour de la souris.
+
+    Première version : Otsu sur l'image entière, plus grande composante
+    sombre. Faux sur de vraies images : les coins et parois de l'arène,
+    sombres eux aussi, forment une composante bien plus grande que la
+    souris, et la « profondeur » mesurée atteignait 150 px — impossible
+    pour un animal de 300 px de long.
+
+    On se sert donc des labels pour localiser l'animal : fenêtre autour
+    de ses keypoints (plus une marge), seuillage Otsu LOCAL dans cette
+    fenêtre, puis on garde la composante qui contient un point d'ancrage
+    du corps (belly_center de préférence). Si l'ancre ne tombe pas dans
+    une zone sombre, la silhouette n'est pas fiable sur cette frame et on
+    renvoie None plutôt qu'une mesure fausse.
+
+    Renvoie (carte, x0, y0) : la carte couvre la fenêtre, (x0, y0) est son
+    coin dans l'image.
     """
     import cv2
 
-    _, masque = cv2.threshold(gris, 0, 255,
-                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-    n, etiq, stats, _ = cv2.connectedComponentsWithStats(masque, 8)
-    if n <= 1:
+    xs = [p[0] for p in points.values()]
+    ys = [p[1] for p in points.values()]
+    if not xs:
         return None
-    plus_grande = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-    souris = (etiq == plus_grande).astype(np.uint8)
-    return cv2.distanceTransform(souris, cv2.DIST_L2, 5)
+    h, w = gris.shape
+    x0 = max(int(min(xs)) - MARGE_PX, 0)
+    y0 = max(int(min(ys)) - MARGE_PX, 0)
+    x1 = min(int(max(xs)) + MARGE_PX, w)
+    y1 = min(int(max(ys)) + MARGE_PX, h)
+    fenetre = gris[y0:y1, x0:x1]
+    if fenetre.size == 0:
+        return None
+
+    _, masque = cv2.threshold(fenetre, 0, 255,
+                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, etiq = cv2.connectedComponents(masque, connectivity=8)
+
+    ancre = next((points[a] for a in ANCRES if a in points), None)
+    if ancre is None:
+        return None
+    ax, ay = int(round(ancre[0])) - x0, int(round(ancre[1])) - y0
+    if not (0 <= ay < etiq.shape[0] and 0 <= ax < etiq.shape[1]):
+        return None
+    lab = etiq[ay, ax]
+    if lab == 0:  # l'ancre du corps n'est pas dans une zone sombre
+        return None
+    souris = (etiq == lab).astype(np.uint8)
+    return cv2.distanceTransform(souris, cv2.DIST_L2, 5), x0, y0
 
 
 def chemin_image(model_dir: Path, index) -> Path:
@@ -86,38 +122,103 @@ def profondeurs(df: pd.DataFrame, model_dir: Path,
     import cv2
 
     scorer = df.columns.get_level_values(0)[0]
+    bps = list(dict.fromkeys(df.columns.get_level_values("bodyparts")))
     lignes = []
+    ignorees = 0
     for idx in df.index:
         img_path = chemin_image(model_dir, idx)
         gris = cv2.imread(str(img_path), cv2.IMREAD_GRAYSCALE)
         if gris is None:
             continue
-        carte = carte_profondeur(gris)
-        if carte is None:
-            continue
-        for bp in keypoints:
-            if (scorer, bp, "x") not in df.columns:
-                continue
+        points = {}
+        for bp in bps:
             x, y = df.at[idx, (scorer, bp, "x")], df.at[idx, (scorer, bp, "y")]
-            if pd.isna(x) or pd.isna(y):
+            if not (pd.isna(x) or pd.isna(y)):
+                points[bp] = (float(x), float(y))
+        res = carte_profondeur(gris, points)
+        if res is None:
+            ignorees += 1
+            continue
+        carte, x0, y0 = res
+        contour = None
+        cs, _ = cv2.findContours((carte > 0).astype(np.uint8),
+                                 cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if cs:
+            contour = max(cs, key=cv2.contourArea) + np.array([x0, y0])
+        for bp in keypoints:
+            if bp not in points:
                 continue
-            xi, yi = int(round(x)), int(round(y))
+            xi = int(round(points[bp][0])) - x0
+            yi = int(round(points[bp][1])) - y0
             if not (0 <= yi < carte.shape[0] and 0 <= xi < carte.shape[1]):
                 prof = 0.0
             else:
                 prof = float(carte[yi, xi])
             lignes.append({"index": idx, "image": str(img_path),
-                           "keypoint": bp, "profondeur": prof})
-    return pd.DataFrame(lignes)
+                           "keypoint": bp, "profondeur": prof,
+                           "profondeur_max": float(carte.max()),
+                           "x": points[bp][0], "y": points[bp][1],
+                           "contour": contour})
+    out = pd.DataFrame(lignes)
+    out.attrs["ignorees"] = ignorees
+    return out
 
 
 def resume(prof: pd.DataFrame, seuil: float) -> None:
+    # Garde-fou : la profondeur maximale d'une silhouette de souris est
+    # sa demi-largeur. Si la médiane de ce maximum dépasse ~100 px, le
+    # masque englobe autre chose que l'animal et toute la mesure est fausse.
+    pmax = float(prof["profondeur_max"].median())
+    print(f"Silhouette : profondeur max médiane {pmax:.0f} px "
+          f"(≈ demi-largeur de la souris)")
+    if pmax > 100:
+        print("⚠  Valeur trop grande pour une souris : le masque déborde "
+              "sur l'arène.\n   Les chiffres ci-dessous ne sont PAS "
+              "fiables — n'applique rien, envoie un --apercu.")
+    print()
     print(f"{'keypoint':<18} {'labels':>7} {'médiane':>8} "
           f"{'enfouis >' + str(int(seuil)) + 'px':>15}")
     for bp, g in prof.groupby("keypoint", sort=False):
         enfouis = (g["profondeur"] > seuil).sum()
         print(f"{bp:<18} {len(g):>7} {g['profondeur'].median():>7.1f}  "
               f"{enfouis:>6} ({100 * enfouis / len(g):4.1f} %)")
+
+
+def ecrire_apercus(prof: pd.DataFrame, n: int, dossier: Path,
+                   seuil: float) -> None:
+    """Images de contrôle : contour du masque + labels colorés par profondeur.
+
+    À regarder AVANT d'appliquer quoi que ce soit : c'est le seul moyen de
+    vérifier que le masque épouse bien la souris et pas l'arène. Vert =
+    label sur le bord ou dehors (patte visible), rouge = enfoui au-delà du
+    seuil (deviné).
+    """
+    import cv2
+
+    dossier.mkdir(parents=True, exist_ok=True)
+    images = list(dict.fromkeys(prof.sort_values(
+        "profondeur", ascending=False)["image"]))[:n]
+    for img_path in images:
+        gris = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+        if gris is None:
+            continue
+        sub = prof[prof["image"] == img_path]
+        # Recalcule le masque de cette frame pour en tracer le contour
+        vis = cv2.cvtColor(gris, cv2.COLOR_GRAY2BGR)
+        for r in sub.itertuples():
+            couleur = (0, 0, 255) if r.profondeur > seuil else (0, 200, 0)
+            x, y = r.x, r.y
+            cv2.circle(vis, (int(x), int(y)), 7, couleur, 2)
+            cv2.putText(vis, f"{r.keypoint} {r.profondeur:.0f}px",
+                        (int(x) + 9, int(y) - 9), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5, couleur, 1, cv2.LINE_AA)
+        if r.contour is not None:
+            cv2.drawContours(vis, [r.contour], -1, (255, 160, 0), 1)
+        nom = Path(img_path).parent.name + "_" + Path(img_path).name
+        cv2.imwrite(str(dossier / nom), vis)
+    print(f"✓ {len(images)} aperçu(s) dans {dossier}")
+    print("  Contour orange = masque de la souris. Vert = label sur le bord "
+          "(visible), rouge = enfoui.")
 
 
 def main() -> None:
@@ -129,6 +230,10 @@ def main() -> None:
     parser.add_argument("--profondeur", type=float, default=PROFONDEUR_DEFAUT,
                         help=f"Profondeur (px) au-delà de laquelle un label "
                              f"est jugé deviné (défaut {PROFONDEUR_DEFAUT}).")
+    parser.add_argument("--apercu", type=int, default=0, metavar="N",
+                        help="Écrit N images de contrôle (masque + labels "
+                             "colorés) dans <modèle>/apercu_visibilite/. "
+                             "À faire avant --appliquer.")
     parser.add_argument("--appliquer", action="store_true",
                         help="Retire les labels enfouis (sauvegarde d'abord "
                              "chaque CollectedData modifié).")
@@ -164,14 +269,29 @@ def main() -> None:
               "sont présents.", file=sys.stderr)
         sys.exit(1)
     tout = pd.concat(toutes, ignore_index=True)
+    ignorees = sum(p.attrs.get("ignorees", 0) for p in toutes)
+    if ignorees:
+        print(f"({ignorees} frame(s) ignorée(s) : silhouette non fiable — "
+              f"le centre du corps n'est pas dans une zone sombre)\n")
     resume(tout, args.profondeur)
+    if args.apercu:
+        print()
+        ecrire_apercus(tout, args.apercu, model_dir / "apercu_visibilite",
+                       args.profondeur)
+    masque_suspect = float(tout["profondeur_max"].median()) > 100
 
     suspects = tout[tout["profondeur"] > args.profondeur]
     liste = model_dir / "labels_enfouis.csv"
-    suspects.sort_values("profondeur", ascending=False).to_csv(liste, index=False)
+    suspects.drop(columns=["contour"]).sort_values(
+        "profondeur", ascending=False).to_csv(liste, index=False)
     print(f"\n✓ Liste des {len(suspects)} label(s) suspect(s) : {liste}")
     print("  Triée par profondeur décroissante : les premiers sont les plus "
           "sûrement devinés.")
+
+    if args.appliquer and masque_suspect:
+        print("\n❌ --appliquer refusé : le masque n'est pas fiable (voir "
+              "l'avertissement plus haut).", file=sys.stderr)
+        sys.exit(1)
 
     if not args.appliquer:
         print("\nRien n'a été modifié. Vérifie quelques images de la liste "
