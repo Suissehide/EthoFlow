@@ -237,11 +237,17 @@ def diagnostic_confusions(df_gt: pd.DataFrame, df_pred: pd.DataFrame
             ok = ~(np.isnan(vers_propre) | np.isnan(vers_jumeau))
             if not ok.any():
                 continue
+            sur_jumeau = ok & (vers_jumeau < vers_propre)
             out["paires"].append({
                 "keypoint": nom,
                 "pct_sur_jumeau": 100.0 * float(
                     (vers_jumeau[ok] < vers_propre[ok]).mean()),
                 "mediane_vers_jumeau": float(np.median(vers_jumeau[ok])),
+                # Frames triées par erreur décroissante : les premières sont
+                # celles où la cible propre est le plus loin de la
+                # prédiction, donc les plus démonstratives à regarder.
+                "frames": [str(i) for i in np.asarray(gt.index)[sur_jumeau][
+                    np.argsort(-vers_propre[sur_jumeau])]],
             })
 
     # --- retournement tête/queue ---
@@ -427,6 +433,14 @@ def main() -> None:
                   f"{p['pct_sur_jumeau']:.0f} % des frames "
                   f"(médiane {p['mediane_vers_jumeau']:.1f} px de lui).")
         print("   Le réseau trouve UNE patte et y pose les deux marqueurs.")
+        pire = max(confus, key=lambda p: p["pct_sur_jumeau"])
+        print(f"   Frames où {pire['keypoint']} est sur l'autre patte "
+              f"(les plus nettes d'abord) :")
+        for f in pire["frames"][:8]:
+            print(f"     · {f}")
+        print("   Regarde-les dans evaluation-results-pytorch\\...\\"
+              "LabeledImages_*\\ : la patte\n"
+              "   « oubliée » est-elle visible, ou fondue dans la silhouette ?")
     ret = diag["retournement"]
     if ret and ret["n"]:
         print()
