@@ -293,6 +293,11 @@ def main() -> None:
               "l'avertissement plus haut).", file=sys.stderr)
         sys.exit(1)
 
+    print("\n⚠  La profondeur ne mesure la visibilité que si l'intérieur de "
+          "la silhouette est\n   uniforme. Si tes aperçus montrent des pattes "
+          "visibles EN ROUGE, l'hypothèse ne\n   tient pas pour tes images : "
+          "n'applique rien.")
+
     if not args.appliquer:
         print("\nRien n'a été modifié. Vérifie quelques images de la liste "
               "(les plus profondes en tête),\npuis relance avec --appliquer "

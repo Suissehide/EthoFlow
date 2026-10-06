@@ -85,6 +85,67 @@ def crop_recommande(envergure_centile: float, marge: float = 1.1) -> int:
     return int(math.ceil(envergure_centile * marge / 32) * 32)
 
 
+# Canaux par branche de HRNet (strides 4, 8, 16, 32) : la somme est ce
+# que reçoit la tête quand les branches sont concaténées.
+CANAUX_HRNET = {"hrnet_w18": [18, 36, 72, 144],
+                "hrnet_w32": [32, 64, 128, 256],
+                "hrnet_w48": [48, 96, 192, 384]}
+
+
+def activer_contexte_global(project_dir: Path) -> None:
+    """Donne à la tête de prédiction les quatre branches de HRNet.
+
+    Par défaut (`interpolate_branches: false`), DLC ne transmet à la tête
+    que la branche haute résolution — stride 4, 32 canaux pour w32 — et
+    jette les trois autres, qui sont celles qui couvrent l'image entière
+    et portent le contexte global : où est la tête, dans quel sens va
+    l'animal.
+
+    Or décider qu'une patte est la GAUCHE exige ce contexte. Les pattes
+    avant, voisines de la tête, s'en passent : le contexte local suffit.
+    Les pattes arrière, à l'autre bout du corps, non — mesuré sur
+    bottomview_129_IR : pattes avant séparées, pattes arrière prédites au
+    même pixel dans 94 % des frames, y compris sur les frames
+    d'entraînement, malgré des labels cohérents à 99 % et une fenêtre
+    d'entraînement contenant l'animal entier.
+
+    Avec `interpolate_branches: true`, les quatre branches sont
+    ré-échantillonnées au stride 4 et concaténées (480 canaux pour w32),
+    comme dans la configuration DEKR de DLC. Les poids SuperAnimal du
+    backbone restent compatibles (seule la sortie change) ; la tête est
+    de toute façon entraînée de zéro (`with_decoder=False`).
+    """
+    import yaml as _yaml
+
+    cfg_path = trouver_pytorch_config(project_dir)
+    if cfg_path is None:
+        print("   ⚠ pytorch_config.yaml introuvable — contexte global non "
+              "appliqué")
+        return
+    cfg = _yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+    modele = cfg.get("model") or {}
+    backbone = modele.get("backbone") or {}
+    nom = backbone.get("model_name", "")
+    if backbone.get("type") != "HRNet" or nom not in CANAUX_HRNET:
+        print(f"   ⚠ contexte global : réservé aux backbones HRNet "
+              f"(trouvé {backbone.get('type')} {nom}) — non appliqué")
+        return
+
+    total = sum(CANAUX_HRNET[nom])
+    backbone["interpolate_branches"] = True
+    modele["backbone_output_channels"] = total
+    tete = ((modele.get("heads") or {}).get("bodypart") or {})
+    for cle in ("heatmap_config", "locref_config"):
+        sous = tete.get(cle)
+        if isinstance(sous, dict) and sous.get("channels"):
+            sous["channels"][0] = total
+    cfg_path.write_text(
+        _yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False),
+        encoding="utf-8")
+    print(f"   ✓ Contexte global : les 4 branches HRNet alimentent la tête "
+          f"({CANAUX_HRNET[nom][0]} → {total} canaux)")
+
+
 def verifier_crop(project_dir: Path, taille_voulue: int | None = None) -> None:
     """Compare la fenêtre d'entraînement à la taille réelle de l'animal.
 
@@ -349,6 +410,20 @@ def main() -> None:
              "recommandée sans rien changer. Mémoire GPU ∝ N².",
     )
     parser.add_argument(
+        "--contexte-global", action="store_true",
+        help="Transmet à la tête les 4 branches de HRNet au lieu de la "
+             "seule branche haute résolution (interpolate_branches). "
+             "Donne au réseau le contexte de l'animal entier, nécessaire "
+             "pour décider du côté d'une patte éloignée de la tête.",
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=None, metavar="N",
+        help="Remplace EPOCHS du _config.py, pour un essai court. Les "
+             "paliers du learning rate (160, 190) ne sont PAS recalés : un "
+             "run de moins de 160 epochs se fait entièrement à LR 1e-4, ce "
+             "qui suffit pour un diagnostic mais pas pour un modèle final.",
+    )
+    parser.add_argument(
         "--batch-size", type=int, default=None, metavar="N",
         help="Taille de lot. À baisser quand on agrandit --crop-size : la "
              "mémoire GPU varie comme le carré de la fenêtre, et comme le "
@@ -425,14 +500,17 @@ def main() -> None:
         verifier_crop(Path(CONFIG).parent, args.crop_size)
         if args.batch_size:
             regler_batch_size(Path(CONFIG).parent, args.batch_size)
+        if args.contexte_global:
+            activer_contexte_global(Path(CONFIG).parent)
         print()
 
-        print(f"Entraînement ({EPOCHS} epochs, transfer learning actif)...")
+        n_epochs = args.epochs or EPOCHS
+        print(f"Entraînement ({n_epochs} epochs, transfer learning actif)...")
         dlc.train_network(
             CONFIG,
             superanimal_name=SUPERANIMAL_NAME,
             superanimal_transfer_learning=True,
-            epochs=EPOCHS,
+            epochs=n_epochs,
         )
         print("✅ Entraînement terminé.\n")
 
