@@ -56,6 +56,10 @@ from interactive import DEFAULT_MODELS_ROOT, prompt, prompt_existing_path  # noq
 
 DEFAULT_PCUTOFF = 0.6
 
+# Au-delà, une prédiction n'est plus imprécise : elle est ailleurs. 25 px
+# ≈ 8 % d'une souris de 300 px, bien au-dessus du bruit de clic (2-3 px).
+SEUIL_GROSSIER_PX = 25.0
+
 
 def bodyparts_of(df: pd.DataFrame) -> list[str]:
     """Noms de keypoints d'un DataFrame DLC, quel que soit le nb de niveaux."""
@@ -146,6 +150,14 @@ def per_keypoint_errors(df_gt: pd.DataFrame, df_pred: pd.DataFrame,
             "rmse_seuil": (float(np.sqrt(np.mean(err[confiant] ** 2)))
                            if confiant.any() else float("nan")),
             "mediane": float(np.median(err)),
+            # La RMSE est dominée par quelques frames aberrantes : un point
+            # juste à 1.5 px dans 95 % des cas affiche 70 px de RMSE si 5 %
+            # des frames sont à 300 px. Les deux colonnes ci-dessous
+            # séparent ce qui est systématique (médiane des prédictions
+            # confiantes) de ce qui est ponctuel (part d'erreurs grossières).
+            "mediane_seuil": (float(np.median(err[confiant]))
+                              if confiant.any() else float("nan")),
+            "pct_grossieres": 100.0 * float((err > SEUIL_GROSSIER_PX).mean()),
         })
         err_tout.append(err)
         err_conf.append(err[confiant])
@@ -169,8 +181,83 @@ def per_keypoint_errors(df_gt: pd.DataFrame, df_pred: pd.DataFrame,
         "rmse_seuil": (float(np.sqrt(np.mean(conf ** 2)))
                        if conf.size else float("nan")),
         "mediane": float(np.median(tout)),
+        "mediane_seuil": float(np.median(conf)) if conf.size else float("nan"),
+        "pct_grossieres": 100.0 * float((tout > SEUIL_GROSSIER_PX).mean()),
     }
     return pd.concat([df, pd.DataFrame([total])], ignore_index=True)
+
+
+def _aligner(df_gt: pd.DataFrame, df_pred: pd.DataFrame):
+    gt, pred = normalise_index(df_gt), normalise_index(df_pred)
+    communes = [i for i in gt.index if i in set(pred.index)]
+    return gt.loc[communes], pred.loc[communes]
+
+
+def _xy(df: pd.DataFrame, bp: str):
+    cx, cy = column_for(df, bp, "x"), column_for(df, bp, "y")
+    if cx is None or cy is None:
+        return None
+    return df[cx].to_numpy(float), df[cy].to_numpy(float)
+
+
+def diagnostic_confusions(df_gt: pd.DataFrame, df_pred: pd.DataFrame
+                           ) -> dict:
+    """Où tombent réellement les prédictions fausses ?
+
+    Deux confusions typiques de la vue de dessous, qu'une RMSE ne
+    distingue pas d'une simple imprécision :
+
+      · **Côté** — la patte droite est prédite à l'emplacement de la
+        gauche (ou l'inverse). On compare la prédiction de chaque membre
+        d'une paire à la vérité terrain de son JUMEAU : si elle en est
+        plus proche que de sa propre cible, le réseau a confondu les
+        deux.
+
+      · **Retournement tête/queue** — sur certaines frames, le nez est
+        prédit à l'arrière et la queue à l'avant. Erreur d'environ une
+        longueur de corps, souvent avec une confiance élevée, sur une
+        poignée de frames : c'est elle qui gonfle la RMSE de nose, chin
+        et tail_tip alors que leur médiane reste à 1-3 px.
+    """
+    gt, pred = _aligner(df_gt, df_pred)
+    out: dict = {"paires": [], "retournement": None}
+
+    # --- confusion de côté ---
+    bps = bodyparts_of(gt)
+    for g in [b for b in bps if str(b).endswith("_left")]:
+        d = str(g)[: -len("_left")] + "_right"
+        if d not in bps:
+            continue
+        gg, gd, pg, pd_ = _xy(gt, g), _xy(gt, d), _xy(pred, g), _xy(pred, d)
+        if None in (gg, gd, pg, pd_):
+            continue
+        for nom, p, propre, jumeau in ((d, pd_, gd, gg), (g, pg, gg, gd)):
+            vers_propre = np.hypot(p[0] - propre[0], p[1] - propre[1])
+            vers_jumeau = np.hypot(p[0] - jumeau[0], p[1] - jumeau[1])
+            ok = ~(np.isnan(vers_propre) | np.isnan(vers_jumeau))
+            if not ok.any():
+                continue
+            out["paires"].append({
+                "keypoint": nom,
+                "pct_sur_jumeau": 100.0 * float(
+                    (vers_jumeau[ok] < vers_propre[ok]).mean()),
+                "mediane_vers_jumeau": float(np.median(vers_jumeau[ok])),
+            })
+
+    # --- retournement tête/queue ---
+    nez_gt, base_gt = _xy(gt, "nose"), _xy(gt, "tail_base")
+    nez_pr = _xy(pred, "nose")
+    if None not in (nez_gt, base_gt, nez_pr):
+        vers_nez = np.hypot(nez_pr[0] - nez_gt[0], nez_pr[1] - nez_gt[1])
+        vers_base = np.hypot(nez_pr[0] - base_gt[0], nez_pr[1] - base_gt[1])
+        ok = ~(np.isnan(vers_nez) | np.isnan(vers_base))
+        retourne = ok & (vers_base < vers_nez)
+        out["retournement"] = {
+            "n": int(retourne.sum()),
+            "total": int(ok.sum()),
+            "frames": [str(i) for i in np.asarray(gt.index)[retourne]],
+        }
+    return out
 
 
 def dossiers_evaluation(model_dir: Path) -> list[Path]:
@@ -283,43 +370,79 @@ def main() -> None:
     print(f"Seuil        : {args.pcutoff}")
     print()
 
-    df = per_keypoint_errors(load_ground_truth(model_dir),
-                             pd.read_hdf(pred_path), args.pcutoff)
+    df_gt, df_pred = load_ground_truth(model_dir), pd.read_hdf(pred_path)
+    df = per_keypoint_errors(df_gt, df_pred, args.pcutoff)
 
     largeur = max(len(str(k)) for k in df["keypoint"])
-    print(f"{'keypoint'.ljust(largeur)}  {'n':>5}  {'%>seuil':>8}  "
-          f"{'rmse':>8}  {'rmse_seuil':>11}  {'médiane':>8}")
-    print("-" * (largeur + 48))
+    entete = (f"{'keypoint'.ljust(largeur)}  {'n':>5}  {'%>seuil':>8}  "
+              f"{'médiane':>8}  {'méd.seuil':>9}  {'%>25px':>7}  {'rmse':>7}")
+    print(entete)
+    print("-" * len(entete))
     for _, r in df.iterrows():
         if r["keypoint"] == "TOTAL":
-            print("-" * (largeur + 48))
+            print("-" * len(entete))
         print(f"{str(r['keypoint']).ljust(largeur)}  {int(r['n']):>5}  "
-              f"{r['pct_au_dessus_seuil']:>7.1f}%  {r['rmse']:>8.1f}  "
-              f"{r['rmse_seuil']:>11.2f}  {r['mediane']:>8.2f}")
+              f"{r['pct_au_dessus_seuil']:>7.1f}%  {r['mediane']:>8.2f}  "
+              f"{r['mediane_seuil']:>9.2f}  {r['pct_grossieres']:>6.1f}%  "
+              f"{r['rmse']:>7.1f}")
+    print()
+    print("médiane   : erreur typique (px), insensible aux frames aberrantes")
+    print("méd.seuil : idem, sur les seules prédictions au-dessus du seuil")
+    print("%>25px    : part des prédictions franchement ailleurs")
+    print("rmse      : dominée par ces quelques frames — à lire en dernier")
 
     # Lecture assistée : on ne commente que ce qui mérite une action.
     print()
     corps = df[df["keypoint"] != "TOTAL"]
+    systematiques = corps[corps["mediane_seuil"] > 10]
+    ponctuels = corps[(corps["pct_grossieres"] > 3)
+                      & ~corps["keypoint"].isin(systematiques["keypoint"])]
     peu_visibles = corps[corps["pct_au_dessus_seuil"] < 50]
-    faux_confiants = corps[corps["rmse_seuil"] > 15]
-    if len(faux_confiants):
-        noms = ", ".join(faux_confiants["keypoint"])
-        print(f"⚠  Confiant mais faux : {noms}")
-        print("   Le cutoff ne rattrapera PAS ces erreurs. Vérifie la "
-              "cohérence des labels sur ces points (inversions L/R),")
-        print("   ou ajoute des frames dans les situations où ils échouent "
-              "(étape B.6).")
+
+    if len(systematiques):
+        print("❌ Faux de façon systématique (même confiant) : "
+              + ", ".join(systematiques["keypoint"]))
+        print("   La majorité des prédictions confiantes tombe à côté. Le "
+              "cutoff ne rattrapera rien.")
+    if len(ponctuels):
+        print("⚠  Justes en général, mais grossièrement faux sur quelques "
+              "frames : " + ", ".join(
+                  f"{r.keypoint} ({r.pct_grossieres:.0f} %)"
+                  for r in ponctuels.itertuples()))
     if len(peu_visibles):
-        noms = ", ".join(f"{r.keypoint} ({r.pct_au_dessus_seuil:.0f} %)"
-                          for r in peu_visibles.itertuples())
-        print(f"ℹ  Souvent sous le seuil : {noms}")
-        print("   Attendu en bottom-view pour les pattes (occlusions). Ces "
-              "points seront interpolés par l'étape 6b ;")
-        print("   sous ~20 %, envisage de les retirer des features VAME "
-              "(filter_keypoints.py).")
-    if not len(faux_confiants) and not len(peu_visibles):
-        print("✅ Aucun keypoint problématique : tous sont majoritairement "
-              "au-dessus du seuil et précis quand ils le sont.")
+        print("ℹ  Souvent sous le seuil : " + ", ".join(
+            f"{r.keypoint} ({r.pct_au_dessus_seuil:.0f} %)"
+            for r in peu_visibles.itertuples()))
+        print("   Si leur médiane reste basse, la position est bonne et c'est "
+              "seulement la confiance\n   qui est faible : baisser le seuil "
+              "en aval les récupère.")
+
+    diag = diagnostic_confusions(df_gt, df_pred)
+    confus = [p for p in diag["paires"] if p["pct_sur_jumeau"] > 30]
+    if confus:
+        print()
+        print("❌ Confusion gauche/droite :")
+        for p in confus:
+            print(f"   {p['keypoint']} est prédit sur son symétrique dans "
+                  f"{p['pct_sur_jumeau']:.0f} % des frames "
+                  f"(médiane {p['mediane_vers_jumeau']:.1f} px de lui).")
+        print("   Le réseau trouve UNE patte et y pose les deux marqueurs.")
+    ret = diag["retournement"]
+    if ret and ret["n"]:
+        print()
+        print(f"⚠  Retournement tête/queue : {ret['n']} frame(s) sur "
+              f"{ret['total']} — le nez prédit plus près de la base de la "
+              f"queue que du nez.")
+        print("   Ce sont elles qui gonflent la RMSE de nose, chin et "
+              "tail_tip. À regarder :")
+        for f in ret["frames"][:8]:
+            print(f"     · {f}")
+        if ret["n"] > 8:
+            print(f"     … et {ret['n'] - 8} autre(s)")
+
+    if not (len(systematiques) or len(ponctuels) or confus
+            or (ret and ret["n"])):
+        print("✅ Aucun keypoint problématique.")
 
     if args.out:
         df.to_csv(args.out, index=False)
