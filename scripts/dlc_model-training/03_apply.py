@@ -27,6 +27,17 @@ from _load_config import add_config_dir_arg, completer_videos, load_config  # no
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_config_dir_arg(parser)
+    parser.add_argument(
+        "--no-labeled-video", action="store_true",
+        help="N'écrit pas de vidéo annotée : seulement les prédictions .h5 "
+             "et .csv. Plus rapide et bien plus léger. Pour en produire une "
+             "seule ensuite : create_labeled_video.py --video <chemin>.",
+    )
+    parser.add_argument(
+        "--videos", nargs="+", default=None, metavar="CHEMIN",
+        help="Analyse uniquement ces vidéos, au lieu de toutes celles "
+             "déclarées dans _config.py.",
+    )
     args = parser.parse_args()
     load_config(args)
 
@@ -36,7 +47,9 @@ def main() -> None:
         PROJECT_DIR, RESULTS_DIR, VIDEOS_TO_ANALYZE,
     )
 
-    videos = completer_videos(VIDEOS_TO_ANALYZE, "VIDEOS_TO_ANALYZE")
+    videos = ([Path(v) for v in args.videos] if args.videos
+              else completer_videos(VIDEOS_TO_ANALYZE, "VIDEOS_TO_ANALYZE"))
+    faire_video = MAKE_LABELED_VIDEO and not args.no_labeled_video
     if not videos:
         print("⚠ Aucune vidéo à analyser : VIDEOS_TO_ANALYZE est vide dans\n"
               "   _config.py, et aucune autre liste n'en déclare.")
@@ -57,7 +70,7 @@ def main() -> None:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Résultats dans : {RESULTS_DIR}")
     print(f"  pcutoff vidéo annotée : {LABELED_VIDEO_PCUTOFF}")
-    print(f"  vidéo annotée         : {'oui' if MAKE_LABELED_VIDEO else 'non'}\n")
+    print(f"  vidéo annotée         : {'oui' if faire_video else 'non'}\n")
 
     for video in videos:
         if not video.exists():
@@ -105,7 +118,7 @@ def main() -> None:
         )
 
         # Vidéo annotée pour inspection visuelle (optionnelle)
-        if MAKE_LABELED_VIDEO:
+        if faire_video:
             dlc.create_labeled_video(
                 CONFIG,
                 [str(video)],
