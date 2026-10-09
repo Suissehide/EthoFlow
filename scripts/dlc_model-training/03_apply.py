@@ -99,9 +99,14 @@ def main() -> None:
                   f"modèle actuel — supprimées pour forcer le recalcul :")
             for p in perimes:
                 print(f"       · {p.name}")
-                p.unlink()
-                for jumeau in out_dir.glob(p.stem + ".*"):
-                    jumeau.unlink()
+                # Tout ce qui porte le nom du snapshot périmé part avec lui :
+                # .h5/.csv, mais aussi les intermédiaires DLC
+                # (_full.pickle, _meta.pickle) et les vidéos annotées
+                # (_pXX_labeled.mp4) — sinon ils s'accumulent et se
+                # confondent avec ceux du modèle courant.
+                for jumeau in out_dir.glob(p.stem + "*"):
+                    if jumeau.is_file():
+                        jumeau.unlink()
 
         # Inférence : produit le .h5 et le .csv dans out_dir
         # snapshot_index=-1 force le dernier snapshot par numéro d'epoch
