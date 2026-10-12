@@ -304,7 +304,8 @@ TRAINING_VIDEOS_FOR_REFINE: list[Path] = [
 OUTLIER_ALGORITHM = "uncertain"
 
 # Seuil de "jump" en pixels au-dessus duquel un mouvement inter-frame
-# est considéré anormal. Sur 1024×1080, 50 px est un compromis.
+# est considéré anormal. Pour une souris de ~300 px (vidéos 2048×2048),
+# 50 px ≈ 1/6 du corps en une frame : un compromis.
 # N'a d'effet QUE si OUTLIER_ALGORITHM == "jump".
 OUTLIER_EPSILON = 50
 

@@ -519,7 +519,7 @@ def main() -> None:
     print("✅ Évaluation terminée.\n")
 
     print(
-        "Cible : test rmse_pcutoff < 8 px (sur 1024×1080, ~0.8 %).\n"
+        "Cible : test rmse_pcutoff < 8 px (≈ 2-3 % de la longueur du corps).\n"
         "Si > 15 px, soit labellise plus de frames, soit revérifie la\n"
         "cohérence des annotations (utilise `dlc.check_labels(CONFIG)`)."
     )

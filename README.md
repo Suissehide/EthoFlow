@@ -1263,7 +1263,7 @@ Surveille `GPU: xxxx/16302.6 MiB` au premier epoch (~9 800 avec ces trois option
 
 **Objectif à valider après B.4** — regarde la RMSE de test que DLC imprime :
 
-- **RMSE_pcutoff < 8 px** sur 1024×1080 (~0.8 % de la largeur) : c'est bon, passe à B.5
+- **RMSE_pcutoff < 8 px** (vidéos bottom-view en 2048×2048, souris de ~300 px nez→base de queue : 8 px ≈ 2,7 % du corps) : c'est bon, passe à B.5
 - **RMSE_pcutoff 8-15 px** : marge d'amélioration, mais le modèle est déjà utilisable pour un premier QC
 - **RMSE_pcutoff > 15 px** : problème. Soit tu manques de frames sur des situations spécifiques (cf. B.6 outliers), soit tes labels sont incohérents (relance B.3.4 audit L/R)
 
