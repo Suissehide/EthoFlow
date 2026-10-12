@@ -526,7 +526,8 @@ def check_model_is_trained(dlc_config_path: str) -> None:
 
 def run_custom(project: Path, session_id: str,
                 no_prompt: bool = False,
-                batch_size: int | None = None) -> None:
+                batch_size: int | None = None,
+                fp16: bool = False) -> None:
     try:
         import deeplabcut
     except ImportError:
@@ -554,12 +555,21 @@ def run_custom(project: Path, session_id: str,
     # de quelques dizaines de minutes.
     if batch_size is not None:
         print(f"Batch d'inférence : {batch_size}")
+    # Demi-précision : par défaut DLC calcule en float32, ce qui laisse
+    # inutilisés les Tensor Cores des GPU récentes. torch.autocast passe
+    # convolutions et produits matriciels en float16 — typiquement ×2 ou
+    # plus en vitesse. Écart sur les coordonnées : sous le pixel, très en
+    # dessous de la précision du modèle (2-3 px).
+    inference_cfg = {"autocast": {"enabled": True}} if fp16 else None
+    if fp16:
+        print("Inférence en demi-précision (autocast float16)")
     deeplabcut.analyze_videos(
         config=dlc_project_config,
         videos=[str(source)],
         save_as_csv=True,
         destfolder=str(output_dir),
         batch_size=batch_size,
+        inference_cfg=inference_cfg,
     )
     print(f"\n✅ Inférence custom terminée : {output_dir}")
 
@@ -597,6 +607,10 @@ if __name__ == "__main__":
                              "Défaut : batch_size du config.yaml du modèle, ou 1 "
                              "s'il est absent — très lent. 16 est un bon départ "
                              "sur une GPU 16 Go ; baisse si CUDA out of memory.")
+    parser.add_argument("--fp16", action="store_true",
+                        help="(mode custom) inférence en demi-précision : utilise "
+                             "les Tensor Cores, typiquement 2x plus rapide. "
+                             "Écart sur les positions sous le pixel.")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="(mode single-animal) dossier de sortie alternatif "
                              "(défaut: <project>/data/dlc-output/). Utile pour comparer "
@@ -658,7 +672,8 @@ if __name__ == "__main__":
             else:
                 run_custom(project, session_id,
                             no_prompt=getattr(args, "no_prompt", False),
-                            batch_size=args.batch_size)
+                            batch_size=args.batch_size,
+                            fp16=args.fp16)
             n_ok += 1
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ {session_id} : {e}", file=sys.stderr)
