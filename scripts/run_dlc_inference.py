@@ -525,7 +525,8 @@ def check_model_is_trained(dlc_config_path: str) -> None:
 
 
 def run_custom(project: Path, session_id: str,
-                no_prompt: bool = False) -> None:
+                no_prompt: bool = False,
+                batch_size: int | None = None) -> None:
     try:
         import deeplabcut
     except ImportError:
@@ -547,11 +548,18 @@ def run_custom(project: Path, session_id: str,
     print(f"Modèle DLC custom : {dlc_project_config}")
     print(f"Vidéo : {source}")
 
+    # Sans batch_size, DLC lit `batch_size` dans le config.yaml du modèle et
+    # retombe sur 1 s'il est absent : une frame à la fois, la GPU attend
+    # en permanence le transfert suivant. 2 h par vidéo de 20 min au lieu
+    # de quelques dizaines de minutes.
+    if batch_size is not None:
+        print(f"Batch d'inférence : {batch_size}")
     deeplabcut.analyze_videos(
         config=dlc_project_config,
         videos=[str(source)],
         save_as_csv=True,
         destfolder=str(output_dir),
+        batch_size=batch_size,
     )
     print(f"\n✅ Inférence custom terminée : {output_dir}")
 
@@ -584,6 +592,11 @@ if __name__ == "__main__":
                         help="(mode single-animal) seuil de likelihood pour le nettoyage")
     parser.add_argument("--interp-limit", type=int, default=25,
                         help="(mode single-animal) taille max d'un trou interpolable, en frames")
+    parser.add_argument("--batch-size", type=int, default=None, metavar="N",
+                        help="(mode custom) frames traitées ensemble par la GPU. "
+                             "Défaut : batch_size du config.yaml du modèle, ou 1 "
+                             "s'il est absent — très lent. 16 est un bon départ "
+                             "sur une GPU 16 Go ; baisse si CUDA out of memory.")
     parser.add_argument("--output-dir", type=Path, default=None,
                         help="(mode single-animal) dossier de sortie alternatif "
                              "(défaut: <project>/data/dlc-output/). Utile pour comparer "
@@ -644,7 +657,8 @@ if __name__ == "__main__":
                 )
             else:
                 run_custom(project, session_id,
-                            no_prompt=getattr(args, "no_prompt", False))
+                            no_prompt=getattr(args, "no_prompt", False),
+                            batch_size=args.batch_size)
             n_ok += 1
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ {session_id} : {e}", file=sys.stderr)
