@@ -342,3 +342,100 @@ def test_start_cree_ethoflow_jobs_si_absent(project):
     assert (project / ".ethoflow" / "jobs").is_dir()
     job = _attendre_fin(project)
     assert job.state == "succeeded"
+
+
+# ------------------------------------------------- progression d'un job
+
+_BARRE = "\r {p}%|████      | {a}/30000 [02:13<{eta}, 101.2it/s]"
+
+
+def test_parse_progress_sessions_et_tqdm():
+    log = ("\n" + "=" * 60 + "\n[1/4] BV-970\n" + "=" * 60 + "\n"
+           + _BARRE.format(p=100, a=30000, eta="00:00") + "\n"
+           + "[2/4] BV-971\n"
+           + "".join(_BARRE.format(p=p, a=300 * p, eta="02:40") for p in (10, 30, 50)))
+    prog = R.parse_progress(log)
+    assert prog["valeur"] == pytest.approx((1 + 0.5) / 4)
+    assert prog["texte"] == "Session 2/4 · BV-971 — 50 % (15000/30000), reste 02:40"
+
+
+def test_parse_progress_barre_de_la_session_precedente_ignoree():
+    log = "[1/2] A\n" + _BARRE.format(p=100, a=30000, eta="00:00") + "\n[2/2] B\n"
+    assert R.parse_progress(log) == {"valeur": 0.5, "texte": "Session 2/2 · B"}
+
+
+def test_parse_progress_tqdm_seul_et_rien():
+    prog = R.parse_progress(_BARRE.format(p=40, a=12000, eta="?"))
+    assert prog["valeur"] == 0.4 and "reste" not in prog["texte"]
+    assert R.parse_progress("Chargement du modèle...\nOK\n") is None
+
+
+def test_read_log_garde_l_etat_final_des_lignes_tqdm(project, monkeypatch):
+    job_id = "j1"
+    chemin = R._job_log(project, job_id)
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    barres = "".join(_BARRE.format(p=p, a=300 * p, eta="01:00") for p in range(1, 100))
+    chemin.write_text("début\n" + barres + "\nfin\n", encoding="utf-8")
+
+    assert R.read_log(project, job_id, tail=3).splitlines() == [
+        "début", _BARRE.format(p=99, a=29700, eta="01:00")[1:], "fin"]
+    # Fenêtre de fin de fichier plus petite que le log : on lit quand même
+    # la fin, sans la première ligne coupée.
+    monkeypatch.setattr(R, "_FENETRE_OCTETS", 200)
+    assert R.read_log(project, job_id, tail=1) == "fin"
+
+
+def test_progress_lue_pendant_un_vrai_job(project):
+    """tqdm écrit sur stderr avec \\r, comme DLC : la progression doit se
+    lire pendant que le job tourne, pas seulement à la fin."""
+    code = (
+        "import sys, time\n"
+        "print('[1/2] A', flush=True)\n"
+        "print('[2/2] B', flush=True)\n"
+        "for p in (25, 75):\n"
+        "    sys.stderr.write(f'\\r {p}%|##  | {p}/100 [00:01<00:03, 9it/s]'); sys.stderr.flush()\n"
+        "    time.sleep(0.4)\n"
+        "time.sleep(5)\n"
+    )
+    R.start(project, PL.Command(env="ethoflow", script="__test__",
+                                args=["python", "-u", "-c", code], label="tqdm"))
+    job = R.current(project)
+    fin = time.time() + 10
+    vu = None
+    while time.time() < fin:
+        vu = R.progress(project, job.job_id)
+        if vu and vu["valeur"] == pytest.approx(0.875):
+            break
+        time.sleep(0.05)
+    assert R.current(project).state == "running"
+    assert vu["texte"] == "Session 2/2 · B — 75 % (75/100), reste 00:03"
+    R.cancel(project, job.job_id)
+    _attendre_fin(project)
+
+
+def test_panneau_affiche_la_barre(project, monkeypatch, tmp_path):
+    from streamlit.testing.v1 import AppTest
+    from lib import project as P
+
+    code = ("import sys, time\nprint('[3/4] S3', flush=True)\n"
+            "sys.stderr.write('\\r 50%|##  | 5/10 [00:01<00:01, 9it/s]'); sys.stderr.flush()\n"
+            "time.sleep(10)\n")
+    R.start(project, PL.Command(env="ethoflow", script="__test__",
+                                args=["python", "-u", "-c", code], label="faux"))
+    job = R.current(project)
+    fin = time.time() + 10
+    while time.time() < fin and not R.progress(project, job.job_id):
+        time.sleep(0.05)
+
+    monkeypatch.setattr(P, "PREFS_PATH", tmp_path / "app_prefs.yaml")
+    P.save_prefs({"projects_root": str(project.parent), "models_root": str(tmp_path)})
+    at = AppTest.from_file(str(P.ROOT / "streamlit_app" / "app.py"), default_timeout=10)
+    at.session_state["current_project_path"] = str(project)
+    at.run()
+    at.button(key="nav_pose").click().run()
+    barres = at.get("progress")
+    R.cancel(project, job.job_id)
+    _attendre_fin(project)
+    assert not at.exception, at.exception
+    assert [b.proto.value for b in barres] == [62]       # (2 + 0.5) / 4
+    assert "Session 3/4 · S3 — 50 %" in barres[0].proto.text

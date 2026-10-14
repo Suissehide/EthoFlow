@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -212,14 +213,86 @@ def history(project: Path, limit: int = 20) -> list[Job]:
     return jobs[:limit]
 
 
+# ponytail: fenêtre fixe en fin de fichier, relue toutes les 2 s par le
+# panneau du job. Une barre tqdm réécrit sa ligne ~10 fois/s (≈ 300 Ko
+# pour une vidéo DLC) : au-delà d'1 Mo de \r, le repère `[i/N]` de session
+# peut sortir de la fenêtre — la progression retombe alors sur tqdm seul.
+_FENETRE_OCTETS = 1024 * 1024
+
+
+def _fin_du_log(path: Path) -> str:
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        taille = f.tell()
+        f.seek(max(0, taille - _FENETRE_OCTETS))
+        texte = f.read().decode("utf-8", errors="replace")
+    # Première ligne probablement coupée en plein milieu : on l'écarte.
+    return texte.split("\n", 1)[-1] if taille > _FENETRE_OCTETS else texte
+
+
+def _lignes_finales(texte: str) -> list[str]:
+    """Une ligne par `\n`, dans son état final : tqdm réécrit sa ligne avec
+    `\r`, et `splitlines()` en faisait autant de lignes que de mises à jour
+    — les 30 dernières n'étaient plus qu'une barre de progression."""
+    lignes = [ligne.rstrip("\r").rsplit("\r", 1)[-1] for ligne in texte.split("\n")]
+    if lignes and lignes[-1] == "":
+        lignes.pop()
+    return lignes
+
+
 def read_log(project: Path, job_id: str, tail: int | None = None) -> str:
     path = _job_log(project, job_id)
     if not path.exists():
         return ""
-    texte = path.read_text(encoding="utf-8", errors="replace")
     if tail is None:
-        return texte
-    return "\n".join(texte.splitlines()[-tail:])
+        return "\n".join(_lignes_finales(path.read_text(encoding="utf-8", errors="replace")))
+    return "\n".join(_lignes_finales(_fin_du_log(path))[-tail:])
+
+
+# `[3/15] BV-970` : boucle sur les sessions (run_dlc_inference,
+# prepare_vame_input_custom, crop_arenes, assign_arenas...).
+_SESSION = re.compile(r"^\[(\d+)/(\d+)\]\s*(.*)$")
+# ` 45%|████▌     | 13500/30000 [02:13<02:40, 101.2it/s]` : barre tqdm.
+_TQDM = re.compile(r"(\d{1,3})%\|[^|]*\|\s*([\d.]+[kMG]?)/([\d.]+[kMG]?)\s*\[[^<\]]*<([^,\]]*)")
+
+
+def parse_progress(texte: str) -> dict | None:
+    """`{valeur, texte}` (valeur dans [0, 1]) d'après la fin d'un log, ou None.
+
+    Avec un repère de session : (sessions finies + fraction tqdm de la
+    session en cours) / N. Une barre tqdm d'une session précédente ne
+    compte jamais pour la suivante.
+    """
+    session = tqdm = None
+    for segment in re.split(r"[\r\n]", texte):
+        m = _SESSION.match(segment.strip())
+        if m:
+            session, tqdm = m, None
+            continue
+        t = _TQDM.search(segment)
+        if t:
+            tqdm = t
+    if session is None and tqdm is None:
+        return None
+    fraction = int(tqdm.group(1)) / 100 if tqdm else 0.0
+    morceaux = []
+    if session:
+        i, n = int(session.group(1)), int(session.group(2))
+        valeur = (i - 1 + fraction) / max(n, 1)
+        morceaux.append(f"Session {i}/{n}" + (f" · {session.group(3).strip()}"
+                                               if session.group(3).strip() else ""))
+    else:
+        valeur = fraction
+    if tqdm:
+        reste = tqdm.group(4).strip()
+        morceaux.append(f"{tqdm.group(1)} % ({tqdm.group(2)}/{tqdm.group(3)})"
+                        + (f", reste {reste}" if reste and "?" not in reste else ""))
+    return {"valeur": min(max(valeur, 0.0), 1.0), "texte": " — ".join(morceaux)}
+
+
+def progress(project: Path, job_id: str) -> dict | None:
+    path = _job_log(project, job_id)
+    return parse_progress(_fin_du_log(path)) if path.exists() else None
 
 
 # ------------------------------------------------------ spécifique plateforme

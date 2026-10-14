@@ -54,6 +54,9 @@ def _log_en_direct(projet: Path, job_id: str, lignes: int) -> None:
     rerun de fragment) pour que le reste de la page — sections
     « artefacts produits », etc. — se mette à jour en conséquence.
     """
+    prog = runner.progress(projet, job_id)
+    if prog:
+        st.progress(prog["valeur"], text=prog["texte"])
     st.code(runner.read_log(projet, job_id, tail=lignes) or "(pas encore de sortie)",
             language="text")
     job = runner.current(projet)
