@@ -62,5 +62,7 @@ if not defined STREAMLIT (
     exit /b 1
 )
 
+rem Depuis la racine du depot : Streamlit y lit .streamlit\config.toml (theme).
+cd /d "%ICI%"
 "%STREAMLIT%" run "%APP%" %*
 exit /b %ERRORLEVEL%

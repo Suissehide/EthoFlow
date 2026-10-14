@@ -30,7 +30,7 @@ from lib.config import (
     projects_root,
     save_prefs,
 )
-from lib.icons import ACCENT, lucide_html, lucide_title
+from lib.icons import lucide_html, lucide_title
 
 import streamlit as st
 
@@ -82,7 +82,7 @@ def _section_racines() -> None:
     }
     for label, chemin in racines.items():
         if chemin.exists():
-            icone = lucide_html("circle-check", 14, ACCENT)
+            icone = lucide_html("circle-check", 14, "#2f9567")
             st.markdown(f"{icone} **{label}** — `{chemin}`", unsafe_allow_html=True)
         else:
             icone = lucide_html("circle-x", 14, "#ef4444")
@@ -98,7 +98,7 @@ def _section_racines() -> None:
 
 def _affiche_resultat(env: str, resultat: "EC.ProbeResult") -> None:
     if resultat.ok:
-        icone = lucide_html("circle-check", 16, ACCENT)
+        icone = lucide_html("circle-check", 16, "#2f9567")
         st.markdown(f"{icone} **`{env}`** — import OK", unsafe_allow_html=True)
     else:
         icone = lucide_html("circle-x", 16, "#ef4444")

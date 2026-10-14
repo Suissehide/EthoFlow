@@ -1,0 +1,161 @@
+/* EthoFlow — refonte 1c (design_handoff_ethoflow_ui).
+   Couleurs de base dans .streamlit/config.toml ; ici, ce que le thème
+   Streamlit ne sait pas faire : rail d'icônes, colonne Activité fixe,
+   cartes, labels mono, journal sombre. Pas d'ombres, bordures 1 px.
+
+   Code d'état unique : vert terminé #2f9567, ambre en cours #c27a12,
+   rouge échec #c9473f, gris à faire #e4e2db. */
+
+/* ---------- Page ---------- */
+header[data-testid="stHeader"] { background: transparent; }
+.stMainBlockContainer { padding: 36px 40px 64px; max-width: none; }
+/* La colonne Activité est fixe à droite : le contenu s'arrête avant. */
+.stApp:has(.st-key-ef_activite) .stMainBlockContainer { padding-right: calc(340px + 40px); }
+
+h1 { font-size: 30px !important; font-weight: 600 !important; letter-spacing: -0.02em; }
+h2, h3 { font-weight: 600 !important; letter-spacing: -0.01em; }
+
+.ef-mono { font-family: 'IBM Plex Mono', monospace; }
+.ef-label {
+  font: 500 12px 'IBM Plex Mono', monospace; letter-spacing: .06em;
+  text-transform: uppercase; color: #8a867e; margin: 0;
+}
+.ef-muted { color: #6b6862; }
+.ef-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* Cartes : conteneurs Streamlit à clé `carte_*` (ils peuvent contenir des
+   widgets), ou blocs HTML `.ef-card`. */
+[class*="st-key-carte_"], .ef-card {
+  background: #fff; border: 1px solid #e0ddd5; border-radius: 10px;
+}
+[class*="st-key-carte_"] { padding: 16px 20px; }
+
+/* Boutons secondaires : blanc, bordure forte. */
+.stButton button[kind="secondary"] { background: #fff; border-color: #d9d6ce; }
+.stButton button[kind="secondary"]:hover { border-color: #4f46c8; color: #4f46c8; }
+.stButton button:disabled { background: #d9d6ce; color: #8a867e; border-color: #d9d6ce; }
+
+/* Journal : bloc sombre, mono 11.5 px. */
+[data-testid="stCode"] pre, [data-testid="stCode"] code {
+  background: #1c1b19 !important; color: #d8d5cc !important;
+  font: 400 11.5px/1.6 'IBM Plex Mono', monospace !important;
+}
+
+/* ---------- Rail (sidebar Streamlit, 72 px) ---------- */
+section[data-testid="stSidebar"] {
+  width: 72px !important; min-width: 72px !important; max-width: 72px !important;
+}
+[data-testid="stSidebarHeader"], [data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"] { display: none !important; }
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
+  padding: 20px 0 16px !important; height: 100vh;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div,
+section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {
+  height: 100%;
+}
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+  align-items: center; gap: 6px;
+}
+.ef-rail-marque { font: 700 15px 'IBM Plex Sans', sans-serif; color: #fff; margin: 0 0 18px; text-align: center; }
+.st-key-rail_bas { margin-top: auto; }
+.st-key-rail_outils { border-top: 1px solid #34322e; padding-top: 10px; }
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button {
+  width: 44px !important; min-width: 44px; height: 44px; min-height: 44px; padding: 0;
+  border: none; border-radius: 8px; background: transparent;
+  font-size: 0; display: flex; align-items: center; justify-content: center;
+}
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button p { display: none; }
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button:hover { background: #2a2825; }
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
+  content: ""; width: 19px; height: 19px; flex-shrink: 0;
+  background: var(--ef-icone) no-repeat center / contain;
+}
+
+/* ---------- Colonne Activité (fixe, 340 px) ---------- */
+.st-key-ef_activite {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 340px; z-index: 99;
+  background: #fff; border-left: 1px solid #e0ddd5;
+  padding: 56px 24px 24px; overflow-y: auto; gap: 18px;
+}
+.ef-activite-titre { font: 600 15px 'IBM Plex Sans', sans-serif; margin: 0; }
+.st-key-carte_job {
+  background: #fdf8ef !important; border-color: #ecd9b5 !important;
+  border-radius: 8px !important; padding: 14px !important;
+}
+.ef-barre { height: 5px; background: #f1e6d2; border-radius: 3px; overflow: hidden; }
+.ef-barre > div { height: 100%; background: #c27a12; border-radius: 3px; }
+.ef-job-pied { display: flex; justify-content: space-between; font: 400 12px 'IBM Plex Mono', monospace; color: #6b6862; }
+.ef-historique { display: flex; flex-direction: column; gap: 14px; }
+.ef-historique-ligne { display: grid; grid-template-columns: 10px 1fr; gap: 10px; }
+.ef-historique-ligne .ef-dot { margin-top: 6px; }
+.ef-historique-ligne b { font: 500 13px 'IBM Plex Sans', sans-serif; display: block; }
+.ef-historique-ligne span { font: 400 12px 'IBM Plex Sans', sans-serif; color: #8a867e; }
+.ef-ensuite { border-top: 1px solid #ecebe6; padding-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+.ef-ensuite b { font: 600 14px 'IBM Plex Sans', sans-serif; }
+.ef-ensuite span { font: 400 13px 'IBM Plex Sans', sans-serif; color: #6b6862; }
+/* Bouton Annuler : lien rouge. */
+.st-key-ef_annuler button {
+  background: transparent !important; border: none !important; padding: 0 !important;
+  min-height: 0 !important; color: #c9473f !important; font-size: 12px !important;
+}
+
+/* ---------- Tableau de bord ---------- */
+/* Nom du projet = déclencheur du menu des projets (titre 30 px + chevron). */
+.st-key-ef_projet_menu button {
+  font: 600 30px 'IBM Plex Sans', sans-serif !important; letter-spacing: -0.02em;
+  padding: 0 !important; color: #1c1b19 !important; min-height: 0 !important;
+}
+.st-key-ef_projet_menu button p { font-size: 30px !important; font-weight: 600 !important; }
+.st-key-btn_ouvrir_dossier button {
+  width: 38px !important; min-width: 38px; height: 38px; min-height: 38px; padding: 0; font-size: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.st-key-btn_ouvrir_dossier button p { display: none; }
+.st-key-btn_ouvrir_dossier button::before {
+  content: ""; width: 18px; height: 18px; flex-shrink: 0;
+  background: var(--ef-icone-dossier) no-repeat center / contain;
+}
+
+/* Tuiles d'étape : HTML + bouton invisible étendu sur toute la tuile. */
+[class*="st-key-tuile_"]:not([class*="st-key-tuile_btn_"]) { position: relative; }
+[class*="st-key-tuile_btn_"] { position: absolute !important; inset: 0; z-index: 2; }
+[class*="st-key-tuile_btn_"] button {
+  width: 100%; height: 100%; opacity: 0; cursor: pointer; border: none;
+}
+.ef-tuile {
+  background: #fff; border: 1px solid #e0ddd5; border-radius: 8px; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px; min-height: 128px;
+}
+[class*="st-key-tuile_"]:hover .ef-tuile { border-color: #b9b5ac; }
+.ef-tuile-run { background: #fdf8ef; border-color: #ecd9b5; }
+.ef-tuile-todo { border-color: #4f46c8; }
+.ef-tuile-locked { opacity: .6; }
+.ef-tuile-haut { display: flex; justify-content: space-between; align-items: center; }
+.ef-tuile-haut span { font: 500 11px 'IBM Plex Mono', monospace; color: #8a867e; }
+.ef-tuile b { font: 600 13px/1.25 'IBM Plex Sans', sans-serif; min-height: 32px; }
+.ef-tuile-barre { height: 3px; background: #ecebe6; border-radius: 2px; overflow: hidden; }
+.ef-tuile-barre > div { height: 100%; border-radius: 2px; }
+.ef-tuile-statut { font: 400 12px 'IBM Plex Mono', monospace; }
+
+/* Carte « étape en cours / prochaine étape ». */
+.st-key-carte_etape { padding: 16px 20px !important; margin-top: 8px; }
+.ef-carte-titre { font: 600 17px 'IBM Plex Sans', sans-serif; margin: 2px 0 4px; }
+.ef-frise { display: grid; gap: 6px; margin-top: 8px; }
+.ef-frise > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ef-frise span { font: 400 10.5px 'IBM Plex Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ef-segment { height: 36px; border-radius: 4px; }
+.ef-sessions { display: flex; flex-direction: column; margin-top: 8px; }
+.ef-session {
+  display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; align-items: center;
+  padding: 4px 0; border-bottom: 1px solid #f1f0ec; font-size: 13px;
+}
+.ef-session .ef-muted { font-size: 12px; color: #8a867e; }
+
+/* Streamlit impose sa taille de police aux <p> Markdown : nos classes gagnent. */
+[data-testid="stMarkdownContainer"] p.ef-label { font-size: 12px !important; line-height: 1.4; }
+[data-testid="stMarkdownContainer"] p.ef-carte-titre { font-size: 17px !important; }
+[data-testid="stMarkdownContainer"] p.ef-activite-titre { font-size: 15px !important; }
+[data-testid="stMarkdownContainer"] .ef-tuile b { font-size: 13px; }
+/* Menu des projets (popover du titre) : assez large pour les chemins. */
+[data-testid="stPopoverBody"] { width: 600px; max-width: 90vw; }

@@ -361,7 +361,9 @@ def test_parse_progress_sessions_et_tqdm():
 
 def test_parse_progress_barre_de_la_session_precedente_ignoree():
     log = "[1/2] A\n" + _BARRE.format(p=100, a=30000, eta="00:00") + "\n[2/2] B\n"
-    assert R.parse_progress(log) == {"valeur": 0.5, "texte": "Session 2/2 · B"}
+    prog = R.parse_progress(log)
+    assert (prog["valeur"], prog["texte"]) == (0.5, "Session 2/2 · B")
+    assert (prog["i"], prog["n"], prog["session"], prog["pct"]) == (2, 2, "B", None)
 
 
 def test_parse_progress_tqdm_seul_et_rien():

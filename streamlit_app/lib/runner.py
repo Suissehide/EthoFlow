@@ -257,7 +257,10 @@ _TQDM = re.compile(r"(\d{1,3})%\|[^|]*\|\s*([\d.]+[kMG]?)/([\d.]+[kMG]?)\s*\[[^<
 
 
 def parse_progress(texte: str) -> dict | None:
-    """`{valeur, texte}` (valeur dans [0, 1]) d'après la fin d'un log, ou None.
+    """`{valeur, texte, i, n, session, pct}` d'après la fin d'un log, ou None.
+
+    `valeur` dans [0, 1] ; `i`/`n`/`session` (repère `[i/N]`) et `pct`
+    (barre tqdm) valent None quand le log ne les donne pas.
 
     Avec un repère de session : (sessions finies + fraction tqdm de la
     session en cours) / N. Une barre tqdm d'une session précédente ne
@@ -287,7 +290,11 @@ def parse_progress(texte: str) -> dict | None:
         reste = tqdm.group(4).strip()
         morceaux.append(f"{tqdm.group(1)} % ({tqdm.group(2)}/{tqdm.group(3)})"
                         + (f", reste {reste}" if reste and "?" not in reste else ""))
-    return {"valeur": min(max(valeur, 0.0), 1.0), "texte": " — ".join(morceaux)}
+    return {"valeur": min(max(valeur, 0.0), 1.0), "texte": " — ".join(morceaux),
+            "i": int(session.group(1)) if session else None,
+            "n": int(session.group(2)) if session else None,
+            "session": session.group(3).strip() or None if session else None,
+            "pct": int(tqdm.group(1)) if tqdm else None}
 
 
 def progress(project: Path, job_id: str) -> dict | None:

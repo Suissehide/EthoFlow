@@ -8,9 +8,9 @@ from __future__ import annotations
 import base64
 
 # Couleur accent globale de l'app (emerald-500)
-ACCENT = "#10b981"
-ACCENT_BG = "rgba(16,185,129,0.10)"
-ACCENT_HEX = "10b981"  # sans #, pour les SVG
+ACCENT = "#4f46c8"
+ACCENT_BG = "#eceafb"
+ACCENT_HEX = "4f46c8"  # sans #, pour les SVG
 
 # Palette catégorielle de référence (skill dataviz), validée contre les
 # fonds Streamlit clair (#ffffff) et sombre (#0e1117) : ordre fixe, jamais

@@ -196,20 +196,3 @@ def test_list_qc_trajectories(project, session_factory, tmp_path):
 
 def test_list_qc_trajectories_dossier_absent(project):
     assert S.list_qc_trajectories(project) == {}
-
-
-def test_avancement_etape_en_cours(project, session_factory):
-    assert [e["etape"] for e in S.avancement(project, multi=False) if e["en_cours"]] == ["Données"]
-
-    session_factory("S1")
-    session_factory("S2")
-    dlc = project / "data" / "dlc-output" / "S1"
-    dlc.mkdir(parents=True)
-    (dlc / "S1DLC.h5").write_bytes(b"\x00")
-
-    etapes = {e["etape"]: e for e in S.avancement(project, multi=False)}
-    assert "Split arènes" not in etapes
-    assert (etapes["Vidéos"]["fait"], etapes["Vidéos"]["total"]) == (2, 2)
-    assert etapes["Pose (DLC)"]["fait"] == 1
-    assert [n for n, e in etapes.items() if e["en_cours"]] == ["Pose (DLC)"]
-    assert "Split arènes" in {e["etape"] for e in S.avancement(project, multi=True)}

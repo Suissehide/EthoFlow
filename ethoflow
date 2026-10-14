@@ -86,4 +86,7 @@ EOF
     exit 1
 fi
 
+# Depuis la racine du dépôt : Streamlit y lit .streamlit/config.toml (thème),
+# que le lanceur soit appelé d'ici ou via un lien dans le PATH.
+cd "$ICI"
 exec "$STREAMLIT" run "$APP" "$@"

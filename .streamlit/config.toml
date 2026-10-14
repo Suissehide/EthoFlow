@@ -1,2 +1,27 @@
 [server]
 runOnSave = true
+
+[client]
+# Pas de bouton « Deploy » : il chevauchait la colonne Activité.
+toolbarMode = "minimal"
+
+# Refonte 1c (design_handoff_ethoflow_ui) : papier, encre, accent indigo,
+# IBM Plex. Le rail sombre et les cartes sont stylés en CSS (style.css).
+[theme]
+base = "light"
+primaryColor = "#4f46c8"
+backgroundColor = "#f6f5f1"
+secondaryBackgroundColor = "#efede7"
+textColor = "#1c1b19"
+borderColor = "#e0ddd5"
+linkColor = "#4f46c8"
+font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap, sans-serif"
+codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap, monospace"
+baseRadius = "6px"
+showWidgetBorder = true
+showSidebarBorder = false
+
+[theme.sidebar]
+backgroundColor = "#1c1b19"
+secondaryBackgroundColor = "#34322e"
+textColor = "#d8d5cc"

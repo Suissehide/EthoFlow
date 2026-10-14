@@ -180,37 +180,6 @@ def arenes_dataframe(meta: dict | None) -> pd.DataFrame:
     return pd.DataFrame(lignes, columns=colonnes)
 
 
-# Étapes du pipeline suivies session par session : (libellé, colonne de
-# `list_sessions`, page de l'app où on la fait).
-ETAPES = [
-    ("Vidéos", "vidéo", "Vidéos & calibration"),
-    ("Pose (DLC)", "DLC", "Pose (DLC)"),
-    ("Split arènes", "split", "Nettoyage"),
-    ("Nettoyage", "nettoyage", "Nettoyage"),
-    ("VAME", "VAME", "VAME"),
-]
-
-
-def avancement(project: Path, *, multi: bool) -> list[dict]:
-    """Avancement par étape : `{etape, page, fait, total, en_cours}`.
-
-    `en_cours` marque la première étape incomplète — c'est « où on en
-    est ». Sans session, c'est l'import depuis l'Excel (page Données).
-    """
-    df = list_sessions(project)
-    total = len(df)
-    etapes = [{"etape": "Données", "page": "Données", "fait": total, "total": total}]
-    for libelle, colonne, page in ETAPES:
-        if colonne == "split" and not multi:
-            continue
-        fait = int((df[colonne] == "OK").sum()) if total else 0
-        etapes.append({"etape": libelle, "page": page, "fait": fait, "total": total})
-    courante = next((e for e in etapes if not e["total"] or e["fait"] < e["total"]), None)
-    for e in etapes:
-        e["en_cours"] = e is courante
-    return etapes
-
-
 def inspection(project: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Bilan de `inspect_session.py` en tableaux, sans passer par un job.
 

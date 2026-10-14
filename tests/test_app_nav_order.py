@@ -26,12 +26,12 @@ ORDRE_ATTENDU = [
     "Données",
     "Vidéos & calibration",
     "Pose (DLC)",
-    "Qualité DLC",
     "Nettoyage",
     "VAME",
     "Motifs",
     "Analyses",
     "Visualisations",
+    "Qualité DLC",   # outils, sous les 9 étapes dans le rail
     "Configuration",
     "À propos",
 ]
