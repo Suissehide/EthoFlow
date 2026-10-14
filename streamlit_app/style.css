@@ -298,3 +298,109 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 @media (max-width: 767px) {
   [data-testid="stMain"] { margin-left: 72px; width: calc(100% - 72px); }
 }
+
+/* ---------- Page Projets (handoff « projets », 2a/2b) ---------- */
+/* Panneau « Nouveau projet » : fixe à droite, 420 px. */
+.st-key-ef_nouveau {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 420px; z-index: 99;
+  background: #fff; border-left: 1px solid #e0ddd5;
+  padding: 36px 28px; overflow-y: auto; gap: 8px;
+}
+/* Rythme du panneau : 8 px entre un libellé et son champ, 20 px entre deux
+   champs (marge haute des libellés). */
+.st-key-ef_nouveau [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+.st-key-ef_nouveau [data-testid="stCaptionContainer"] p { font-size: 12px !important; color: #8a867e; }
+.st-key-creation_nom { margin-top: 20px; }
+.st-key-creation_nom label p { font: 600 14px 'IBM Plex Sans', sans-serif !important; color: #1c1b19; }
+.stApp:has(.st-key-ef_nouveau) .stMainBlockContainer { padding-right: calc(420px + 40px); }
+[data-testid="stMarkdownContainer"] p.ef-panneau-titre { font: 600 18px 'IBM Plex Sans', sans-serif !important; margin: 0; }
+[data-testid="stMarkdownContainer"] p.ef-panneau-sous { font-size: 13px !important; margin: 2px 0 0; }
+[data-testid="stMarkdownContainer"] p.ef-champ-titre {
+  font: 600 14px 'IBM Plex Sans', sans-serif !important; margin: 20px 0 0;
+  display: flex; justify-content: space-between;
+}
+.ef-champ-titre span { font-weight: 400; font-size: 13px; color: #8a867e; }
+[data-testid="stMarkdownContainer"] p.ef-erreur { color: #c9473f; font-size: 12px !important; margin: 0; }
+.st-key-creation_nom input { font-family: 'IBM Plex Mono', monospace; font-size: 14px; }
+.st-key-pied_creation { margin-top: auto; padding-top: 20px; gap: 8px; }
+[data-testid="stMarkdownContainer"] p.ef-pied-note { text-align: center; font-size: 12px !important; color: #8a867e; margin: 0; }
+/* Cartes radio (création + Pose) : bordure 1.5 px, sélection indigo. */
+.st-key-creation_kind [role="radiogroup"] { gap: 8px; width: 100%; }
+.st-key-creation_kind [role="radiogroup"] > label {
+  width: 100%; margin: 0; padding: 14px; background: #fff;
+  border: 1.5px solid #e0ddd5; border-radius: 8px; align-items: flex-start;
+}
+.st-key-creation_kind [role="radiogroup"] > label:has(input:checked) { border-color: #4f46c8; }
+.st-key-creation_kind [role="radiogroup"] > label [data-testid="stMarkdownContainer"] p { font-weight: 600; font-size: 14px; }
+.st-key-creation_kind [role="radiogroup"] > label [data-testid="stCaptionContainer"] p { font-size: 13px !important; color: #6b6862; }
+/* Récapitulatif et carte de création. */
+.ef-recap { display: flex; flex-direction: column; border-top: 1px solid #ecebe6; margin-top: 12px; }
+.ef-recap > div { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #ecebe6; font-size: 14px; }
+.ef-recap > div span:first-child { color: #6b6862; }
+.st-key-carte_creation, .st-key-carte_creation_echec { border-radius: 8px !important; padding: 16px !important; gap: 10px; }
+.st-key-carte_creation { background: #fdf8ef !important; border-color: #ecd9b5 !important; }
+.st-key-carte_creation_echec { background: #fcf3f2 !important; border-color: #efc9c4 !important; }
+[class*="st-key-carte_creation"] { border: 1px solid; }
+[data-testid="stMarkdownContainer"] p.ef-creation-titre { font: 600 14px 'IBM Plex Sans', sans-serif !important; margin: 0; display: flex; align-items: center; gap: 8px; }
+.ef-sous-etapes { display: flex; flex-direction: column; gap: 10px; }
+.ef-sous-etapes > div { display: grid; grid-template-columns: 8px 1fr; gap: 12px; align-items: center; font-size: 13px; }
+.ef-sous-etapes .ef-todo { color: #8a867e; }
+.st-key-ef_annuler_creation button { background: transparent !important; border: none !important; color: #c9473f !important; font-size: 12px !important; padding: 0 !important; min-height: 0 !important; }
+.st-key-ef_annuler_creation button p { font-size: 12px !important; }
+/* Barre « Emplacement ». */
+.st-key-barre_emplacement {
+  background: #fff; border: 1px solid #e0ddd5; border-radius: 8px; padding: 12px 16px; gap: 12px;
+}
+.st-key-barre_emplacement, [class*="st-key-actions_"] { flex-wrap: nowrap !important; }
+.st-key-barre_emplacement > div:first-child { flex: 1 1 0; min-width: 0; width: auto !important; }
+.ef-emplacement { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 12px; align-items: center; }
+[data-testid="stMarkdownContainer"] .ef-emplacement p.ef-label { font-size: 11px !important; margin: 0; }
+[data-testid="stMarkdownContainer"] p.ef-chemin {
+  font: 400 13px 'IBM Plex Mono', monospace !important; margin: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Liste des projets. */
+.st-key-liste_projets { background: #fff; border: 1px solid #e0ddd5; border-radius: 10px; gap: 0 !important; overflow: hidden; }
+.st-key-entete_liste { padding: 12px 20px; }
+.st-key-entete_liste [data-testid="stMarkdownContainer"] p.ef-label { font-size: 11px !important; }
+[class*="st-key-ligne_"] { padding: 16px 20px; border-top: 1px solid #f1f0ec; }
+[class*="st-key-ligne_dernier_"], [class*="st-key-ligne_"]:hover { background: #faf9f6; }
+[data-testid="stMarkdownContainer"] p.ef-projet-nom { font: 600 15px 'IBM Plex Sans', sans-serif !important; margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ef-tag { font: 500 11px 'IBM Plex Mono', monospace; color: #4f46c8; background: #eceafb; padding: 2px 6px; border-radius: 4px; }
+[data-testid="stMarkdownContainer"] p.ef-projet-sous { font-size: 12px !important; color: #8a867e; margin: 2px 0 0; }
+[data-testid="stMarkdownContainer"] p.ef-projet-type { font-size: 13px !important; color: #56534d; margin: 0; }
+.ef-mini-frise { display: grid; grid-template-columns: repeat(9, 1fr); gap: 3px; }
+.ef-mini-frise span { height: 6px; border-radius: 2px; }
+[data-testid="stMarkdownContainer"] p.ef-projet-statut { font-size: 12px !important; margin: 6px 0 0; }
+[data-testid="stMarkdownContainer"] p.ef-projet-date { font: 400 12px 'IBM Plex Mono', monospace !important; color: #8a867e; margin: 0; }
+/* Menu ⋯ : bouton nu, sans chevron (maquette). */
+/* Boutons compacts (32 px) dans la barre et les lignes, comme la maquette. */
+[class*="st-key-actions_"] button, .st-key-barre_emplacement button {
+  min-height: 32px !important; padding: 4px 12px !important; font-size: 13px !important; font-weight: 500;
+}
+[class*="st-key-actions_"] button p, .st-key-barre_emplacement button p { font-size: 13px !important; }
+[class*="st-key-menu_"] button { width: 32px; padding: 0 !important; justify-content: center; border-color: transparent !important; background: transparent !important; }
+[class*="st-key-menu_"] button:hover { background: #ecebe6 !important; }
+[class*="st-key-menu_"] button [data-testid="stIconMaterial"],
+[class*="st-key-menu_"] button svg { display: none; }
+/* État vide. */
+.ef-vide {
+  min-height: 420px; border: 1.5px dashed #d0ccc3; border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 24px;
+}
+.ef-vide b { font: 600 16px 'IBM Plex Sans', sans-serif; }
+.ef-vide span { font-size: 14px; color: #6b6862; max-width: 420px; }
+/* Rail : pages d'étape grisées tant qu'aucun projet n'est ouvert. */
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button:disabled { opacity: .35; background: transparent !important; cursor: default; }
+
+@media (max-width: 1180px) {
+  .st-key-ef_nouveau { position: static; width: auto; padding: 24px 0 0; border-left: none; border-top: 1px solid #e0ddd5; background: transparent; }
+  .stApp:has(.st-key-ef_nouveau) .stMainBlockContainer { padding-right: 40px; }
+}
+/* Colonnes empilées (< 640 px) : l'en-tête n'a plus de colonnes à titrer. */
+@media (max-width: 640px) {
+  .st-key-entete_liste { display: none; }
+  [class*="st-key-ligne_"] [data-testid="stHorizontalBlock"] { gap: 8px; }
+  [class*="st-key-ligne_"] { border-top: none; }
+  [class*="st-key-ligne_"] + [class*="st-key-ligne_"] { border-top: 1px solid #f1f0ec; }
+}

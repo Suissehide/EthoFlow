@@ -166,6 +166,7 @@ def test_bouton_present_dans_la_barre_laterale_avec_un_projet(tmp_path, monkeypa
     at = AppTest.from_file(str(REPO / "streamlit_app" / "app.py"))
     at.run()
     assert not at.exception, at.exception
+    at.button(key="ouvrir_0").click().run()   # ouvre le projet : son tableau de bord
 
     boutons = {b.key: b for b in at.button}
     assert "btn_ouvrir_dossier" in boutons, list(boutons)

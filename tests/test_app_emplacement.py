@@ -1,4 +1,4 @@
-"""Choix de l'emplacement des projets depuis la page Projet.
+"""Choix de l'emplacement des projets depuis la page Projets.
 
 Le champ « Emplacement » accepte une racine (dossier contenant des projets)
 ou un projet directement, mémorise les emplacements récents, et refuse un
@@ -44,7 +44,9 @@ def test_champ_prerempli_sur_la_racine_courante(tmp_path, monkeypatch):
     at.run()
     assert not at.exception, at.exception
     assert at.text_input(key="emplacement_saisi").value == str(a)
-    assert Path(at.session_state["current_project_path"]).name == "projet-a"
+    # La page liste les projets, sans en ouvrir aucun d'office.
+    assert any("projet-a" in m.value for m in at.markdown)
+    assert "current_project_path" not in at.session_state
 
 
 def test_changer_d_emplacement_change_les_projets_listes(tmp_path, monkeypatch):
@@ -53,7 +55,8 @@ def test_changer_d_emplacement_change_les_projets_listes(tmp_path, monkeypatch):
     at.run()
     at.text_input(key="emplacement_saisi").set_value(str(b)).run()
     assert not at.exception, at.exception
-    assert Path(at.session_state["current_project_path"]).name == "projet-b"
+    assert any("projet-b" in m.value for m in at.markdown)
+    assert not any("projet-a" in m.value for m in at.markdown)
     # L'emplacement devient le défaut, donc survit au redémarrage.
     assert P.projects_root() == b
 
@@ -71,9 +74,12 @@ def test_chemin_de_projet_colle_ouvre_le_projet(tmp_path, monkeypatch):
 
     assert not at.exception, at.exception
     assert Path(at.session_state["current_project_path"]).name == "projet-a"
-    # La racine retenue est le parent : le sélecteur propose les voisins.
-    assert "projet-voisin" in at.selectbox(key="projet_selector").options
+    assert at.session_state["current_page"] == "Projet"   # son tableau de bord
+    # La racine retenue est le parent : la page Projets liste les voisins.
     assert P.projects_root() == a
+    at.button(key="nav_projets").click().run()
+    assert at.text_input(key="emplacement_saisi").value == str(a)
+    assert any("projet-voisin" in m.value for m in at.markdown)
 
 
 def test_chemin_relatif_refuse_et_aucun_dossier_cree(tmp_path, monkeypatch):

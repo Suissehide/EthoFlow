@@ -64,62 +64,42 @@ def test_creer_supprimer_retaper_ne_ressuscite_pas_le_projet(tmp_path, monkeypat
     nom = "test-zombie"
     cible = projects_root / nom
 
-    # ---- 1) Créer X, attendre le succès ----
+    # ---- 1) Créer X : le projet s'ouvre tout seul à la fin ----
     at = AppTest.from_file(APP_PY)
     at.run()
     assert not at.exception, at.exception
-    # Ciblage par clé, jamais par position : la page porte aussi le champ
-    # d'emplacement, et un index se casserait au moindre ajout de widget.
     at.text_input(key="creation_nom").set_value(nom).run()
-    boutons = {b.key: b for b in at.button}
-    assert "btn_creer" in boutons, list(boutons)
-    boutons["btn_creer"].click().run()
+    at.button(key="btn_creer").click().run()
     assert not at.exception, at.exception
 
     _attendre_job_termine(cible.parent)
-    # `_section_ouverture` auto-sélectionne le projet fraîchement listable
-    # via son propre `st.rerun()` interne : quelques `.run()` "à froid"
-    # pour la laisser se stabiliser d'abord. Sans ça, ré-affirmer la
-    # valeur du champ "Nom du projet" dans la MÊME requête que ce rerun-là
-    # ne "prend" pas côté AppTest (pas de frontend persistant comme dans
-    # un vrai navigateur : la resoumission d'un widget qu'un rerun interne
-    # traverse avant même de l'atteindre se perd) — artefact du harnais de
-    # test, sans équivalent réel puisqu'un navigateur garde la valeur
-    # tapée côté client quoi qu'il arrive côté serveur.
+    # Le clic relance le script (carte de création à la place du formulaire) ;
+    # l'arbre d'AppTest garde pourtant les anciens champs, dont l'état a
+    # été nettoyé — on les remet pour que `run()` puisse les relire.
+    at.session_state["creation_kind"] = "single"
+    at.session_state["creation_modele"] = "(choisir plus tard)"
     at.run()
-    at.run()
-    nom_field = [t for t in at.text_input if t.label == "Nom du projet"][0]
-    nom_field.set_value(nom).run()
     assert not at.exception, at.exception
-    assert any("créé avec succès" in s.value for s in at.success), \
-        [s.value for s in at.success]
     assert (cible / "configs" / "pipeline_config.yaml").is_file()
+    assert Path(at.session_state["current_project_path"]).name == nom
+    assert at.session_state["current_page"] == "Projet"   # ouvert directement
 
-    # ---- 2) Supprimer X via le flux guardé (Supprimer -> confirmer) ----
-    boutons = {b.key: b for b in at.button}
-    assert "btn_supprimer_projet" in boutons, list(boutons)
-    boutons["btn_supprimer_projet"].click().run()
+    # ---- 2) Revenir aux projets, supprimer X (menu ⋯ -> Supprimer -> confirmer) ----
+    at.button(key="nav_projets").click().run()
+    supprimer = [b for b in at.button if b.key.startswith("supprimer_")]
+    assert supprimer, [b.key for b in at.button]
+    supprimer[0].click().run()
+    at.button(key="btn_confirmer_suppression").click().run()
     assert not at.exception, at.exception
-    boutons = {b.key: b for b in at.button}
-    assert "btn_confirmer_suppression" in boutons, list(boutons)
-    boutons["btn_confirmer_suppression"].click().run()
-    assert not at.exception, at.exception
-
     assert not cible.exists(), "le rmtree n'a pas eu lieu"
 
     # ---- 3) Retaper le même nom ----
-    text_inputs = list(at.text_input)
-    nom_field = [t for t in text_inputs if t.label == "Nom du projet"][0]
-    nom_field.set_value(nom).run()
+    at.text_input(key="creation_nom").set_value(nom).run()
     assert not at.exception, at.exception
-
-    textes_success = [s.value for s in at.success]
-    assert not any("créé avec succès" in t for t in textes_success), (
-        f"bannière fantôme réapparue pour un projet supprimé : {textes_success}"
-    )
-    boutons = {b.key: b for b in at.button}
-    assert "btn_creer" in boutons, (
-        f"le bouton de création a disparu pour de bon après suppression : {list(boutons)}"
-    )
-    # Rien n'a dû être recréé sur disque par le simple fait de retaper le nom.
+    # Le job de création réussi (toujours le dernier de la racine) ne doit
+    # pas être repris pour ce nouveau dossier : pas d'ouverture fantôme…
+    assert at.session_state["current_page"] == "Projets"
+    # …et le bouton de création reste là, utilisable.
+    bouton = at.button(key="btn_creer")
+    assert not bouton.disabled, bouton.help
     assert not cible.exists(), "le dossier a été ressuscité rien qu'en retapant le nom"

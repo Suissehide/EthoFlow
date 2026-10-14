@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 APP_PY = str(REPO / "streamlit_app" / "app.py")
 
 ORDRE_ATTENDU = [
-    "Projet",
+    "Projet",       # tableau de bord ; « Projets » le précède dans le rail
     "Données",
     "Vidéos & calibration",
     "Pose (DLC)",
@@ -42,8 +42,7 @@ def _noms_nav_dans_l_ordre(at: AppTest) -> list[str]:
 
 
 def test_ordre_sans_projet_ouvert(tmp_path, monkeypatch):
-    """Sans projet ouvert, seules les pages toujours visibles apparaissent
-    (Projet, Configuration, À propos), dans l'ordre."""
+    """Sans projet ouvert : Projets, puis les étapes grisées, puis le système."""
     monkeypatch.setattr(P, "PREFS_PATH", tmp_path / "app_prefs.yaml")
     P.save_prefs({
         "projects_root": str(tmp_path / "projects"),
@@ -54,8 +53,11 @@ def test_ordre_sans_projet_ouvert(tmp_path, monkeypatch):
     at.run()
     assert not at.exception, at.exception
 
+    # Le rail montre toujours les étapes, grisées tant qu'aucun projet n'est ouvert.
     noms = _noms_nav_dans_l_ordre(at)
-    assert noms == ["Projet", "Configuration", "À propos"], noms
+    assert noms == ["Projets", *ORDRE_ATTENDU[:9], "Configuration", "À propos"], noms
+    inactifs = {b.label for b in at.button if b.key.startswith("nav_") and b.disabled}
+    assert inactifs == set(ORDRE_ATTENDU[:9])
 
 
 def test_ordre_avec_projet_ouvert_suit_le_parcours_pipeline(tmp_path, monkeypatch):
@@ -80,4 +82,4 @@ def test_ordre_avec_projet_ouvert_suit_le_parcours_pipeline(tmp_path, monkeypatc
     assert not at.exception, at.exception
 
     noms = _noms_nav_dans_l_ordre(at)
-    assert noms == ORDRE_ATTENDU, noms
+    assert noms == ["Projets", *ORDRE_ATTENDU], noms

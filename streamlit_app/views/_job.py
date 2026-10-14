@@ -32,7 +32,8 @@ def _ligne_job(job, *, heure_debut: bool = True) -> str:
 
 def bouton_lancer(projet: Path, label: str, cmd, *, cle: str,
                   type: str = "primary", disabled: bool = False,
-                  help: str | None = None, afficher_raison: bool = True) -> None:
+                  help: str | None = None, afficher_raison: bool = True,
+                  width: str = "content") -> None:
     """Bouton de lancement d'un job, désactivé si un autre job tourne déjà.
 
     Gère `JobBusy` (course entre l'affichage du bouton et le clic) en
@@ -53,7 +54,7 @@ def bouton_lancer(projet: Path, label: str, cmd, *, cle: str,
         else:
             aide = "Un autre job tourne déjà."
     bloque = disabled or occupe or verrou is not None
-    if st.button(label, key=cle, type=type, disabled=bloque, help=aide):
+    if st.button(label, key=cle, type=type, disabled=bloque, help=aide, width=width):
         try:
             runner.start(projet, cmd)
             st.rerun()

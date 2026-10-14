@@ -30,6 +30,7 @@ from views import (  # noqa: E402
     nettoyage,
     pose,
     projet,
+    projets,
     qualite_dlc,
     vame_page,
     videos,
@@ -46,9 +47,6 @@ st.set_page_config(
 # ============================================================
 # Init session state
 # ============================================================
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "Projet"
-
 # Restore the last project at startup, if it still exists
 if "current_project_path" not in st.session_state:
     from lib.project import load_prefs
@@ -58,6 +56,11 @@ if "current_project_path" not in st.session_state:
         set_current_project(dernier)
 
 has_project = current_project_name() is not None
+
+# Au démarrage : le tableau de bord du dernier projet s'il existe encore,
+# sinon la page Projets (handoff « projets »).
+if "current_page" not in st.session_state:
+    st.session_state.current_page = "Projet" if has_project else "Projets"
 
 # ============================================================
 # Pages
@@ -71,11 +74,13 @@ has_project = current_project_name() is not None
 # Lucide (voir lib/icons.ICONS) et une clé unique.
 # ============================================================
 PAGES: list[dict] = [
-    {"name": "Projet",             "icon": "layout-dashboard", "render": projet.render,         "key": "projet"},
+    {"name": "Projets",            "icon": "folder",           "render": projets.render,         "key": "projets"},
 ]
 
-# Pages requiring a project
+# Pages requiring a project : sans projet, elles restent dans le rail mais
+# grisées et non cliquables (handoff « projets »).
 PROJECT_PAGES: list[dict] = [
+    {"name": "Projet",             "icon": "layout-dashboard", "render": projet.render,         "key": "projet"},
     {"name": "Données",            "icon": "file-spreadsheet", "render": donnees.render,        "key": "donnees"},
     {"name": "Vidéos & calibration", "icon": "video",           "render": videos.render,          "key": "videos"},
     {"name": "Pose (DLC)",         "icon": "scan-line",        "render": pose.render,            "key": "pose"},
@@ -96,18 +101,13 @@ BOTTOM_PAGES: list[dict] = [
     {"name": "À propos",           "icon": "info",             "render": about.render,           "key": "about"},
 ]
 
-# Visible pages depend on project state
-if has_project:
-    _visible_main = PAGES + PROJECT_PAGES
-else:
-    _visible_main = PAGES
+_visible_main = PAGES + PROJECT_PAGES
+_ALL_PAGES = {p["name"]: p for p in PAGES + BOTTOM_PAGES
+              + (PROJECT_PAGES + OUTILS_PAGES if has_project else [])}
 
-_ALL_PAGES = {p["name"]: p for p in _visible_main + BOTTOM_PAGES
-              + (OUTILS_PAGES if has_project else [])}
-
-# If current page requires project but no project → redirect to Projet
+# Page qui exige un projet, sans projet ouvert → page Projets.
 if st.session_state.current_page not in _ALL_PAGES:
-    st.session_state.current_page = "Projet"
+    st.session_state.current_page = "Projets"
 
 # ============================================================
 # Style global (refonte 1c) — thème de base dans .streamlit/config.toml
@@ -133,7 +133,9 @@ st.sidebar.markdown(f"<style>{_rail_css}</style>", unsafe_allow_html=True)
 
 
 def _bouton_rail(page: dict) -> None:
-    if st.button(page["name"], key=f"nav_{page['key']}", help=page["name"]):
+    inactif = page["name"] not in _ALL_PAGES
+    if st.button(page["name"], key=f"nav_{page['key']}", disabled=inactif,
+                 help=f"{page['name']} : ouvre d'abord un projet" if inactif else page["name"]):
         st.session_state.current_page = page["name"]
         st.rerun()
 
@@ -173,6 +175,7 @@ st.session_state["_raisons_vues"] = set()
 _ALL_PAGES[st.session_state.current_page]["render"]()
 
 # Colonne Activité rendue après la page : fixe à droite sur grand écran,
-# sous le contenu sur écran étroit (style.css).
-if has_project:
+# sous le contenu sur écran étroit (style.css). La page Projets a son
+# propre panneau à droite (« Nouveau projet »).
+if has_project and st.session_state.current_page != "Projets":
     _activite.render(_projet_courant, st.session_state["_etat_pipeline"])
