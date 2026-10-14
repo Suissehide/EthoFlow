@@ -63,6 +63,24 @@ Cette distinction est indépendante de l'angle de la caméra : tu peux avoir du 
 
 ## Installation (first-time)
 
+### En un double-clic (recommandé)
+
+1. Récupère le dossier EthoFlow : `git clone <URL_ETHOFLOW>`, ou télécharge le ZIP du dépôt et décompresse-le.
+2. Double-clique sur le lanceur de ton système :
+   - **Windows** : `EthoFlow.bat`
+   - **macOS** : `EthoFlow.command` (la première fois, si macOS bloque le fichier : clic droit → Ouvrir)
+   - **Linux** : `./EthoFlow.command` dans un terminal la première fois ; EthoFlow apparaît ensuite dans le menu des applications.
+
+Le lanceur fait tout ce qui manque, puis ouvre l'app dans le navigateur :
+
+- installe conda (Miniforge, dans ton dossier personnel, sans droits admin) s'il est absent — il te le demande d'abord ;
+- crée les environnements `ethoflow`, `dlc` et `vame` (10 à 20 min chacun, **une seule fois**), et les met à jour si un `environment-*.yml` a changé après un `git pull` ;
+- vérifie que torch voit la GPU NVIDIA dans `dlc` et `vame`, et lance `diagnose_gpu.py --fix` sinon.
+
+Ensuite, le même double-clic lance simplement l'app (quelques secondes). Garde la fenêtre du terminal ouverte : la fermer arrête EthoFlow.
+
+Les étapes ci-dessous décrivent la même installation, à la main.
+
 ### 1. Cloner le repo
 
 ```cmd
