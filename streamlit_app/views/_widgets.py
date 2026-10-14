@@ -194,3 +194,37 @@ def details_techniques(cmd=None, *, notes: list[str] | None = None) -> None:
             st.code(shlex.join(PL.to_argv(cmd)), language="bash", wrap_lines=True)
         for note in notes or []:
             st.markdown(note)
+
+
+def choix_modele_dlc(projet: Path, *, cle: str) -> None:
+    """Désigner le modèle DLC du projet : modèles trouvés, ou un chemin.
+
+    Partagé par le menu du projet (Projet) et la page Pose, qui le propose
+    sur place quand « Mon modèle entraîné » n'a pas de modèle valide.
+    """
+    from lib.config import list_dlc_models, models_root, set_dlc_config
+
+    modeles = list_dlc_models(models_root())
+    options = [str(m / "config.yaml") for m in modeles]
+    choisi = (st.selectbox("Modèles trouvés", options=options, key=f"{cle}_dlc_trouve")
+              if options else None)
+    libre = champ_chemin(
+        "…ou un chemin" if options else "Dossier du modèle", cle=f"{cle}_dlc_libre",
+        mode="fichier", extensions=[".yaml", ".yml"],
+        titre_dialogue="Choisir le config.yaml du modèle DLC",
+        help="Le dossier du modèle suffit : son `config.yaml` est trouvé "
+             "tout seul. Le fichier lui-même marche aussi.",
+    )
+    chemin = libre.strip() or choisi
+    if chemin:
+        # Écriture locale instantanée, pas un job : `set_dlc_config` ne
+        # touche qu'à la clé `dlc_project_config` et préserve le reste
+        # (`default_arenes_coords`, `px_per_cm`...). Passer par
+        # `create_project.py --force` — ce que faisait la première version
+        # — régénère pipeline_config.yaml en entier (arènes perdues) ET
+        # regénère l'Excel de démarrage même déjà rempli par le chercheur
+        # (ruling R10.2, Critical 1+2 de la revue).
+        if st.button("Utiliser ce modèle", key=f"btn_{cle}", type="primary"):
+            set_dlc_config(projet, chemin)
+            st.toast(f"Modèle DLC configuré : {chemin}")
+            st.rerun()

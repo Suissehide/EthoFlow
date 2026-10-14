@@ -20,7 +20,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from lib.config import current_project, current_project_name  # noqa: E402
-from lib.icons import lucide_data_uri  # noqa: E402
+from lib.icons import LOGO_SVG, logo_data_uri, lucide_data_uri  # noqa: E402
 from views import (  # noqa: E402
     about,
     analyses,
@@ -38,6 +38,7 @@ from views import (  # noqa: E402
 
 st.set_page_config(
     page_title="EthoFlow",
+    page_icon=LOGO_SVG,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -138,7 +139,8 @@ def _bouton_rail(page: dict) -> None:
 
 
 with st.sidebar:
-    st.markdown('<p class="ef-rail-marque">Ef</p>', unsafe_allow_html=True)
+    st.markdown(f'<img class="ef-rail-logo" src="{logo_data_uri()}" width="32" height="32" '
+                'alt="EthoFlow" title="EthoFlow">', unsafe_allow_html=True)
     for _p in _visible_main:
         _bouton_rail(_p)
     if has_project:
@@ -161,7 +163,6 @@ if has_project:
     _job = _runner.current(_projet_courant) if _runner.is_running(_projet_courant) else None
     st.session_state["_etat_pipeline"] = _E.etat_pipeline(
         _projet_courant, _job.script if _job else None)
-    _activite.render(_projet_courant, st.session_state["_etat_pipeline"])
 
 # Raisons de verrou déjà écrites pendant ce rendu (views/_job.bouton_lancer).
 st.session_state["_raisons_vues"] = set()
@@ -170,3 +171,8 @@ st.session_state["_raisons_vues"] = set()
 # Dispatch
 # ============================================================
 _ALL_PAGES[st.session_state.current_page]["render"]()
+
+# Colonne Activité rendue après la page : fixe à droite sur grand écran,
+# sous le contenu sur écran étroit (style.css).
+if has_project:
+    _activite.render(_projet_courant, st.session_state["_etat_pipeline"])

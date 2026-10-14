@@ -101,3 +101,18 @@ def lucide_data_uri(name: str, color_hex: str = "9ca3af") -> str:
     svg = _make_svg(name, 18, f"#{color_hex}")
     encoded = base64.b64encode(svg.encode()).decode()
     return f"data:image/svg+xml;base64,{encoded}"
+
+
+# Logo EthoFlow : carré indigo (accent de l'app), une onde blanche — le flux
+# du comportement — et un point suivi. Rail (32 px) et onglet du navigateur.
+LOGO_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="8" fill="#4f46c8"/>'
+    '<path d="M6 19.5c2.6-6 5.2-6 7.8 0s5.2 6 7.8 0" fill="none" stroke="#fff" '
+    'stroke-width="2.4" stroke-linecap="round"/>'
+    '<circle cx="25.2" cy="13" r="2.6" fill="#fff"/></svg>'
+)
+
+
+def logo_data_uri() -> str:
+    return "data:image/svg+xml;base64," + base64.b64encode(LOGO_SVG.encode()).decode()

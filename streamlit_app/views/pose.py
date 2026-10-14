@@ -83,18 +83,27 @@ def _section_mode(projet: Path) -> str:
     nom = f" ({Path(chemin).parent.name})" if statut == "ok" else ""
     mode = st.radio(
         "Modèle à utiliser", _MODES, index=_MODES.index(defaut),
+        # Le badge reste sur « Mon modèle entraîné », même sans modèle
+        # désigné : c'est la voie recommandée, la carte ci-dessous aide à y aller.
         format_func=lambda m: _TITRES[m] + (
-            " :violet-badge[Recommandé pour ce projet]" if m == defaut else ""),
+            " :violet-badge[Recommandé pour ce projet]" if m == "custom" else ""),
         captions=[_DESCRIPTIONS[m].format(nom=nom) for m in _MODES],
         key="pose_mode", label_visibility="collapsed", width="stretch",
     )
 
-    if mode == "custom" and statut == "absent":
-        st.warning("Aucun modèle DLC n'est désigné pour ce projet. Choisis-en un : "
-                   "tableau de bord → menu du projet (son nom) → Modèle DLC.")
-    elif mode == "custom" and statut == "introuvable":
-        st.warning(f"Le modèle désigné est introuvable (déplacé ou supprimé) : {chemin}. "
-                   "Tableau de bord → menu du projet → Modèle DLC → Diagnostiquer.")
+    if mode == "custom" and statut != "ok":
+        # Désigner le modèle ici même, sans quitter la page (au lieu d'un
+        # message qui renvoie vers le menu du projet).
+        with st.container(key="carte_modele"):
+            st.markdown('<p class="ef-carte-titre" style="margin:0">'
+                        "Choisir le modèle DLC du projet</p>", unsafe_allow_html=True)
+            if statut == "introuvable":
+                st.warning(f"Le modèle désigné est introuvable (déplacé ou supprimé) : "
+                           f"{chemin}. Choisis-le à son nouvel emplacement.")
+            else:
+                st.caption("Aucun modèle n'est encore désigné pour ce projet. Choisis le "
+                           "dossier du modèle entraîné : il sert pour toutes les sessions.")
+            _widgets.choix_modele_dlc(projet, cle="pose_modele")
     return mode
 
 

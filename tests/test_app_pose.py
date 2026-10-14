@@ -88,7 +88,7 @@ def test_mode_par_defaut_custom_si_modele_configure(tmp_path, monkeypatch):
 
     assert _radio_mode(at).value == "custom"
     # Modèle configuré et présent sur disque : pas d'avertissement.
-    assert not any("Aucun modèle DLC" in w.value for w in at.warning)
+    assert not any("Aucun modèle n'est encore désigné" in c.value for c in at.caption)
     assert not any("introuvable" in w.value for w in at.warning)
 
 
@@ -125,8 +125,9 @@ def test_custom_sans_modele_avertit_et_desactive_le_bouton(tmp_path, monkeypatch
     _radio_mode(at).set_value("custom").run()
     assert not at.exception, at.exception
 
-    assert any("Aucun modèle DLC" in w.value for w in at.warning), [w.value for w in at.warning]
-    assert any("Modèle DLC" in w.value and "menu du projet" in w.value for w in at.warning)
+    # Plus de renvoi vers le menu du projet : la carte de choix est sur place.
+    assert any("Aucun modèle n'est encore désigné" in c.value for c in at.caption)
+    assert "pose_modele_dlc_libre" in {t.key for t in at.text_input}
 
     boutons = {b.key: b for b in at.button}
     assert boutons["btn_pose_lancer"].disabled
@@ -142,9 +143,9 @@ def test_custom_avec_modele_introuvable_pointe_vers_diagnostiquer(tmp_path, monk
     _radio_mode(at).set_value("custom").run()
     assert not at.exception, at.exception
 
-    assert any("introuvable" in w.value and "Diagnostiquer" in w.value for w in at.warning), \
+    assert any("introuvable" in w.value and "nouvel emplacement" in w.value for w in at.warning), \
         [w.value for w in at.warning]
-    assert not any("Aucun modèle DLC" in w.value for w in at.warning)
+    assert not any("Aucun modèle n'est encore désigné" in c.value for c in at.caption)
 
     boutons = {b.key: b for b in at.button}
     assert boutons["btn_pose_lancer"].disabled
@@ -178,3 +179,21 @@ def test_toutes_sessions_coche_par_defaut_active_le_bouton(tmp_path, monkeypatch
 
     boutons = {b.key: b for b in at.button}
     assert boutons["btn_pose_lancer"].disabled
+
+
+def test_choisir_le_modele_depuis_la_page_pose(tmp_path, monkeypatch):
+    """Carte « Choisir le modèle DLC » : on désigne le modèle sans quitter la page."""
+    projet = _projet(tmp_path, kind="single", modele="absent")
+    modele = tmp_path / "models" / "souris"
+    modele.mkdir(parents=True)
+    (modele / "config.yaml").write_text("Task: souris\n", encoding="utf-8")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    _radio_mode(at).set_value("custom").run()
+    assert at.button(key="btn_pose_lancer").disabled
+    at.button(key="btn_pose_modele").click().run()
+    assert not at.exception, at.exception
+
+    assert P.dlc_config_path(projet) == str(modele / "config.yaml")
+    assert not at.button(key="btn_pose_lancer").disabled
+    assert "pose_modele_dlc_libre" not in {t.key for t in at.text_input}

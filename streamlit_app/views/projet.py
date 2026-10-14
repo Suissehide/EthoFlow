@@ -32,7 +32,7 @@ from lib.config import (
 from lib.icons import lucide_data_uri, lucide_title
 from lib.sessions import list_sessions
 from views import _job
-from views._widgets import champ_chemin
+from views._widgets import champ_chemin, choix_modele_dlc
 
 
 # ============================================================
@@ -376,30 +376,7 @@ def _section_modele_dlc(projet: Path) -> None:
             "Aucun modèle désigné. L'estimation de pose avec « Mon modèle entraîné » en a besoin."
         )
 
-    modeles = list_dlc_models(models_root())
-    options = [str(m / "config.yaml") for m in modeles]
-    choisi = (st.selectbox("Modèles trouvés", options=options, key="modele_dlc_trouve")
-              if options else None)
-    libre = champ_chemin(
-        "…ou un chemin", cle="modele_dlc_libre",
-        mode="fichier", extensions=[".yaml", ".yml"],
-        titre_dialogue="Choisir le config.yaml du modèle DLC",
-        help="Le dossier du modèle suffit : son `config.yaml` est trouvé "
-             "tout seul. Le fichier lui-même marche aussi.",
-    )
-    chemin = libre.strip() or choisi
-    if chemin:
-        # Écriture locale instantanée, pas un job : `set_dlc_config` ne
-        # touche qu'à la clé `dlc_project_config` et préserve le reste
-        # (`default_arenes_coords`, `px_per_cm`...). Passer par
-        # `create_project.py --force` — ce que faisait la première version
-        # — régénère pipeline_config.yaml en entier (arènes perdues) ET
-        # regénère l'Excel de démarrage même déjà rempli par le chercheur
-        # (ruling R10.2, Critical 1+2 de la revue).
-        if st.button("Utiliser ce modèle", key="btn_modele", type="primary"):
-            set_dlc_config(projet, chemin)
-            st.toast(f"Modèle DLC configuré : {chemin}")
-            st.rerun()
+    choix_modele_dlc(projet, cle="modele")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -427,9 +404,12 @@ def _entete(projet: Path) -> None:
     modele = Path(_dlc(projet)).parent.name if _dlc(projet) else "pas de modèle DLC"
     genre = ("N animaux par vidéo (arènes)" if project_kind(projet) == "multi"
              else "1 animal par vidéo")
-    col_titre, col_dossier = st.columns([12, 1], vertical_alignment="center")
-    with col_titre:
-        # Le nom du projet ouvre la gestion des projets (maquette 1c : nom + chevron).
+    st.markdown(f'<style>.st-key-btn_ouvrir_dossier button {{ --ef-icone-dossier: '
+                f'url("{lucide_data_uri("folder-open", "1c1b19")}"); }}</style>',
+                unsafe_allow_html=True)
+    # Nom du projet (ouvre la gestion des projets, maquette 1c : nom +
+    # chevron) puis, juste à sa droite, le bouton « ouvrir le dossier ».
+    with st.container(horizontal=True, vertical_alignment="center", gap="small"):
         with st.popover(projet.name, type="tertiary", key="ef_projet_menu"):
             onglet_projets, onglet_nouveau, onglet_modele = st.tabs(
                 ["Projets", "Nouveau projet", "Modèle DLC"])
@@ -440,13 +420,6 @@ def _entete(projet: Path) -> None:
                 _section_creation(projects_root())
             with onglet_modele:
                 _section_modele_dlc(projet)
-        st.markdown(f'<p class="ef-muted" style="margin:-6px 0 0">{genre} · '
-                    f'{n} session{"s" if n > 1 else ""} · {escape(modele)}</p>',
-                    unsafe_allow_html=True)
-    with col_dossier:
-        st.markdown(f'<style>.st-key-btn_ouvrir_dossier button {{ --ef-icone-dossier: '
-                    f'url("{lucide_data_uri("folder-open", "1c1b19")}"); }}</style>',
-                    unsafe_allow_html=True)
         # Libellé réduit à une espace : l'icône est posée en `::before` par
         # le CSS. Le dossier s'ouvre sur la machine qui héberge le serveur —
         # l'aide le dit, pour qui consulte l'app à distance.
@@ -455,6 +428,9 @@ def _entete(projet: Path) -> None:
                           "(sur la machine qui fait tourner l'app)"):
             ok, message = reveal.ouvrir_dans_explorateur(projet)
             (st.toast if ok else st.error)(message)
+    st.markdown(f'<p class="ef-muted" style="margin:-6px 0 4px">{genre} · '
+                f'{n} session{"s" if n > 1 else ""} · {escape(modele)}</p>',
+                unsafe_allow_html=True)
 
 
 def _tuile_html(ligne: dict) -> str:
@@ -473,6 +449,11 @@ def _tuile_html(ligne: dict) -> str:
 
 
 def _tuiles(lignes: list[dict]) -> None:
+    with st.container(key="tuiles"):
+        _rangee_tuiles(lignes)
+
+
+def _rangee_tuiles(lignes: list[dict]) -> None:
     for col, ligne in zip(st.columns(len(lignes), gap="small"), lignes):
         e = ligne["etape"]
         with col, st.container(key=f"tuile_{e.n}"):
@@ -526,7 +507,8 @@ def _carte_etape(projet: Path, lignes: list[dict]) -> None:
         haut.markdown(f'{etiquette}<p class="ef-carte-titre">{escape(titre)}</p>'
                       f'<p class="ef-muted" style="margin:0">{escape(phrase)}</p>',
                       unsafe_allow_html=True)
-        with lien:
+        # Bouton calé sur le bord droit de la carte.
+        with lien, st.container(horizontal_alignment="right"):
             if st.button("Ouvrir l'étape →", key="btn_ouvrir_etape",
                          type="secondary" if en_cours else "primary"):
                 st.session_state.current_page = e.nom

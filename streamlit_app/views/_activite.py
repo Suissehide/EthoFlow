@@ -99,7 +99,13 @@ def render(projet: Path, lignes: list[dict]) -> None:
         suite = E.ensuite(lignes)
         if suite:
             e = suite["etape"]
-            st.markdown(
-                f'<div class="ef-ensuite"><p class="ef-label">Ensuite</p>'
-                f"<b>{e.n:02d} · {escape(e.nom)}</b><span>{escape(suite['texte'])}</span></div>",
-                unsafe_allow_html=True)
+            # Bloc cliquable : il mène à la page de l'étape suivante.
+            with st.container(key="ef_ensuite"):
+                st.markdown(
+                    f'<div class="ef-ensuite"><p class="ef-label">Ensuite</p>'
+                    f"<b>{e.n:02d} · {escape(e.nom)} →</b>"
+                    f"<span>{escape(suite['texte'])}</span></div>",
+                    unsafe_allow_html=True)
+                if st.button(f"Ouvrir : {e.nom}", key="ef_ensuite_btn", help=f"Ouvrir : {e.nom}"):
+                    st.session_state.current_page = e.nom
+                    st.rerun()

@@ -28,7 +28,7 @@ h2, h3 { font-weight: 600 !important; letter-spacing: -0.01em; }
 [class*="st-key-carte_"], .ef-card {
   background: #fff; border: 1px solid #e0ddd5; border-radius: 10px;
 }
-[class*="st-key-carte_"] { padding: 16px 20px; }
+[class*="st-key-carte_"] { padding: 24px; }
 
 /* Boutons secondaires : blanc, bordure forte. */
 .stButton button[kind="secondary"] { background: #fff; border-color: #d9d6ce; }
@@ -47,8 +47,11 @@ section[data-testid="stSidebar"] {
 }
 [data-testid="stSidebarHeader"], [data-testid="stSidebarCollapseButton"],
 [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+/* Streamlit garde 20 px de marge latérale : sans la retirer, les boutons
+   de 44 px n'ont que 32 px et débordent à gauche (icônes décentrées). */
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding: 0 !important; }
 section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
-  padding: 20px 0 16px !important; height: 100vh;
+  padding: 20px 0 16px !important; height: 100vh; width: 72px;
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div,
 section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"] {
@@ -57,7 +60,7 @@ section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] > div > [d
 section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
   align-items: center; gap: 6px;
 }
-.ef-rail-marque { font: 700 15px 'IBM Plex Sans', sans-serif; color: #fff; margin: 0 0 18px; text-align: center; }
+.ef-rail-logo { display: block; margin: 0 auto 28px; }
 .st-key-rail_bas { margin-top: auto; }
 .st-key-rail_outils { border-top: 1px solid #34322e; padding-top: 10px; }
 section[data-testid="stSidebar"] [class*="st-key-nav_"] button {
@@ -65,7 +68,8 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button {
   border: none; border-radius: 8px; background: transparent;
   font-size: 0; display: flex; align-items: center; justify-content: center;
 }
-section[data-testid="stSidebar"] [class*="st-key-nav_"] button p { display: none; }
+/* Le contenu texte du bouton (vide) occupe une place à côté de l'icône. */
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button > div { display: none; }
 section[data-testid="stSidebar"] [class*="st-key-nav_"] button:hover { background: #2a2825; }
 section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
   content: ""; width: 19px; height: 19px; flex-shrink: 0;
@@ -111,22 +115,40 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
   width: 38px !important; min-width: 38px; height: 38px; min-height: 38px; padding: 0; font-size: 0;
   display: flex; align-items: center; justify-content: center;
 }
-.st-key-btn_ouvrir_dossier button p { display: none; }
+.st-key-btn_ouvrir_dossier button > div { display: none; }
 .st-key-btn_ouvrir_dossier button::before {
   content: ""; width: 18px; height: 18px; flex-shrink: 0;
   background: var(--ef-icone-dossier) no-repeat center / contain;
 }
 
 /* Tuiles d'étape : HTML + bouton invisible étendu sur toute la tuile. */
-[class*="st-key-tuile_"]:not([class*="st-key-tuile_btn_"]) { position: relative; }
-[class*="st-key-tuile_btn_"] { position: absolute !important; inset: 0; z-index: 2; }
+/* Hauteur fixe commune : la tuile visible et son bouton invisible
+   couvrent exactement la même surface, toutes les tuiles s'alignent. */
+[class*="st-key-tuile_"]:not([class*="st-key-tuile_btn_"]) {
+  position: relative; height: 140px !important; min-height: 140px; gap: 0 !important;
+}
+/* Le bloc HTML de la tuile remplit le conteneur (pas le bouton, à part). */
+[class*="st-key-tuile_"] > [data-testid="stElementContainer"]:not([class*="st-key-tuile_btn_"]),
+[class*="st-key-tuile_"] > [data-testid="stElementContainer"]:not([class*="st-key-tuile_btn_"]) [data-testid="stMarkdown"],
+[class*="st-key-tuile_"] > [data-testid="stElementContainer"]:not([class*="st-key-tuile_btn_"]) [data-testid="stMarkdownContainer"] {
+  height: 100% !important; width: 100%;
+}
+[class*="st-key-tuile_btn_"] {
+  position: absolute !important; top: 0; left: 0; width: 100% !important; height: 100% !important;
+  z-index: 2; margin: 0 !important;
+}
+[class*="st-key-tuile_btn_"] .stButton, [class*="st-key-tuile_btn_"] [data-testid="stTooltipHoverTarget"],
+[class*="st-key-tuile_btn_"] [data-testid="stTooltipIcon"], [class*="st-key-tuile_btn_"] .stButton > div {
+  width: 100% !important; height: 100% !important;
+}
 [class*="st-key-tuile_btn_"] button {
-  width: 100%; height: 100%; opacity: 0; cursor: pointer; border: none;
+  width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; border: none;
 }
 .ef-tuile {
   background: #fff; border: 1px solid #e0ddd5; border-radius: 8px; padding: 12px;
-  display: flex; flex-direction: column; gap: 10px; min-height: 128px;
+  display: flex; flex-direction: column; gap: 10px; height: 140px; box-sizing: border-box;
 }
+.ef-tuile-statut { margin-top: auto; }
 [class*="st-key-tuile_"]:hover .ef-tuile { border-color: #b9b5ac; }
 .ef-tuile-run { background: #fdf8ef; border-color: #ecd9b5; }
 .ef-tuile-todo { border-color: #4f46c8; }
@@ -139,13 +161,14 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 .ef-tuile-statut { font: 400 12px 'IBM Plex Mono', monospace; }
 
 /* Carte « étape en cours / prochaine étape ». */
-.st-key-carte_etape { padding: 16px 20px !important; margin-top: 8px; }
+.st-key-carte_etape { padding: 24px !important; margin-top: 8px; gap: 12px; }
 .ef-carte-titre { font: 600 17px 'IBM Plex Sans', sans-serif; margin: 2px 0 4px; }
 .ef-frise { display: grid; gap: 6px; margin-top: 8px; }
 .ef-frise > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .ef-frise span { font: 400 10.5px 'IBM Plex Mono', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ef-segment { height: 36px; border-radius: 4px; }
-.ef-sessions { display: flex; flex-direction: column; margin-top: 8px; }
+.ef-sessions { display: flex; flex-direction: column; margin-top: 4px; }
+.ef-session:last-child { border-bottom: none; }
 .ef-session {
   display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; align-items: center;
   padding: 4px 0; border-bottom: 1px solid #f1f0ec; font-size: 13px;
@@ -225,4 +248,53 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 .ef-puce {
   font: 500 11px 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .04em;
   border: 1px solid; border-radius: 999px; padding: 1px 8px;
+}
+
+/* « Ensuite » cliquable : bouton invisible étendu sur le bloc (comme les tuiles). */
+.st-key-ef_ensuite { position: relative; }
+.st-key-ef_ensuite_btn {
+  position: absolute !important; top: 0; left: 0; width: 100% !important; height: 100% !important;
+  z-index: 2; margin: 0 !important;
+}
+.st-key-ef_ensuite_btn .stButton, .st-key-ef_ensuite_btn [data-testid="stTooltipHoverTarget"],
+.st-key-ef_ensuite_btn [data-testid="stTooltipIcon"], .st-key-ef_ensuite_btn .stButton > div {
+  width: 100% !important; height: 100% !important;
+}
+.st-key-ef_ensuite_btn button { width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; border: none; }
+.st-key-ef_ensuite:hover .ef-ensuite b { color: #4f46c8; }
+/* Rangée des tuiles : elles passent à la ligne plutôt que de s'écraser. */
+/* Grille : à la ligne, toutes les tuiles gardent la même largeur. */
+.st-key-tuiles [data-testid="stHorizontalBlock"] {
+  display: grid !important; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px;
+}
+.st-key-tuiles [data-testid="stColumn"] { width: auto !important; min-width: 0 !important; }
+/* Carte « modèle DLC » de la page Pose. */
+.st-key-carte_modele { padding: 24px !important; gap: 12px; }
+
+/* ---------- Écrans étroits ---------- */
+@media (max-width: 1180px) {
+  /* La colonne Activité passe sous le contenu au lieu de le recouvrir. */
+  .st-key-ef_activite {
+    position: static; width: auto; padding: 24px 0 0; border-left: none;
+    border-top: 1px solid #e0ddd5; background: transparent;
+  }
+  .stApp:has(.st-key-ef_activite) .stMainBlockContainer { padding-right: 40px; }
+}
+@media (max-width: 760px) {
+  .stMainBlockContainer, .stApp:has(.st-key-ef_activite) .stMainBlockContainer { padding: 24px 16px 48px; }
+  .ef-phases { grid-template-columns: 1fr; }
+  h1, [data-testid="stMarkdownContainer"] h1.ef-titre-etape { font-size: 24px !important; }
+  .st-key-ef_projet_menu button p { font-size: 24px !important; }
+}
+/* Streamlit retire 16 px sous chaque bloc Markdown (pour compenser la marge
+   de son dernier paragraphe). Nos blocs HTML n'en ont pas : sans ceci, ce
+   retrait mange le padding bas des cartes. */
+[class*="st-key-carte_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
+
+/* Les boutons d'action ne passent pas à la ligne. */
+.st-key-btn_ouvrir_etape button { white-space: nowrap; }
+/* Mode « mobile » de Streamlit : la barre latérale recouvre le contenu ;
+   on décale le contenu de la largeur du rail. */
+@media (max-width: 767px) {
+  [data-testid="stMain"] { margin-left: 72px; width: calc(100% - 72px); }
 }
