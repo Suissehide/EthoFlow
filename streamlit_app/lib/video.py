@@ -29,7 +29,7 @@ from __future__ import annotations
 import math
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import cv2
 import numpy as np
@@ -195,8 +195,9 @@ def draw_scale_line(frame: np.ndarray, p1: tuple[int, int], p2: tuple[int, int])
 def find_relinks(project: Path, videos_dir: Path, ext: str = "mp4") -> list[tuple[str, Path]]:
     """Sessions dont la `source_video` actuelle est absente, avec le fichier retrouvé sous `videos_dir`.
 
-    Cherche `<videos_dir>/<id>.<ext>` où `id` vient de `metadata["id"]`,
-    à défaut du nom du dossier de session. Ne retourne que les sessions
+    Cherche le nom de fichier de l'ancienne `source_video`, à défaut
+    `<videos_dir>/<id>.<ext>` où `id` vient de `metadata["id"]`, puis du
+    nom du dossier de session. Ne retourne que les sessions
     dont la vidéo retrouvée existe réellement — une session dont la
     vidéo actuelle est valide ne doit jamais être proposée au
     re-pointage.
@@ -211,9 +212,15 @@ def find_relinks(project: Path, videos_dir: Path, ext: str = "mp4") -> list[tupl
         source = meta.get("source_video")
         if source and Path(source).is_file():
             continue
-        video_id = meta.get("id") or session_id
-        candidat = videos_dir / f"{video_id}.{ext}"
-        if candidat.is_file():
+        # D'abord le nom de fichier de l'ancienne source_video : c'est le
+        # vrai nom (sync_from_excel nomme le dossier BV-970 mais la vidéo
+        # 970.mp4), extension comprise. PureWindowsPath coupe sur / et \\,
+        # donc un chemin Windows se lit aussi depuis macOS/Linux.
+        noms = [PureWindowsPath(source).name] if source else []
+        noms.append(f"{meta.get('id') or session_id}.{ext}")
+        candidat = next((videos_dir / n for n in noms
+                         if (videos_dir / n).is_file()), None)
+        if candidat is not None:
             resultats.append((session_id, candidat))
     return resultats
 

@@ -180,6 +180,28 @@ def arenes_dataframe(meta: dict | None) -> pd.DataFrame:
     return pd.DataFrame(lignes, columns=colonnes)
 
 
+def _retype(valeur, ancienne):
+    """Rend au texte saisi le type que le champ avait dans le YAML.
+
+    L'éditeur affiche tout en texte : sans ça, enregistrer une fois
+    transforme `mouse_id: 970` en `'970'` (et dates, booléens, flottants
+    de même), ce qui change les groupements des analyses. Un texte qui ne
+    se relit pas dans le type d'origine reste du texte.
+    """
+    if not isinstance(valeur, str):
+        return valeur
+    valeur = valeur.strip()
+    if ancienne is None or isinstance(ancienne, str):
+        return valeur
+    try:
+        relu = yaml.safe_load(valeur)
+    except yaml.YAMLError:
+        return valeur
+    if isinstance(ancienne, float) and type(relu) is int:
+        relu = float(relu)
+    return relu if type(relu) is type(ancienne) else valeur
+
+
 def save_metadata_fields(
     project: Path, session_id: str, champs: dict
 ) -> bool:
@@ -205,7 +227,7 @@ def save_metadata_fields(
         if valeur is None or (isinstance(valeur, str) and not valeur.strip()):
             meta.pop(cle, None)
         else:
-            meta[cle] = valeur.strip() if isinstance(valeur, str) else valeur
+            meta[cle] = _retype(valeur, meta.get(cle))
     chemin.write_text(
         yaml.safe_dump(meta, sort_keys=False, allow_unicode=True),
         encoding="utf-8",

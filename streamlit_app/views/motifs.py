@@ -240,12 +240,15 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
                 st.caption(f"**{groupe}**")
                 cols = st.columns(3)
                 for i, terme in enumerate(termes):
-                    if cols[i % 3].button(
+                    # Via on_click : modifier la clé d'un widget déjà
+                    # instancié dans ce run lève StreamlitAPIException ;
+                    # le callback, lui, tourne avant sa recréation.
+                    cols[i % 3].button(
                         terme, key=f"motifs_voc_{motif_id}_{groupe}_{terme}",
                         width="stretch",
-                    ):
-                        st.session_state[label_key] = terme
-                        st.rerun()
+                        on_click=st.session_state.__setitem__,
+                        args=(label_key, terme),
+                    )
 
 
 # ============================================================

@@ -169,3 +169,21 @@ def test_galerie_qc_sans_labeled_mp4_est_presente_comme_normale(tmp_path, monkey
         [w.value for w in at.warning]
     assert not any("_labeled.mp4" in e.value for e in at.error), \
         [e.value for e in at.error]
+
+
+def test_toutes_les_sessions_ignore_la_selection_perimee(tmp_path, monkeypatch):
+    """Régression : le multiselect désactivé garde son ancienne valeur, et
+    prepare_vame_input (sans --all) la recevait malgré « Toutes » cochée."""
+    import lib.pipeline as PL
+    appels = []
+    original = PL.prepare_vame_input
+    monkeypatch.setattr(PL, "prepare_vame_input",
+                        lambda *a, **kw: appels.append(kw) or original(*a, **kw))
+
+    projet = _projet(tmp_path)
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    at.checkbox(key="nettoyage_clean_all").uncheck().run()
+    at.multiselect(key="nettoyage_clean_sel").select("S1").run()
+    at.checkbox(key="nettoyage_clean_all").check().run()
+    assert not at.exception, at.exception
+    assert appels[-1]["sessions"] == []

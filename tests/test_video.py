@@ -75,6 +75,21 @@ def test_relink_retrouve_les_videos_deplacees(project, session_factory, tmp_path
     assert meta["source_video"] == str(nouveau / "BV-970.mp4")
 
 
+def test_relink_metadata_reelle_de_sync_from_excel(project, tmp_path):
+    """Régression : sync_from_excel écrit le dossier BV-970 mais la vidéo
+    970.mp4, sans clé `id` — l'ancienne recherche de BV-970.mp4 ne
+    trouvait jamais rien. Extension autre que mp4 incluse."""
+    sdir = project / "data" / "raw" / "BV-970"
+    sdir.mkdir(parents=True)
+    (sdir / "metadata.yaml").write_text(yaml.safe_dump({
+        "session_id": "BV-970", "mouse_id": 970,
+        "source_video": r"D:\ancien\chemin\970.avi"}))
+    nouveau = tmp_path / "videos"
+    nouveau.mkdir()
+    (nouveau / "970.avi").write_bytes(b"\x00")
+    assert V.find_relinks(project, nouveau) == [("BV-970", nouveau / "970.avi")]
+
+
 def test_relink_ignore_les_sessions_deja_ok(project, session_factory, tmp_path):
     session_factory("BV-971")           # vidéo présente et valide
     assert V.find_relinks(project, tmp_path) == []

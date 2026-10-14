@@ -341,3 +341,17 @@ def test_reprise_ancien_yaml_proposee_et_ecrit_apres_confirmation(tmp_path, monk
 
     apres = csv_path.read_text(encoding="utf-8-sig")
     assert "grooming" in apres
+
+
+def test_vocabulaire_suggere_remplit_le_label(tmp_path, monkeypatch):
+    """Régression : le bouton écrivait la clé du champ Label après son
+    instanciation -> StreamlitAPIException au lieu de remplir le champ."""
+    projet = _projet(tmp_path)
+    _ecrire_csv(projet, ["0;;;;;;5.00;"])
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    bouton = [b for b in at.button if b.key.startswith("motifs_voc_0_")][0]
+    bouton.click().run()
+    assert not at.exception, at.exception
+    champ_label = [t for t in at.text_input if t.label == "Label (texte libre)"][0]
+    assert champ_label.value == bouton.label

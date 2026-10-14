@@ -279,3 +279,25 @@ def test_save_arenes_n_impose_aucune_colonne(project):
     arene = _lire_meta(project, "S1")["arenes"][0]
     assert arene["regime"] == "gras"
     assert arene["observateur"] == "Léa"
+
+
+def test_save_metadata_conserve_les_types(project):
+    """L'éditeur renvoie tout en texte : un int, un float, un bool ou une
+    date doivent garder leur type, sinon les groupements changent."""
+    import datetime
+    _ecrire_meta(project, "S1", {"id": "S1", "mouse_id": 970, "poids": 21.5,
+                                 "ko": True, "date": datetime.date(2026, 1, 2),
+                                 "group": "MCC"})
+    S.save_metadata_fields(project, "S1", {
+        "mouse_id": "970", "poids": "22", "ko": "False",
+        "date": "2026-01-03", "group": "42",
+    })
+    apres = _lire_meta(project, "S1")
+    assert apres["mouse_id"] == 970
+    assert apres["poids"] == 22.0 and isinstance(apres["poids"], float)
+    assert apres["ko"] is False
+    assert apres["date"] == datetime.date(2026, 1, 3)
+    assert apres["group"] == "42", "un champ texte reste du texte"
+    # Saisie illisible dans le type d'origine : gardée telle quelle.
+    S.save_metadata_fields(project, "S1", {"mouse_id": "inconnu"})
+    assert _lire_meta(project, "S1")["mouse_id"] == "inconnu"

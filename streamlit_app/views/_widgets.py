@@ -26,7 +26,10 @@ def selecteur_sessions(projet: Path, *, cle: str) -> tuple[list[str], bool]:
     choisies = st.multiselect(
         "Sessions", options=list(df["session_id"]), disabled=tout, key=f"{cle}_sel",
     )
-    return choisies, tout
+    # Le multiselect désactivé garde son ancienne valeur : sans ce garde,
+    # un appelant qui ne transmet que `choisies` (prepare_vame_input n'a
+    # pas de --all) lancerait la sélection périmée au lieu de tout.
+    return ([] if tout else choisies), tout
 
 
 def champ_chemin(
