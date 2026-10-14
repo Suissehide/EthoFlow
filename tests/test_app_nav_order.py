@@ -22,7 +22,7 @@ REPO = Path(__file__).resolve().parent.parent
 APP_PY = str(REPO / "streamlit_app" / "app.py")
 
 ORDRE_ATTENDU = [
-    "Projet",       # tableau de bord ; « Projets » le précède dans le rail
+    "Tableau de bord",  # page « Projet » ; « Projets » (la liste) la précède dans le rail
     "Données",
     "Vidéos & calibration",
     "Pose (DLC)",

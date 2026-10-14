@@ -80,7 +80,9 @@ PAGES: list[dict] = [
 # Pages requiring a project : sans projet, elles restent dans le rail mais
 # grisées et non cliquables (handoff « projets »).
 PROJECT_PAGES: list[dict] = [
-    {"name": "Projet",             "icon": "layout-dashboard", "render": projet.render,         "key": "projet"},
+    # Libellé du rail distinct de « Projets » (la liste) : le nom interne reste « Projet ».
+    {"name": "Projet",             "icon": "layout-dashboard", "render": projet.render,         "key": "projet",
+     "libelle": "Tableau de bord"},
     {"name": "Données",            "icon": "file-spreadsheet", "render": donnees.render,        "key": "donnees"},
     {"name": "Vidéos & calibration", "icon": "video",           "render": videos.render,          "key": "videos"},
     {"name": "Pose (DLC)",         "icon": "scan-line",        "render": pose.render,            "key": "pose"},
@@ -134,8 +136,9 @@ st.sidebar.markdown(f"<style>{_rail_css}</style>", unsafe_allow_html=True)
 
 def _bouton_rail(page: dict) -> None:
     inactif = page["name"] not in _ALL_PAGES
-    if st.button(page["name"], key=f"nav_{page['key']}", disabled=inactif,
-                 help=f"{page['name']} : ouvre d'abord un projet" if inactif else page["name"]):
+    libelle = page.get("libelle", page["name"])
+    if st.button(libelle, key=f"nav_{page['key']}", disabled=inactif,
+                 help=f"{libelle} : ouvre d'abord un projet" if inactif else libelle):
         st.session_state.current_page = page["name"]
         st.rerun()
 
