@@ -41,7 +41,7 @@ import lib.motif_labels as ML
 import lib.pipeline as PL
 import lib.vame as VA
 from lib.analysis import (csv_separator, group_analysis_files,
-                          parse_list_columns)
+                          parse_list_columns, usage_par_groupe)
 from lib.config import require_project
 from lib import runner
 from views import _job
@@ -358,6 +358,105 @@ def _tab_resultats(projet: Path, axes: list[dict]) -> None:
 
 
 # ============================================================
+# Usage par groupe — graphique interactif calculé dans l'app
+# ============================================================
+
+# Palette catégorielle de référence (skill dataviz), validée contre les
+# fonds Streamlit clair (#ffffff) et sombre (#0e1117) : ordre fixe, jamais
+# cyclé — d'où le plafond de 8 groupes. En clair, 3 teintes passent sous
+# 3:1 de contraste : le tableau sous le graphique sert de relais.
+_PALETTE = {
+    "light": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+              "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
+    "dark": ["#3987e5", "#d95926", "#199e70", "#c98500",
+             "#d55181", "#008300", "#9085e9", "#e66767"],
+}
+_FOND = {"light": "#ffffff", "dark": "#0e1117"}
+
+
+@st.cache_data(ttl=60, show_spinner="Lecture des motif_usage…")
+def _usage_cache(projet: str, algo: str):
+    return usage_par_groupe(Path(projet), algo)
+
+
+def _tab_usage(projet: Path) -> None:
+    import altair as alt
+
+    st.caption(
+        "Fréquence de chaque motif par session, colorée par groupe ; le "
+        "trait épais est la moyenne du groupe. Descriptif uniquement — les "
+        "tests statistiques sont dans « Lancer une analyse »."
+    )
+    algos = VA.list_algos(projet)
+    if not algos:
+        st.info("Aucune segmentation VAME pour l'instant — page **VAME**, étape segment.")
+        return
+
+    col_algo, col_axe = st.columns(2)
+    algo = col_algo.selectbox("Segmentation", algos, key="analyses_usage_algo")
+    df, colonnes = _usage_cache(str(projet), algo)
+    colonnes = [c for c in colonnes if c[1] <= len(_PALETTE["light"])]
+    if df.empty or not colonnes:
+        st.info(
+            "Aucune colonne de l'Excel ne sépare ces sessions en 2 à 8 "
+            "groupes. Ajoute-en une dans **Données** (ex : `group`)."
+        )
+        return
+    noms = [c[0] for c in colonnes]
+    # `group` = la variable de comparaison principale de l'Excel (template).
+    noms.sort(key=lambda n: n not in ("group", "condition"))
+    axe = col_axe.selectbox(
+        "Comparer par", noms, key="analyses_usage_axe",
+        format_func=lambda n: f"{n} ({next(c[1] for c in colonnes if c[0] == n)} groupes)",
+    )
+
+    df = df.dropna(subset=[axe]).assign(groupe=lambda d: d[axe].astype(str),
+                                        pct=lambda d: 100 * d["frequency"])
+    groupes = sorted(df["groupe"].unique())
+    ordre = (df.groupby("motif_nom")["pct"].mean()
+             .sort_values(ascending=False).index.tolist())
+    effectifs = df.groupby("groupe")["session"].nunique()
+    mode = "dark" if st.context.theme.type == "dark" else "light"
+    couleur = alt.Color("groupe:N", title=axe, scale=alt.Scale(
+        domain=groupes, range=_PALETTE[mode][:len(groupes)]))
+
+    base = alt.Chart(df).encode(
+        x=alt.X("motif_nom:N", sort=ordre, title=None,
+                axis=alt.Axis(labelAngle=-40, labelLimit=160)),
+        xOffset=alt.XOffset("groupe:N", sort=groupes),
+        color=couleur,
+    )
+    points = base.mark_circle(size=70, opacity=0.75, stroke=_FOND[mode],
+                              strokeWidth=1.5).encode(
+        y=alt.Y("pct:Q", title="Usage (% des frames)"),
+        tooltip=[alt.Tooltip("session:N", title="Session"),
+                 alt.Tooltip("groupe:N", title=axe),
+                 alt.Tooltip("motif_nom:N", title="Motif"),
+                 alt.Tooltip("pct:Q", title="Usage (%)", format=".1f")],
+    )
+    moyennes = base.mark_tick(thickness=3, size=18).encode(
+        y=alt.Y("mean(pct):Q"),
+        tooltip=[alt.Tooltip("groupe:N", title=axe),
+                 alt.Tooltip("motif_nom:N", title="Motif"),
+                 alt.Tooltip("mean(pct):Q", title="Moyenne (%)", format=".1f"),
+                 alt.Tooltip("count(session):Q", title="Sessions")],
+    )
+    st.altair_chart((points + moyennes).properties(height=380), width="stretch")
+
+    st.caption("Sessions par groupe : " + " · ".join(
+        f"{g} : {effectifs[g]}" for g in groupes))
+    tableau = (df.pivot_table(index="motif_nom", columns="groupe", values="pct",
+                              aggfunc="mean").reindex(ordre).round(2))
+    tableau.columns = [f"{g} (n={effectifs[g]})" for g in tableau.columns]
+    with st.expander("Tableau des moyennes (%)", expanded=False):
+        st.dataframe(tableau, width="stretch")
+        st.download_button(
+            "Télécharger (CSV)", tableau.to_csv(sep=";").encode("utf-8-sig"),
+            file_name=f"usage_{algo}_par_{axe}.csv", key="btn_usage_csv",
+        )
+
+
+# ============================================================
 # Entrée
 # ============================================================
 
@@ -378,7 +477,10 @@ def render() -> None:
     # (ruling R17.1).
     axes = _axes_disponibles(projet)
 
-    onglet_lancer, onglet_resultats = st.tabs(["Lancer une analyse", "Résultats"])
+    onglet_usage, onglet_lancer, onglet_resultats = st.tabs(
+        ["Usage par groupe", "Lancer une analyse", "Résultats"])
+    with onglet_usage:
+        _tab_usage(projet)
     with onglet_lancer:
         _tab_lancer(projet, axes)
     with onglet_resultats:

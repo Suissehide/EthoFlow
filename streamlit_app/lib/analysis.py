@@ -163,3 +163,40 @@ def group_analysis_files(
          for axe, fichiers in sorted(par_axe.items())},
         autres,
     )
+
+
+# ============================================================
+# Usage des motifs par groupe — calculé dans l'app, sans job
+# ============================================================
+
+def usage_par_groupe(project: Path, algo: str) -> tuple["pd.DataFrame", list[tuple[str, int, list]]]:
+    """Table longue session × motif, avec les attributs de chaque session.
+
+    Le rattachement session -> attributs (y compris arène -> souris en
+    multi-animaux) et le choix des colonnes groupables viennent de
+    `analyze_vame.py` lui-même : les groupes vus ici sont ceux de l'analyse
+    statistique, pas une seconde interprétation de la metadata.
+
+    Retourne `(df, colonnes)` ; `df` a `session`, `motif`, `frequency`,
+    `motif_nom` + une colonne par attribut ; `colonnes` est la sortie de
+    `usable_group_columns` (nom, nombre de groupes, valeurs).
+    """
+    import pandas as pd
+
+    from lib import motif_labels as ML  # met scripts/ dans sys.path (lib.project)
+    from lib.vame import motif_usage_df
+
+    import analyze_vame as AV
+
+    usage = motif_usage_df(project, algo)
+    if usage.empty:
+        return usage, []
+    index = AV.load_metadata_index(Path(project))
+    attributs = pd.DataFrame([
+        {**index.get(AV.parse_session_name(s), {}), "session": s}
+        for s in usage["session"].unique()
+    ])
+    labels = AV.load_motif_labels(ML.path(project) if ML.exists(project) else None)
+    df = usage.merge(attributs, on="session", how="left")
+    df["motif_nom"] = df["motif"].map(lambda m: AV.motif_display(int(m), labels))
+    return df, AV.usable_group_columns(attributs.drop(columns=["session"]))

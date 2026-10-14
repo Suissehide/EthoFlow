@@ -194,3 +194,28 @@ def test_cases_group_by_apparaissent_apres_decouverte(tmp_path, monkeypatch):
     assert not at.exception, at.exception
     cases_apres = {c.key: c for c in at.checkbox}
     assert "analyses_gb_captopril" in cases_apres
+
+
+def test_onglet_usage_par_groupe_graphique_et_tableau(tmp_path, monkeypatch):
+    import numpy as np
+    projet = _projet(tmp_path)
+    for sid, groupe, usage in [("S1", "KO", [1, 3, 0]), ("S2", "WT", [4, 0, 0])]:
+        sdir = projet / "data" / "raw" / sid
+        sdir.mkdir(parents=True)
+        (sdir / "metadata.yaml").write_text(
+            yaml.safe_dump({"session_id": sid, "group": groupe}), encoding="utf-8")
+        d = projet / "data" / "vame" / "results" / sid / "VAME" / "hmm-3"
+        d.mkdir(parents=True)
+        np.save(d / f"motif_usage_{sid}.npy", np.asarray(usage, dtype=float))
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert at.selectbox(key="analyses_usage_axe").value == "group"
+    assert len(at.get("vega_lite_chart")) == 1
+    tableau = at.dataframe[0].value
+    assert list(tableau.columns) == ["KO (n=1)", "WT (n=1)"]
+    assert tableau.loc["motif_0", "WT (n=1)"] == 100.0
+
+
+def test_onglet_usage_sans_segmentation_l_explique(tmp_path, monkeypatch):
+    at = _lancer_sur_projet(tmp_path, monkeypatch, _projet(tmp_path))
+    assert any("Aucune segmentation" in i.value for i in at.info)

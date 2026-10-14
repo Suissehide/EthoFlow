@@ -205,3 +205,30 @@ def test_le_csv_global_se_relit_avec_le_separateur_detecte(tmp_path):
     relu = pd.read_csv(f, sep=csv_separator(f))
     assert list(relu.columns) == list(df.columns)
     assert relu.loc[0, "value"] == pytest.approx(0.36)
+
+
+def _segmentation(vame, session, usage):
+    import numpy as np
+    d = vame / "results" / session / "VAME" / "hmm-3"
+    d.mkdir(parents=True)
+    np.save(d / f"motif_usage_{session}.npy", np.asarray(usage, dtype=float))
+
+
+def test_usage_par_groupe_rattache_les_groupes_de_l_excel(project, session_factory):
+    from lib.analysis import usage_par_groupe
+    vame = project / "data" / "vame"
+    for sid, groupe, usage in [("S1", "KO", [1, 3, 0]), ("S2", "KO", [2, 2, 0]),
+                               ("S3", "WT", [4, 0, 0])]:
+        session_factory(sid, group=groupe)
+        _segmentation(vame, sid, usage)
+    (vame / "motif_labels.csv").write_text(
+        "motif_id;label;category\n0;grooming;\n", encoding="utf-8-sig")
+
+    df, colonnes = usage_par_groupe(project, "hmm-3")
+
+    assert ("group", 2, ["KO", "WT"]) in colonnes
+    s1 = df[df["session"] == "S1"].set_index("motif")
+    assert s1.loc[0, "group"] == "KO"
+    assert s1.loc[1, "frequency"] == 0.75
+    assert s1.loc[0, "motif_nom"] == "0: grooming"
+    assert s1.loc[1, "motif_nom"] == "motif_1"
