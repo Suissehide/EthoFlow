@@ -103,3 +103,52 @@ def champ_chemin(
                 st.warning(message)
 
     return st.session_state[cle]
+
+
+# ============================================================
+# Pages d'étape (refonte 1c) : en-tête et verrou
+# ============================================================
+
+def entete_etape(projet: Path) -> None:
+    """« PROJET · ÉTAPE n / 9 », titre en clair, ce que fait l'étape.
+
+    L'étape est celle de la page courante (`lib.etapes.PAR_PAGE`) : le
+    titre et la phrase sont définis une seule fois, au même endroit que
+    l'état du pipeline.
+    """
+    from html import escape
+
+    from lib.etapes import ETAPES, PAR_PAGE
+
+    etape = PAR_PAGE[st.session_state.get("current_page", "")]
+    st.markdown(
+        f'<p class="ef-label">{escape(projet.name)} · Étape {etape.n} / {len(ETAPES)}</p>'
+        f'<h1 class="ef-titre-etape">{escape(etape.titre)}</h1>'
+        f'<p class="ef-description-etape">{escape(etape.description)}</p>',
+        unsafe_allow_html=True,
+    )
+
+
+def verrou_etape(page: str | None = None) -> str | None:
+    """Pourquoi les lancements de l'étape `page` (défaut : la page courante)
+    sont bloqués, ou None.
+
+    Règle métier : une étape s'ouvre quand la précédente est faite pour
+    toutes les sessions. La page reste consultable ; seuls ses boutons de
+    lancement sont désactivés, avec cette phrase à côté.
+    """
+    from lib import etapes as E
+
+    lignes = st.session_state.get("_etat_pipeline") or []
+    page = page or st.session_state.get("current_page")
+    ligne = next((x for x in lignes if x["etape"].nom == page), None)
+    if ligne is None or ligne["etat"] not in ("next", "locked"):
+        return None
+    # La première étape pas encore faite — pas une étape finie qu'on relance.
+    cour = next((x for x in lignes if x["etat"] == "todo"), None) or E.courante(lignes)
+    if cour is None:
+        return None
+    return (f"Disponible quand l'étape « {cour['etape'].nom} » sera faite pour "
+            f"toutes les sessions ({cour['fait']}/{cour['total']} aujourd'hui)."
+            if cour["total"] else
+            f"Disponible quand l'étape « {cour['etape'].nom} » sera faite.")

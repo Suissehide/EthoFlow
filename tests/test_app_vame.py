@@ -36,6 +36,13 @@ def _projet(tmp_path: Path) -> Path:
     (session_dir / "metadata.yaml").write_text(
         yaml.safe_dump({"source_video": str(session_dir / "S1.mp4")}), encoding="utf-8",
     )
+    # Étapes précédentes faites (vidéo, pose, nettoyage) : VAME n'est pas
+    # verrouillée, ces tests portent sur la logique propre à la page.
+    (session_dir / "S1.mp4").write_bytes(b"\x00")
+    sortie = p / "data" / "dlc-output" / "S1"
+    sortie.mkdir(parents=True)
+    (sortie / "S1DLC.h5").write_bytes(b"\x00")
+    (sortie / "S1_clean.h5").write_bytes(b"\x00")
     return p
 
 
@@ -241,3 +248,66 @@ def test_courbes_d_entrainement_affichees(tmp_path, monkeypatch):
     assert metriques["Meilleur modèle"] == "epoch 20"
     assert metriques["Sans amélioration"] == "10"
     assert len(at.get("vega_lite_chart")) >= 2   # train/test + composante KL
+
+
+def test_vame_verrouillee_tant_que_le_nettoyage_n_est_pas_fait(tmp_path, monkeypatch):
+    """Règle de la refonte : lancement bloqué, raison écrite sous le bouton."""
+    projet = _projet(tmp_path)
+    (projet / "data" / "dlc-output" / "S1" / "S1_clean.h5").unlink()
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert _bouton(at, "btn_vame_setup").disabled
+    assert any("Nettoyage" in c.value and "0/1" in c.value for c in at.caption)
+
+
+def _job_echoue(projet):
+    import json
+    jobs = projet / ".ethoflow" / "jobs"
+    jobs.mkdir(parents=True, exist_ok=True)
+    job_id = "20260101-161400-000000-run_vame"
+    (jobs / f"{job_id}.json").write_text(json.dumps({
+        "job_id": job_id, "script": "run_vame.py", "env": "vame", "label": "VAME train",
+        "argv": ["python", "run_vame.py", "train"], "started_at": "2026-01-01T16:02:00",
+        "ended_at": "2026-01-01T16:14:00", "returncode": 1, "pid": None,
+        "state": "failed", "cancel_requested": False, "owner_pid": None}))
+    (jobs / f"{job_id}.log").write_text("torch.OutOfMemoryError: CUDA out of memory.\n")
+    return job_id
+
+
+def test_relancer_verrouille_comme_lancer(tmp_path, monkeypatch):
+    projet = _projet(tmp_path)
+    job_id = _job_echoue(projet)
+    (projet / "data" / "dlc-output" / "S1" / "S1_clean.h5").unlink()
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert _bouton(at, f"relancer_{job_id}").disabled
+
+
+def test_banniere_d_echec_explique_en_clair(tmp_path, monkeypatch):
+    import json
+    projet = _projet(tmp_path)
+    jobs = projet / ".ethoflow" / "jobs"
+    jobs.mkdir(parents=True)
+    job_id = "20260101-161400-000000-run_vame"
+    (jobs / f"{job_id}.json").write_text(json.dumps({
+        "job_id": job_id, "script": "run_vame.py", "env": "vame", "label": "VAME train",
+        "argv": ["python", "run_vame.py", "train"], "started_at": "2026-01-01T16:02:00",
+        "ended_at": "2026-01-01T16:14:00", "returncode": 1, "pid": None,
+        "state": "failed", "cancel_requested": False, "owner_pid": None}))
+    (jobs / f"{job_id}.log").write_text(
+        "Epoch 15/200\ntorch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.00 GiB\n")
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    texte = " ".join(m.value for m in at.markdown)
+    assert "« VAME train » a échoué après 12 min" in texte
+    assert "carte graphique" in texte and "taille de lot" in texte
+    assert "code de retour 1" in texte
+    assert f"relancer_{job_id}" in {b.key for b in at.button}
+
+
+def test_banniere_seulement_sur_la_page_de_son_etape(tmp_path, monkeypatch):
+    projet = _projet(tmp_path)
+    job_id = _job_echoue(projet)
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert f"relancer_{job_id}" in {b.key for b in at.button}
+    at.button(key="nav_pose").click().run()
+    assert not at.exception, at.exception
+    assert f"relancer_{job_id}" not in {b.key for b in at.button}

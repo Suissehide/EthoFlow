@@ -663,14 +663,7 @@ def _section_avancee(projet: Path) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("Nettoyage")
-    st.caption(
-        "Étape 6b du pipeline : nettoyage des poses DLC avant VAME. "
-        "Facultative — le pipeline tourne sans — mais elle évite qu'un "
-        "keypoint mal tracké devienne un faux motif comportemental. Tourne "
-        "dans l'env conda `dlc`."
-    )
-    st.caption(f"Projet détecté comme `{project_kind(projet)}`.")
+    _widgets.entete_etape(projet)
 
     _section_arenes(projet)
     st.divider()

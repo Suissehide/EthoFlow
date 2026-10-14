@@ -441,3 +441,14 @@ def test_panneau_affiche_la_barre(project, monkeypatch, tmp_path):
     assert not at.exception, at.exception
     assert [b.proto.value for b in barres] == [62]       # (2 + 0.5) / 4
     assert "Session 3/4 · S3 — 50 %" in barres[0].proto.text
+
+
+def test_restart_reprend_la_meme_ligne_de_commande(project):
+    R.start(project, PL.Command(env="ethoflow", script="__test__",
+                                args=["python", "-c", "import sys; sys.exit(3)"], label="raté"))
+    rate = _attendre_fin(project)
+    assert rate.state == "failed"
+    R.restart(project, rate)
+    relance = _attendre_fin(project)
+    assert relance.job_id != rate.job_id
+    assert (relance.argv, relance.label, relance.script) == (rate.argv, rate.label, rate.script)

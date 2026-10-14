@@ -52,6 +52,8 @@ def _projet(tmp_path: Path, *, kind: str = "single",
     (session_dir / "metadata.yaml").write_text(
         yaml.safe_dump({"source_video": str(session_dir / "S1.mp4")}), encoding="utf-8",
     )
+    # La vidéo existe : l'étape Vidéos est faite, la Pose n'est pas verrouillée.
+    (session_dir / "S1.mp4").write_bytes(b"\x00")
 
     if avec_crop:
         cropped_session = p / "data" / "cropped" / "S1"

@@ -51,7 +51,8 @@ ETAPES: tuple[Etape, ...] = (
           colonne="DLC", scripts=("run_dlc_inference.py",), apres="après la pose"),
     Etape(5, "Nettoyage", "brush-cleaning", "Nettoyage des poses",
           "Écarte les points peu fiables et répare les petits trous, pour "
-          "donner à VAME des trajectoires propres.",
+          "donner à VAME des trajectoires propres. Facultatif, mais évite "
+          "qu'un point mal suivi devienne un faux comportement.",
           colonne="nettoyage",
           scripts=("prepare_vame_input_custom.py", "assign_arenas.py", "relabel_video.py"),
           apres="après le nettoyage"),
@@ -60,7 +61,8 @@ ETAPES: tuple[Etape, ...] = (
           "en motifs comportementaux.",
           colonne="VAME", scripts=("run_vame.py",), apres="après VAME"),
     Etape(7, "Motifs", "tags", "Nommer les motifs",
-          "Regarde chaque motif et donne-lui un nom et une catégorie."),
+          "Regarde chaque motif et donne-lui un nom et une catégorie : ces "
+          "noms remplacent « motif_0, motif_1… » dans toutes les figures."),
     Etape(8, "Analyses", "chart-column", "Comparer les groupes",
           "Compare l'usage des motifs entre groupes expérimentaux, avec les "
           "statistiques.", scripts=("analyze_vame.py",)),

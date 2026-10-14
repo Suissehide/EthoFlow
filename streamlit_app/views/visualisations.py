@@ -35,6 +35,7 @@ import lib.vame as VA
 from lib.config import require_project
 from lib.icons import lucide_title
 from views import _job
+from views import _widgets
 
 _ALGOS_PAR_DEFAUT = ["hmm", "kmeans"]
 
@@ -334,11 +335,7 @@ def _tab_dendrogramme(projet: Path) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("Visualisations")
-    st.caption(
-        "Rendus optionnels du README (étape 9) — le pipeline tourne sans, "
-        "mais ce sont ceux qui finissent dans un papier ou un poster."
-    )
+    _widgets.entete_etape(projet)
 
     if not VA.list_algos(projet):
         st.info(

@@ -180,6 +180,12 @@ def current(project: Path) -> Job | None:
     return hist[0] if hist else None
 
 
+def restart(project: Path, job: "Job") -> "Job":
+    """Relance un job terminé avec exactement la même ligne de commande."""
+    return start(project, Command(env=job.env, script=job.script, label=job.label),
+                 argv=job.argv)
+
+
 def is_running(project: Path) -> bool:
     """Autorité : verrou présent ET pid réellement vivant.
 
@@ -343,7 +349,8 @@ def _tuer_groupe_de_process(pid: int, is_windows: bool) -> None:
 
 # ---------------------------------------------------------------- exécution
 
-def start(project: Path, cmd: Command) -> Job:
+def start(project: Path, cmd: Command, *, argv: list[str] | None = None) -> Job:
+    """`argv` : la ligne de commande exacte, pour relancer un job à l'identique."""
     project = Path(project)
     if is_running(project):
         en_cours = current(project)
@@ -358,7 +365,7 @@ def start(project: Path, cmd: Command) -> Job:
     # utilisé par `history()` reste valable, `%f` est du zero-padding.
     horodatage = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     job_id = f"{horodatage}-{Path(cmd.script).stem}"
-    argv = _argv(cmd)
+    argv = list(argv) if argv else _argv(cmd)
     # Seul point d'écriture qui doit faire exister `.ethoflow/jobs/` s'il
     # n'existe pas encore (premier job du projet, ou projet tout juste
     # recréé) — voir le commentaire sur `jobs_dir` (ruling R10.6c).

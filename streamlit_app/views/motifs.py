@@ -37,6 +37,7 @@ import lib.motif_labels as ML
 import lib.pipeline as PL
 from lib.config import VOCABULAIRE_SUGGERE, categories, require_project
 from views import _job
+from views import _widgets
 
 
 # ============================================================
@@ -322,14 +323,7 @@ def _tab_table(projet: Path, df: pd.DataFrame) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("Motifs")
-    st.caption(
-        "Étape 8 du pipeline : visionne les clips de chaque motif VAME et "
-        "nomme les comportements. Sauvegarde dans "
-        "`data/vame/motif_labels.csv`, lu par `analyze_vame.py` — sans "
-        "lui, les figures affichent `motif_0`, `motif_1`, etc. au lieu "
-        "d'un vrai nom de comportement."
-    )
+    _widgets.entete_etape(projet)
 
     _job.panneau(projet)
 

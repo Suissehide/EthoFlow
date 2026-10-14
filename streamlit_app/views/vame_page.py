@@ -45,6 +45,7 @@ from lib.config import require_project
 from lib.icons import lucide_title
 from views import _graphiques as G
 from views import _job
+from views import _widgets
 from views._widgets import champ_chemin
 
 # ============================================================
@@ -477,14 +478,7 @@ def _section_apercu(etat: dict) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("VAME")
-    st.caption(
-        "Étape 7 du pipeline : segmentation non supervisée des séquences "
-        "de pose en motifs comportementaux. Contrairement au modèle DLC, "
-        "VAME s'entraîne une fois **par projet** — le VAE apprend la "
-        "structure posturale de ces animaux précis, il n'est pas "
-        "réutilisable ailleurs."
-    )
+    _widgets.entete_etape(projet)
 
     etat = V.stage_status(projet)
 

@@ -775,14 +775,7 @@ def _onglet_echelle(projet: Path) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("Vidéos & calibration")
-    st.caption(
-        "Étapes 4 et 6a du pipeline : regarder une session avant de la "
-        "traiter, comparer ses caractéristiques réelles à ce que déclare la "
-        "metadata, re-pointer une vidéo déplacée, et cropper les arènes pour "
-        "la voie B du multi-animal."
-    )
-    st.caption(f"Projet détecté comme `{project_kind(projet)}`.")
+    _widgets.entete_etape(projet)
 
     onglet_sessions, onglet_crop, onglet_calibration_arenes, onglet_echelle = st.tabs(
         ["Sessions", "Crop", "Calibration arènes", "Échelle px/cm"]

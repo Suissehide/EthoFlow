@@ -28,7 +28,6 @@ from lib.config import (
     cropped_videos_exist,
     dlc_config_status,
     dlc_output_dir,
-    project_kind,
     require_project,
 )
 from lib.icons import lucide_title
@@ -263,12 +262,7 @@ def _section_artefacts(projet: Path) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("Pose (DLC)")
-    st.caption(
-        "Étape 5 du pipeline : inférence DeepLabCut sur la vidéo source de "
-        "chaque session. Tourne dans l'env conda `dlc` — nécessite un GPU."
-    )
-    st.caption(f"Projet détecté comme `{project_kind(projet)}`.")
+    _widgets.entete_etape(projet)
 
     mode = _section_mode(projet)
     st.divider()

@@ -46,6 +46,7 @@ from lib.config import require_project
 from lib.icons import FOND, SERIES
 from lib import runner
 from views import _job
+from views import _widgets
 
 _CLE_CROSS = "analyses_cross_pairs"
 
@@ -453,12 +454,7 @@ def _tab_usage(projet: Path) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("Analyses")
-    st.caption(
-        "Étape 9 du pipeline : transforme la segmentation VAME en "
-        "statistiques et figures. Toute colonne de ton Excel — y compris "
-        "celles que tu as inventées — peut servir d'axe de comparaison."
-    )
+    _widgets.entete_etape(projet)
 
     _job.panneau(projet)
 

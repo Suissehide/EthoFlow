@@ -29,6 +29,7 @@ from lib.sessions import (
     metadata_fields,
 )
 from views import _job
+from views import _widgets
 from views._widgets import champ_chemin
 
 
@@ -310,11 +311,7 @@ def _section_sessions(projet: Path) -> None:
 def render() -> None:
     projet = require_project()
 
-    st.title("Données")
-    st.caption(
-        "Étapes 2 et 3 du pipeline : remplir l'Excel maître, puis en tirer "
-        "les metadata.yaml des sessions."
-    )
+    _widgets.entete_etape(projet)
 
     chemin_excel = _section_excel(projet)
     st.divider()

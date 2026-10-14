@@ -159,3 +159,19 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 [data-testid="stMarkdownContainer"] .ef-tuile b { font-size: 13px; }
 /* Menu des projets (popover du titre) : assez large pour les chemins. */
 [data-testid="stPopoverBody"] { width: 600px; max-width: 90vw; }
+
+/* ---------- Pages d'étape ---------- */
+[data-testid="stMarkdownContainer"] h1.ef-titre-etape {
+  font: 600 30px 'IBM Plex Sans', sans-serif !important; letter-spacing: -0.02em;
+  margin: 2px 0 6px; padding: 0;
+}
+[data-testid="stMarkdownContainer"] p.ef-description-etape {
+  font-size: 15px !important; line-height: 1.5; color: #56534d; max-width: 700px; margin: 0 0 8px;
+}
+/* Bannière d'échec : rouge clair, cause en clair avant le journal. */
+.st-key-carte_echec {
+  background: #fcf3f2 !important; border-color: #efc9c4 !important; padding: 20px 24px !important;
+}
+.ef-echec { display: grid; grid-template-columns: 28px 1fr; gap: 14px; align-items: start; }
+[data-testid="stMarkdownContainer"] p.ef-echec-titre { font: 600 17px 'IBM Plex Sans', sans-serif !important; margin: 0 0 6px; }
+[data-testid="stMarkdownContainer"] p.ef-echec-cause { font-size: 14px !important; line-height: 1.55; color: #56534d; margin: 0; max-width: 640px; }
