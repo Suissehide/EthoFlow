@@ -64,7 +64,9 @@ def render() -> None:
         Pour entraîner un nouveau modèle DeepLabCut (Parcours B du README),
         tu n'utilises pas cette interface : la formation se fait **au terminal**
         via `scripts/dlc_model-training/`. L'app EthoFlow n'importe et utilise
-        que des modèles préalablement entraînés.
+        que des modèles préalablement entraînés ; la page **Qualité DLC**
+        montre en lecture seule les courbes d'entraînement, les erreurs par
+        keypoint et la confiance du modèle sur les vidéos du projet.
 
         Consulte le [README](README.md) pour le détail complet du pipeline et
         [`docs/ETHOFLOW.md`](docs/ETHOFLOW.md) pour la documentation

@@ -26,6 +26,7 @@ ORDRE_ATTENDU = [
     "Données",
     "Vidéos & calibration",
     "Pose (DLC)",
+    "Qualité DLC",
     "Nettoyage",
     "VAME",
     "Motifs",
