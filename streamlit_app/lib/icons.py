@@ -12,6 +12,18 @@ ACCENT = "#10b981"
 ACCENT_BG = "rgba(16,185,129,0.10)"
 ACCENT_HEX = "10b981"  # sans #, pour les SVG
 
+# Palette catégorielle de référence (skill dataviz), validée contre les
+# fonds Streamlit clair (#ffffff) et sombre (#0e1117) : ordre fixe, jamais
+# cyclé — d'où un plafond de 8 séries. En clair, 3 teintes passent sous
+# 3:1 de contraste : chaque graphique doit offrir des libellés ou un tableau en relais.
+SERIES = {
+    "light": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
+              "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
+    "dark": ["#3987e5", "#d95926", "#199e70", "#c98500",
+             "#d55181", "#008300", "#9085e9", "#e66767"],
+}
+FOND = {"light": "#ffffff", "dark": "#0e1117"}
+
 # Inner SVG paths (24×24 viewBox, stroke-based)
 ICONS: dict[str, str] = {
     "layout-dashboard": '<rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/><rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>',

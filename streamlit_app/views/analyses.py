@@ -43,6 +43,7 @@ import lib.vame as VA
 from lib.analysis import (csv_separator, group_analysis_files,
                           parse_list_columns, usage_par_groupe)
 from lib.config import require_project
+from lib.icons import FOND, SERIES
 from lib import runner
 from views import _job
 
@@ -361,17 +362,6 @@ def _tab_resultats(projet: Path, axes: list[dict]) -> None:
 # Usage par groupe — graphique interactif calculé dans l'app
 # ============================================================
 
-# Palette catégorielle de référence (skill dataviz), validée contre les
-# fonds Streamlit clair (#ffffff) et sombre (#0e1117) : ordre fixe, jamais
-# cyclé — d'où le plafond de 8 groupes. En clair, 3 teintes passent sous
-# 3:1 de contraste : le tableau sous le graphique sert de relais.
-_PALETTE = {
-    "light": ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
-              "#e87ba4", "#008300", "#4a3aa7", "#e34948"],
-    "dark": ["#3987e5", "#d95926", "#199e70", "#c98500",
-             "#d55181", "#008300", "#9085e9", "#e66767"],
-}
-_FOND = {"light": "#ffffff", "dark": "#0e1117"}
 
 
 @st.cache_data(ttl=60, show_spinner="Lecture des motif_usage…")
@@ -395,7 +385,7 @@ def _tab_usage(projet: Path) -> None:
     col_algo, col_axe = st.columns(2)
     algo = col_algo.selectbox("Segmentation", algos, key="analyses_usage_algo")
     df, colonnes = _usage_cache(str(projet), algo)
-    colonnes = [c for c in colonnes if c[1] <= len(_PALETTE["light"])]
+    colonnes = [c for c in colonnes if c[1] <= len(SERIES["light"])]
     if df.empty or not colonnes:
         st.info(
             "Aucune colonne de l'Excel ne sépare ces sessions en 2 à 8 "
@@ -418,7 +408,7 @@ def _tab_usage(projet: Path) -> None:
     effectifs = df.groupby("groupe")["session"].nunique()
     mode = "dark" if st.context.theme.type == "dark" else "light"
     couleur = alt.Color("groupe:N", title=axe, scale=alt.Scale(
-        domain=groupes, range=_PALETTE[mode][:len(groupes)]))
+        domain=groupes, range=SERIES[mode][:len(groupes)]))
 
     base = alt.Chart(df).encode(
         x=alt.X("motif_nom:N", sort=ordre, title=None,
@@ -426,7 +416,7 @@ def _tab_usage(projet: Path) -> None:
         xOffset=alt.XOffset("groupe:N", sort=groupes),
         color=couleur,
     )
-    points = base.mark_circle(size=70, opacity=0.75, stroke=_FOND[mode],
+    points = base.mark_circle(size=70, opacity=0.75, stroke=FOND[mode],
                               strokeWidth=1.5).encode(
         y=alt.Y("pct:Q", title="Usage (% des frames)"),
         tooltip=[alt.Tooltip("session:N", title="Session"),

@@ -222,3 +222,22 @@ def test_setup_ne_demande_jamais_rien_depuis_l_app(tmp_path, monkeypatch):
     ]).args
     assert "--no-prompt" in args
     assert args.index("setup") < args.index("--n-clusters")
+
+
+def test_courbes_d_entrainement_affichees(tmp_path, monkeypatch):
+    import numpy as np
+    projet = _projet(tmp_path)
+    vame = _init_vame(projet)
+    d = vame / "model" / "model_losses"
+    d.mkdir(parents=True)
+    np.save(d / "train_losses_VAME.npy", np.linspace(10, 2, 30))
+    np.save(d / "test_losses_VAME.npy", np.r_[np.linspace(9, 3, 20), np.full(10, 3.5)])
+    np.save(d / "weight_values_VAME.npy", np.minimum(1, np.arange(30) / 10))
+    np.save(d / "kl_losses_VAME.npy", np.linspace(1, 0.2, 30))
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    metriques = {m.label: m.value for m in at.metric}
+    assert metriques["Epoch"] == "30"
+    assert metriques["Meilleur modèle"] == "epoch 20"
+    assert metriques["Sans amélioration"] == "10"
+    assert len(at.get("vega_lite_chart")) >= 2   # train/test + composante KL

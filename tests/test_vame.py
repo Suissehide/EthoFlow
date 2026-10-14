@@ -74,3 +74,25 @@ def test_stage_status_align_complete(project, vame_project):
     (vame_project / "data" / "processed").mkdir(parents=True)
     (vame_project / "data" / "processed" / "S1_processed.nc").write_text("mock")
     assert V.stage_status(project)["align"] is True
+
+
+def test_training_losses_et_meilleur_epoch(project, vame_project):
+    import numpy as np
+    from lib import vame as VA
+    d = vame_project / "model" / "model_losses"
+    d.mkdir(parents=True)
+    np.save(d / "train_losses_VAME.npy", np.array([9.0, 5, 4, 3, 2.5]))
+    np.save(d / "test_losses_VAME.npy", np.array([1.0, 6, 5, 3.5, 4]))   # 1.0 : pendant l'annealing
+    np.save(d / "weight_values_VAME.npy", np.array([0.2, 0.6, 1, 1, 1]))
+    np.save(d / "kl_losses_VAME.npy", np.array([1.0, 1, 1, 1]))          # une epoch de retard
+    (d / "kmeans_losses_VAME.npy").write_bytes(b"illisible")
+
+    df = VA.training_losses(project)
+    assert list(df["epoch"]) == [1, 2, 3, 4]
+    assert "kmeans" not in df and "kl" in df
+    assert VA.best_epoch(df) == 4
+
+
+def test_training_losses_absent(project, vame_project):
+    from lib import vame as VA
+    assert VA.training_losses(project) is None

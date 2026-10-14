@@ -124,3 +124,51 @@ def stage_status(project: Path) -> dict[str, bool]:
         "train": any((vp / "model" / "best_model").glob("*.pkl")),
         "segment": any(vp.glob("results/*/*/*/*_label_*.npy")),
     }
+
+
+# Fichiers que vame-py (model/rnn_vae.py) réécrit à CHAQUE epoch sous
+# model/model_losses/ — d'où des courbes lisibles pendant l'entraînement.
+# `mse_test_losses` n'est pas une série (un scalaire), donc absent.
+_LOSSES = {
+    "train": "train_losses", "test": "test_losses",
+    "reconstruction": "mse_train_losses", "kl": "kl_losses",
+    "kmeans": "kmeans_losses", "prediction": "fut_losses",
+    "kl_weight": "weight_values",
+}
+
+
+def training_losses(project: Path) -> pd.DataFrame | None:
+    """Une ligne par epoch (1, 2, …) et une colonne par loss, ou `None`.
+
+    Une série illisible (tenseurs torch picklés, fichier en cours
+    d'écriture) est ignorée plutôt que de masquer les autres ; les séries
+    sont coupées à la plus courte, vame-py les écrivant l'une après l'autre.
+    """
+    dossier = vame_project(project) / "model" / "model_losses"
+    nom = read_config(project).get("model_name") or "VAME"
+    series = {}
+    for colonne, prefixe in _LOSSES.items():
+        fichier = dossier / f"{prefixe}_{nom}.npy"
+        if not fichier.is_file():
+            continue
+        try:
+            series[colonne] = np.asarray(np.load(fichier, allow_pickle=True), dtype=float).ravel()
+        except Exception:
+            continue
+    if "train" not in series:
+        return None
+    n = min(len(v) for v in series.values())
+    df = pd.DataFrame({k: v[:n] for k, v in series.items()})
+    df.insert(0, "epoch", range(1, n + 1))
+    return df
+
+
+def best_epoch(df: pd.DataFrame) -> int | None:
+    """Epoch du modèle sauvegardé : test loss minimale une fois l'annealing
+    KL terminé (vame-py ne sauvegarde qu'avec un poids KL > 0.99)."""
+    if "test" not in df:
+        return None
+    eligibles = df[df["kl_weight"] > 0.99] if "kl_weight" in df else df
+    if eligibles.empty:
+        return None
+    return int(eligibles.loc[eligibles["test"].idxmin(), "epoch"])

@@ -36,12 +36,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 import lib.pipeline as PL
 import lib.vame as V
 from lib.config import require_project
-from lib.icons import lucide_title
+from lib.icons import FOND, SERIES, lucide_title
 from views import _job
 from views._widgets import champ_chemin
 
@@ -251,6 +252,128 @@ def _section_trainset(projet: Path, etat: dict) -> None:
 # Sous-étape 4 : train
 # ============================================================
 
+def _courbes(projet: Path) -> None:
+    """Courbes d'entraînement lues dans `model/model_losses/`, réécrit par
+    vame-py à chaque epoch : on suit un run de plusieurs heures en direct."""
+    import altair as alt
+
+    df = V.training_losses(projet)
+    if df is None:
+        return
+    cfg = V.read_config(projet)
+    n = int(df["epoch"].iloc[-1])
+    meilleur = V.best_epoch(df)
+    max_ep, conv = cfg.get("max_epochs"), cfg.get("model_convergence")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Epoch", f"{n} / {max_ep}" if max_ep else n)
+    if meilleur:
+        c2.metric("Meilleur modèle", f"epoch {meilleur}",
+                  help=f"Test loss {df.loc[meilleur - 1, 'test']:.4g}. C'est le .pkl "
+                       "de model/best_model/.")
+        c3.metric("Sans amélioration", f"{n - meilleur} / {conv}" if conv else n - meilleur,
+                  help="vame-py s'arrête quand ce compteur dépasse "
+                       "`model_convergence` (config.yaml).")
+    else:
+        c2.metric("Meilleur modèle", "—",
+                  help="Pas encore : vame-py ne sauvegarde qu'après l'annealing KL.")
+
+    mode = "dark" if st.context.theme.type == "dark" else "light"
+    neutre = "#9ca3af"
+    noms = {"train": "Train", "test": "Test"}
+    longue = (df.melt("epoch", value_vars=[c for c in noms if c in df],
+                      var_name="serie", value_name="loss")
+              .assign(serie=lambda d: d["serie"].map(noms)))
+    echelle_y = alt.Scale(type="log") if (longue["loss"] > 0).all() else alt.Scale()
+    couleur = alt.Color("serie:N", title=None, scale=alt.Scale(
+        domain=list(noms.values()), range=SERIES[mode][:2]))
+
+    couches = []
+    if "kl_weight" in df:
+        fin = df.loc[df["kl_weight"] > 0.99, "epoch"].min()
+        fin = n if pd.isna(fin) else int(fin)
+        bande = pd.DataFrame({"debut": [1], "fin": [fin], "texte": ["annealing KL"]})
+        couches += [
+            alt.Chart(bande).mark_rect(color=neutre, opacity=0.12)
+            .encode(x="debut:Q", x2="fin:Q"),
+            alt.Chart(bande).mark_text(align="left", baseline="top", dx=4, dy=4,
+                                       color=neutre, fontSize=11)
+            .encode(x="debut:Q", y=alt.value(0), text="texte:N"),
+        ]
+    survol = alt.selection_point(fields=["epoch"], nearest=True, on="pointerover",
+                                 empty=False, clear="pointerout")
+    lignes = alt.Chart(longue).encode(
+        x=alt.X("epoch:Q", title="Epoch", axis=alt.Axis(grid=False, tickCount=10)),
+        y=alt.Y("loss:Q", title="Loss (échelle log)" if echelle_y.type == "log" else "Loss",
+                scale=echelle_y, axis=alt.Axis(tickCount=4, gridOpacity=0.5)),
+        color=couleur,
+    )
+    couches += [
+        lignes.mark_line(strokeWidth=2),
+        lignes.mark_point(filled=True, size=60).encode(
+            opacity=alt.condition(survol, alt.value(1), alt.value(0))),
+        alt.Chart(df).mark_rule(color=neutre).encode(x="epoch:Q").transform_filter(survol),
+        alt.Chart(df).mark_rule(opacity=0, strokeWidth=12).encode(
+            x="epoch:Q",
+            tooltip=[alt.Tooltip("epoch:Q", title="Epoch")]
+            + [alt.Tooltip(f"{c}:Q", title=noms[c], format=".4g") for c in noms if c in df],
+        ).add_params(survol),
+        # Libellés directs en bout de courbe (encre neutre, la ligne porte la couleur).
+        alt.Chart(longue[longue["epoch"] == n]).mark_text(align="left", dx=6, color=neutre)
+        .encode(x="epoch:Q", y=alt.Y("loss:Q", scale=echelle_y), text="serie:N"),
+    ]
+    if meilleur:
+        repere = pd.DataFrame({"epoch": [meilleur], "texte": ["meilleur modèle"]})
+        couches += [
+            alt.Chart(repere).mark_rule(color=neutre, strokeDash=[4, 4]).encode(x="epoch:Q"),
+            alt.Chart(repere).mark_text(align="left", baseline="top", dx=4, dy=4,
+                                        color=neutre, fontSize=11)
+            .encode(x="epoch:Q", y=alt.value(0), text="texte:N"),
+        ]
+    st.altair_chart(alt.layer(*couches).properties(height=300), width="stretch")
+
+    composantes = {"reconstruction": "Reconstruction (MSE)", "kl": "KL",
+                   "kmeans": "K-means", "prediction": "Prédiction"}
+    presentes = [c for c in composantes if c in df and df[c].abs().sum() > 0]
+    if presentes:
+        with st.expander("Composantes de la loss train", expanded=False):
+            cols = st.columns(2)
+            for i, c in enumerate(presentes):
+                with cols[i % 2]:
+                    st.altair_chart(
+                        alt.Chart(df).mark_line(strokeWidth=2, color=SERIES[mode][0])
+                        .encode(x=alt.X("epoch:Q", title="Epoch",
+                                        axis=alt.Axis(grid=False, tickCount=6)),
+                                y=alt.Y(f"{c}:Q", title=None,
+                                        axis=alt.Axis(tickCount=3, gridOpacity=0.5)),
+                                tooltip=[alt.Tooltip("epoch:Q", title="Epoch"),
+                                         alt.Tooltip(f"{c}:Q", title=composantes[c],
+                                                     format=".4g")])
+                        .properties(title=composantes[c], height=200),
+                        width="stretch",
+                    )
+    with st.expander("Tableau des losses", expanded=False):
+        st.dataframe(df, hide_index=True, width="stretch")
+
+
+# Rafraîchie toutes les 30 s pendant un `train` : vame-py réécrit les
+# losses à chaque epoch, il suffit de les relire.
+_courbes_en_direct = st.fragment(run_every=30)(_courbes)
+
+
+def _section_courbes(projet: Path) -> None:
+    from lib import runner
+
+    job = runner.current(projet)
+    en_cours = (runner.is_running(projet) and job is not None
+                and job.script == "run_vame.py" and "train" in job.argv)
+    if en_cours:
+        st.caption("Entraînement en cours — courbes rafraîchies toutes les 30 s.")
+        _courbes_en_direct(projet)
+    else:
+        _courbes(projet)
+
+
 def _section_train(projet: Path, etat: dict) -> None:
     _entete_etape("train", etat["train"])
     if etat["train"]:
@@ -264,6 +387,8 @@ def _section_train(projet: Path, etat: dict) -> None:
         )
     else:
         st.caption("Aucun modèle sauvegardé pour l'instant.")
+
+    _section_courbes(projet)
 
     st.warning(
         "**Dure 3 à 8 h sur GPU.** Le job tourne en arrière-plan et son "
