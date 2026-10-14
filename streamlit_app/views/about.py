@@ -14,14 +14,16 @@ def render() -> None:
         **EthoFlow** est une interface web légère pour orchestrer l'analyse
         comportementale de souris avec **DeepLabCut** et **VAME**. Elle pilote
         les scripts de `scripts/` (chacun tournant dans son propre
-        environnement conda — `dlc`, `pipeline` ou `vame`) sans dupliquer leur
+        environnement conda — `ethoflow`, `dlc` ou `vame`) sans dupliquer leur
         logique : l'app construit et lance la commande, affiche le suivi de
         job, et lit les fichiers produits.
 
-        ## Les neuf pages du pipeline
+        ## Les pages
 
-        - **Projet** — ouvrir ou créer un projet, désigner le modèle DLC à
-          utiliser, suivre l'avancement global.
+        - **Projets** — la page d'accueil : les projets de l'emplacement
+          avec leur étape en cours, et la création d'un nouveau projet.
+        - **Tableau de bord** — le projet ouvert : ses neuf étapes, l'étape
+          en cours, le modèle DLC (menu du nom du projet).
         - **Données** — étapes 2-3 : consulter et modifier l'Excel maître
           (source de vérité), puis le synchroniser en `metadata.yaml` par session.
         - **Vidéos & calibration** — étapes 4 et 6a : localiser/recadrer les
@@ -40,6 +42,7 @@ def render() -> None:
         - **Visualisations** — étape 9, rendus optionnels (motif_gif,
           manifold, dendrogramme de communautés) pour un papier ou un poster.
 
+        **Qualité DLC** montre ce que les diagnostics disent du modèle DLC.
         Deux pages système complètent la navigation : **Configuration**
         (chemins de préférence, santé des environnements conda) et **À
         propos** (cette page).

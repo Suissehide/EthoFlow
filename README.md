@@ -57,7 +57,7 @@ Cette distinction est indépendante de l'angle de la caméra : tu peux avoir du 
 - **GPU** : NVIDIA avec ≥ 8 GB VRAM. Sans GPU, l'entraînement DLC est inexploitable et l'inférence prend des heures par vidéo.
 - **RAM** : 32 GB minimum, 64 GB confortable pour VAME avec beaucoup de sessions.
 - **Disque** : SSD ≥ 500 GB pour le travail actif. HDD/NAS secondaire pour l'archivage.
-- **Logiciels** : [Miniconda](https://docs.conda.io/projects/miniconda/), [Git](https://git-scm.com), [ffmpeg](https://ffmpeg.org) (livré avec l'env `ethoflow`).
+- **Logiciels** : rien à installer à l'avance avec le [lanceur à double-cliquer](#en-un-double-clic-recommandé) — il installe conda ([Miniforge](https://github.com/conda-forge/miniforge)) s'il manque ; ffmpeg est livré avec l'env `ethoflow`. [Git](https://git-scm.com) sert à récupérer le dépôt et ses mises à jour (sinon, ZIP du dépôt).
 
 ---
 
@@ -153,7 +153,11 @@ python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 
 ## Lancer l'interface
 
-Depuis la racine du dépôt, **sans activer d'environnement au préalable** :
+**Le plus simple** : double-clic sur `EthoFlow.bat` (Windows) ou `EthoFlow.command` (macOS, Linux) — voir [En un double-clic](#en-un-double-clic-recommandé). Il vérifie l'installation puis lance l'app, qui s'ouvre dans le navigateur.
+
+L'app s'ouvre sur la page **Projets** : la liste des projets de l'emplacement (avec leur étape en cours) et, à droite, la création d'un nouveau projet. Une fois un projet ouvert, le **tableau de bord** montre les neuf étapes ; le rail de gauche mène à chacune, et la colonne **Activité** à droite suit les jobs en cours. Les étapes se débloquent dans l'ordre : une étape s'ouvre quand la précédente est faite pour toutes les sessions.
+
+**Une fois l'installation faite**, le lanceur seul démarre l'app plus vite, depuis la racine du dépôt, **sans activer d'environnement au préalable** :
 
 ```cmd
 :: Windows
@@ -206,7 +210,9 @@ Le même modèle DLC entraîné une fois est réutilisé pour tous les projets E
 
 ### Étape 1 — créer un projet EthoFlow
 
-Deux façons de lancer — **interactif** (le script demande ce qui manque) ou **tout en arguments**.
+**Dans l'app** : page **Projets** → panneau « Nouveau projet » (nom, nombre d'animaux par vidéo, modèle DLC facultatif) → « Créer et ouvrir le projet ».
+
+**En ligne de commande**, deux façons de lancer — **interactif** (le script demande ce qui manque) ou **tout en arguments**.
 
 **Mode interactif** (recommandé la première fois) :
 

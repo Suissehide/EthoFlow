@@ -54,6 +54,4 @@ Thumbs.db
 *.swp
 *.swo
 
-# Docker
-.docker/
 .vame_config_path
