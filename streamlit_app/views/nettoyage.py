@@ -161,11 +161,12 @@ def _section_nettoyage(projet: Path) -> None:
                 key="nettoyage_window_length",
                 help="Fenêtre du filtre de lissage, en nombre impair d'images.")
             likelihood_threshold = st.number_input(
-                "Confiance minimale", min_value=0.0, max_value=1.0, value=0.70,
+                "Confiance minimale", min_value=0.0, max_value=1.0, value=0.60,
                 step=0.05, key="nettoyage_likelihood",
                 help="La confiance que le modèle donne à chaque point, de 0 à 1. "
                      "Plus haut = plus sévère, plus de points reconstitués. "
-                     "0,70 est la valeur recommandée par l'équipe de VAME. "
+                     "0,60 par défaut : un cran plus permissif que les 0,70 "
+                     "de l'équipe de VAME, pour moins reconstituer. "
                      "Un point peut être sûr de lui et faux : les filtres 3 et 4 "
                      "sont là pour ça.")
             max_speed = st.number_input(
