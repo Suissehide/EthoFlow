@@ -357,7 +357,7 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 .st-key-ef_annuler_creation button p { font-size: 12px !important; }
 /* Barre « Emplacement ». */
 .st-key-barre_emplacement {
-  background: #fff; border: 1px solid #e0ddd5; border-radius: 8px; padding: 12px 16px; gap: 12px;
+  background: #fff; border: 1px solid #e0ddd5; border-radius: 8px; padding: 12px 20px; gap: 12px;
 }
 .st-key-barre_emplacement, [class*="st-key-actions_"] { flex-wrap: nowrap !important; }
 .st-key-barre_emplacement > div:first-child { flex: 1 1 0; min-width: 0; width: auto !important; }
@@ -369,9 +369,10 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 }
 /* Liste des projets. */
 .st-key-liste_projets { background: #fff; border: 1px solid #e0ddd5; border-radius: 10px; gap: 0 !important; overflow: hidden; }
-.st-key-entete_liste { padding: 12px 20px; }
+/* Texte des colonnes calé sur « Emplacement » : 20 (marge) + 16 (icône) + 12 = 48 px. */
+.st-key-entete_liste { padding: 12px 20px 12px 48px; }
 .st-key-entete_liste [data-testid="stMarkdownContainer"] p.ef-label { font-size: 11px !important; }
-[class*="st-key-ligne_"] { padding: 16px 20px; border-top: 1px solid #f1f0ec; }
+[class*="st-key-ligne_"] { padding: 16px 20px 16px 48px; border-top: 1px solid #f1f0ec; }
 [class*="st-key-ligne_dernier_"], [class*="st-key-ligne_"]:hover { background: #faf9f6; }
 [data-testid="stMarkdownContainer"] p.ef-projet-nom { font: 600 15px 'IBM Plex Sans', sans-serif !important; margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ef-tag { font: 500 11px 'IBM Plex Mono', monospace; color: #4f46c8; background: #eceafb; padding: 2px 6px; border-radius: 4px; }
@@ -389,6 +390,9 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 [class*="st-key-actions_"] button p, .st-key-barre_emplacement button p { font-size: 13px !important; }
 [class*="st-key-menu_"] button { width: 32px; padding: 0 !important; justify-content: center; border-color: transparent !important; background: transparent !important; }
 [class*="st-key-menu_"] button:hover { background: #ecebe6 !important; }
+/* Le chevron masqué garde son conteneur : on le retire, sinon « ⋯ » est décalé. */
+[class*="st-key-menu_"] button > div { margin: 0 !important; }
+[class*="st-key-menu_"] button div:has(> span > [data-testid="stIconMaterial"]),
 [class*="st-key-menu_"] button [data-testid="stIconMaterial"],
 [class*="st-key-menu_"] button svg { display: none; }
 /* État vide. */
