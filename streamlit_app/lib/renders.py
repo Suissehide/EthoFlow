@@ -102,13 +102,16 @@ def list_dendrograms(project: Path) -> list[Path]:
 # ============================================================
 
 def _parse_flags(argv: list[str], script: str, *,
-                 value_flags: set[str], bool_flags: set[str]) -> dict[str, str] | None:
+                 value_flags: set[str], bool_flags: set[str],
+                 optional_value_flags: frozenset[str] = frozenset(),
+                 ) -> dict[str, str] | None:
     """Coupe l'`argv` d'un job en flags bruts (`--xxx` -> valeur ou True).
 
     Retourne `None` si le script ne correspond pas, ou si l'`argv`
     contient un flag hors de `value_flags`/`bool_flags` (format futur du
     script, ruling R21.1 appliqué ici aussi) — refuser plutôt que de faire
-    passer une valeur pour autre chose.
+    passer une valeur pour autre chose. `optional_value_flags` : flags
+    `nargs="?"`, valeur `""` quand ils sont passés seuls.
     """
     args = list(argv)
     try:
@@ -130,6 +133,14 @@ def _parse_flags(argv: list[str], script: str, *,
         if tok in bool_flags:
             kwargs[tok] = "1"
             i += 1
+            continue
+        if tok in optional_value_flags:
+            if i + 1 < len(rest) and not rest[i + 1].startswith("--"):
+                kwargs[tok] = rest[i + 1]
+                i += 2
+            else:
+                kwargs[tok] = ""
+                i += 1
             continue
         if tok in value_flags:
             if i + 1 >= len(rest):
@@ -168,9 +179,11 @@ def parse_behavior_structure_gif_args(argv: list[str]) -> dict | None:
         value_flags={"--session", "--algo", "--projection", "--labels",
                      "--start", "--duration", "--output-format"},
         bool_flags={"--with-video", "--pool-all-sessions"},
+        optional_value_flags=frozenset({"--labeled-video"}),
     )
     if raw is None or "--session" not in raw:
         return None
+    labeled = raw.get("--labeled-video")
     return {
         "session": raw["--session"],
         "algo": raw.get("--algo", "hmm"),
@@ -178,9 +191,12 @@ def parse_behavior_structure_gif_args(argv: list[str]) -> dict | None:
         "start": float(raw.get("--start", 0.0)),
         "duration": float(raw["--duration"]) if "--duration" in raw else None,
         "output_format": raw.get("--output-format", "gif"),
-        "with_video": "--with-video" in raw,
+        # --labeled-video implique --with-video dans le script.
+        "with_video": "--with-video" in raw or labeled is not None,
         "pool_all_sessions": "--pool-all-sessions" in raw,
         "labels": raw.get("--labels"),
+        "labeled_video": labeled is not None,
+        "labeled_pcutoff": float(labeled) if labeled else None,
     }
 
 

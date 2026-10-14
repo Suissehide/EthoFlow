@@ -129,7 +129,9 @@ def run_dlc_inference(project: Path, *, mode: str,
                       all_sessions: bool = False,
                       skip_existing: bool = True,
                       video_adapt: bool = False,
-                      video_adapt_batch_size: int = 2) -> Command:
+                      video_adapt_batch_size: int = 2,
+                      batch_size: int | None = None,
+                      fp16: bool = False) -> Command:
     args = _base(project)
     if all_sessions:
         args.append("--all")
@@ -141,6 +143,10 @@ def run_dlc_inference(project: Path, *, mode: str,
     if video_adapt:
         args += ["--video-adapt",
                  "--video-adapt-batch-size", str(video_adapt_batch_size)]
+    if batch_size is not None:
+        args += ["--batch-size", str(batch_size)]
+    if fp16:
+        args.append("--fp16")
     return _cmd("run_dlc_inference.py", args, f"Inférence DLC ({mode})")
 
 
@@ -424,7 +430,9 @@ def behavior_structure_gif(project: Path, *, session: str, algo: str = "hmm",
                            output_format: str = "gif",
                            with_video: bool = False,
                            pool_all_sessions: bool = False,
-                           labels: str | Path | None = None) -> Command:
+                           labels: str | Path | None = None,
+                           labeled_video: bool = False,
+                           labeled_pcutoff: float | None = None) -> Command:
     args = _base(project) + ["--session", session, "--algo", algo,
                              "--projection", projection,
                              "--start", str(start),
@@ -433,6 +441,11 @@ def behavior_structure_gif(project: Path, *, session: str, algo: str = "hmm",
         args += ["--duration", str(duration)]
     if with_video:
         args.append("--with-video")
+    if labeled_video:
+        # Implique --with-video côté script. Sans seuil : la plus récente.
+        args.append("--labeled-video")
+        if labeled_pcutoff is not None:
+            args.append(str(labeled_pcutoff))
     if pool_all_sessions:
         args.append("--pool-all-sessions")
     if labels:

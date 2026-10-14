@@ -242,6 +242,22 @@ def _tab_manifold(projet: Path, sessions: list[str]) -> None:
         help="Nécessite OpenCV et un `source_video` valide dans "
              "`metadata.yaml`. Ralentit un peu le rendu.",
     )
+    labeled_video = st.checkbox(
+        "`--labeled-video` — vidéo annotée DLC (keypoints) dans le panneau",
+        value=False, key="visu_manifold_labeled",
+        help="Remplace la vidéo brute par celle de `data/dlc-output/<session>/` "
+             "(implique `--with-video`). Si elle manque : "
+             "`relabel_video.py --session <s> --pcutoffs 0.3`.",
+    )
+    labeled_pcutoff = None
+    if labeled_video:
+        labeled_pcutoff = st.number_input(
+            "pcutoff (vide = la plus récente)",
+            min_value=0.0, max_value=1.0, value=None, step=0.05,
+            key="visu_manifold_labeled_pcutoff",
+            help="Avec un seuil : exactement la vidéo `*_labeled_pXX.mp4` "
+                 "produite à ce seuil, sans repli sur une autre.",
+        )
     pool_all_sessions = st.checkbox(
         "`--pool-all-sessions` — référentiel commun à toutes les sessions",
         value=False, key="visu_manifold_pool",
@@ -266,6 +282,8 @@ def _tab_manifold(projet: Path, sessions: list[str]) -> None:
         start=float(start), duration=float(duration) if duration else None,
         output_format=output_format, with_video=with_video,
         pool_all_sessions=pool_all_sessions, labels=labels,
+        labeled_video=labeled_video,
+        labeled_pcutoff=float(labeled_pcutoff) if labeled_pcutoff is not None else None,
     )
     _job.bouton_lancer(
         projet, f"Générer le manifold — {session}", cmd,

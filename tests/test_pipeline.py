@@ -245,3 +245,12 @@ def test_parse_prepare_vame_input_args_seuils_manquants_refuse():
         ["conda", "run", "-n", "dlc", "python",
          "/x/prepare_vame_input_custom.py", "--project-dir", "/p", "--no-prompt"],
     ) is None
+
+
+def test_run_dlc_inference_batch_size_et_fp16(project):
+    args = PL.run_dlc_inference(project, mode="custom", all_sessions=True,
+                                batch_size=16, fp16=True).args
+    assert args[args.index("--batch-size") + 1] == "16"
+    assert "--fp16" in args
+    defaut = PL.run_dlc_inference(project, mode="custom", all_sessions=True).args
+    assert "--batch-size" not in defaut and "--fp16" not in defaut

@@ -121,7 +121,9 @@ def _section_mode(projet: Path) -> str:
     return mode
 
 
-def _section_options(projet: Path, mode: str) -> tuple[list[str], bool, bool, bool, int]:
+def _section_options(
+    projet: Path, mode: str,
+) -> tuple[list[str], bool, bool, bool, int, int | None, bool]:
     st.markdown(lucide_title("settings", "Options"), unsafe_allow_html=True)
 
     choisies, tout = _widgets.selecteur_sessions(projet, cle="pose")
@@ -151,12 +153,36 @@ def _section_options(projet: Path, mode: str) -> tuple[list[str], bool, bool, bo
                  "(8) déborde la VRAM d'un RTX 4080/5080.",
         )
 
-    return choisies, tout, skip_existing, video_adapt, int(video_adapt_batch_size)
+    # Mode custom uniquement : le script ignore ces deux flags sinon.
+    batch_size, fp16 = None, False
+    if mode == "custom":
+        col_batch, col_fp16 = st.columns(2)
+        with col_batch:
+            batch_size = int(st.number_input(
+                "`--batch-size`",
+                min_value=1, max_value=128, value=16, step=1,
+                key="pose_batch_size",
+                help="Frames traitées ensemble par la GPU. Sans ce flag, DLC "
+                     "retombe sur 1 — très lent. 16 est un bon départ sur "
+                     "une GPU 16 Go ; baisse si CUDA out of memory.",
+            ))
+        with col_fp16:
+            fp16 = st.checkbox(
+                "Demi-précision (`--fp16`)",
+                value=False, key="pose_fp16",
+                help="Autocast float16 : utilise les Tensor Cores, "
+                     "typiquement 2x plus rapide. Écart sur les positions "
+                     "sous le pixel.",
+            )
+
+    return (choisies, tout, skip_existing, video_adapt,
+            int(video_adapt_batch_size), batch_size, fp16)
 
 
 def _section_lancement(
     projet: Path, mode: str, choisies: list[str], tout: bool,
     skip_existing: bool, video_adapt: bool, video_adapt_batch_size: int,
+    batch_size: int | None = None, fp16: bool = False,
 ) -> None:
     # "absent" ET "introuvable" désactivent le bouton : dans les deux cas
     # `--mode custom --no-prompt` échouerait à coup sûr (ruling R12.1),
@@ -177,6 +203,7 @@ def _section_lancement(
         skip_existing=skip_existing,
         video_adapt=video_adapt,
         video_adapt_batch_size=video_adapt_batch_size,
+        batch_size=batch_size, fp16=fp16,
     )
     _job.bouton_lancer(
         projet, "Lancer l'inférence DLC", cmd,
@@ -245,11 +272,13 @@ def render() -> None:
 
     mode = _section_mode(projet)
     st.divider()
-    choisies, tout, skip_existing, video_adapt, video_adapt_batch_size = _section_options(projet, mode)
+    (choisies, tout, skip_existing, video_adapt, video_adapt_batch_size,
+     batch_size, fp16) = _section_options(projet, mode)
     st.divider()
     _section_lancement(
         projet, mode, choisies, tout,
         skip_existing, video_adapt, video_adapt_batch_size,
+        batch_size, fp16,
     )
     st.divider()
     _section_artefacts(projet)

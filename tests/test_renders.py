@@ -104,7 +104,21 @@ def test_parse_behavior_structure_gif_args_aller_retour(project):
         "session": "S1", "algo": "kmeans", "projection": "pca",
         "start": 5.0, "duration": None, "output_format": "mp4",
         "with_video": True, "pool_all_sessions": True, "labels": None,
+        "labeled_video": False, "labeled_pcutoff": None,
     }
+
+
+def test_parse_behavior_structure_gif_args_labeled_video(project):
+    # Seul (la plus récente) ou avec un seuil, suivi d'autres flags.
+    for pcutoff in (None, 0.3):
+        cmd = PL.behavior_structure_gif(project, session="S1", labeled_video=True,
+                                        labeled_pcutoff=pcutoff,
+                                        pool_all_sessions=True)
+        kwargs = RD.parse_behavior_structure_gif_args(PL.to_argv(cmd))
+        assert kwargs["labeled_video"] is True
+        assert kwargs["labeled_pcutoff"] == pcutoff
+        assert kwargs["with_video"] is True     # implique --with-video
+        assert kwargs["pool_all_sessions"] is True
 
 
 def test_parse_behavior_structure_gif_args_drapeaux_absents_par_defaut(project):
