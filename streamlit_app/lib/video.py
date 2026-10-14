@@ -40,7 +40,7 @@ from lib.sessions import load_metadata, session_ids
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
-from paths import raw_dir  # noqa: E402
+from paths import cropped_dir, dlc_output_dir, raw_dir  # noqa: E402
 
 
 @dataclass
@@ -190,6 +190,27 @@ def draw_scale_line(frame: np.ndarray, p1: tuple[int, int], p2: tuple[int, int])
     cv2.putText(sortie, f"{distance:.1f} px", (pt1[0] + 8, pt1[1] - 8),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 255), 2, cv2.LINE_AA)
     return sortie
+
+
+def session_videos(project: Path, session_id: str, meta: dict) -> dict[str, Path]:
+    """Toutes les vidéos existantes d'une session, libellé -> chemin.
+
+    Source (metadata), arènes croppées (`crop_arenes.py`) et vidéos
+    annotées par DLC (`run_dlc_inference.py`, `relabel_video.py` — en
+    récursif : le mode single-animal les range sous `cropped-raw/`). Toutes
+    ont les mêmes frames que la source, d'où un index de frame partagé.
+    """
+    project = Path(project)
+    videos: dict[str, Path] = {}
+    source = meta.get("source_video")
+    if source and Path(source).is_file():
+        videos["Source"] = Path(source)
+    for p in sorted((cropped_dir(project) / session_id).glob("*.mp4")):
+        videos[f"Arène — {p.stem}"] = p
+    dossier_dlc = dlc_output_dir(project) / session_id
+    for p in sorted(dossier_dlc.rglob("*_labeled*.mp4")):
+        videos[f"Annotée DLC — {p.relative_to(dossier_dlc)}"] = p
+    return videos
 
 
 def find_relinks(project: Path, videos_dir: Path, ext: str = "mp4") -> list[tuple[str, Path]]:

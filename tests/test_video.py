@@ -133,3 +133,19 @@ def test_draw_scale_line_ne_modifie_pas_loriginal():
     sortie = V.draw_scale_line(frame, (10, 10), (60, 10))
     assert frame.sum() == 0
     assert sortie.sum() > 0
+
+
+def test_session_videos_source_arenes_et_annotees(project, session_factory):
+    session_factory("S1")
+    croppe = project / "data" / "cropped" / "S1"
+    croppe.mkdir(parents=True)
+    (croppe / "S1_A1.mp4").write_bytes(b"\x00")
+    rangee = project / "data" / "dlc-output" / "S1" / "cropped-raw"
+    rangee.mkdir(parents=True)
+    (rangee / "S1_A1DLC_labeled.mp4").write_bytes(b"\x00")
+    (rangee / "S1_A1DLC.h5").write_bytes(b"\x00")
+
+    meta = yaml.safe_load((project / "data" / "raw" / "S1" / "metadata.yaml").read_text())
+    videos = V.session_videos(project, "S1", meta)
+    assert list(videos) == ["Source", "Arène — S1_A1",
+                            "Annotée DLC — cropped-raw/S1_A1DLC_labeled.mp4"]

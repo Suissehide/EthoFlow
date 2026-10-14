@@ -437,7 +437,14 @@ def _section_sessions(projet: Path) -> None:
     for i, colonne in enumerate(etapes, start=1):
         cols[i].metric(colonne, int((df[colonne] == "OK").sum()))
 
-    st.dataframe(df, width="stretch", hide_index=True)
+    st.caption("Clique une ligne pour ouvrir ses vidéos.")
+    choix = st.dataframe(df, width="stretch", hide_index=True,
+                         on_select="rerun", selection_mode="single-row",
+                         key="projet_sessions_table")
+    if choix.selection.rows:
+        st.session_state["videos_session_choisie"] = df.iloc[choix.selection.rows[0]]["session_id"]
+        st.session_state.current_page = "Vidéos & calibration"
+        st.rerun()
 
 
 # ============================================================

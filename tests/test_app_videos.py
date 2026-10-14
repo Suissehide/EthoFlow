@@ -618,3 +618,43 @@ def test_echelle_valeur_actuelle_affichee_si_deja_configuree(tmp_path, monkeypat
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
     textes = [c.value for c in at.caption]
     assert any("4.000 px/cm" in t for t in textes), textes
+
+
+def test_visualiseur_frame_a_frame_partage_l_index_entre_videos(
+        tmp_path, monkeypatch, video_reelle):
+    projet = _projet(tmp_path, kind="single")
+    source = video_reelle(tmp_path / "videos", fps=10.0, n=20)
+    video_reelle(projet / "data" / "dlc-output" / "S1",
+                 "S1DLC_resnet50_labeled_p30.mp4", fps=10.0, n=20)
+    _ecrire_session(projet, "S1", source_video=source)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    choix = at.radio(key="videos_choix_S1")
+    assert choix.options == ["Source", "Annotée DLC — S1DLC_resnet50_labeled_p30.mp4"]
+
+    at.button(key="videos_frame_S1_suiv").click().run()
+    at.button(key="videos_frame_S1_suiv").click().run()
+    assert not at.exception, at.exception
+    assert at.slider(key="videos_frame_S1").value == 2
+    at.button(key="videos_frame_S1_prec").click().run()
+    assert at.slider(key="videos_frame_S1").value == 1
+
+    # Même frame affichée sur la vidéo annotée.
+    choix = at.radio(key="videos_choix_S1")  # élément du dernier run, pas un périmé
+    choix.set_value(choix.options[1]).run()
+    assert not at.exception, at.exception
+    assert at.slider(key="videos_frame_S1").value == 1
+    assert _compter_elements(at, "imgs") >= 1
+
+
+def test_lecteur_navigateur_sur_demande_au_dela_du_seuil(
+        tmp_path, monkeypatch, video_reelle):
+    import views.videos as VV
+    monkeypatch.setattr(VV, "_LECTEUR_MAX_OCTETS", 0)
+    projet = _projet(tmp_path, kind="single")
+    _ecrire_session(projet, "S1", source_video=video_reelle(tmp_path / "videos"))
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert _compter_elements(at, "video") == 0
+    at.toggle(key="videos_frame_S1_lecteur").set_value(True).run()
+    assert _compter_elements(at, "video") == 1

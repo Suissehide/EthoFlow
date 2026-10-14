@@ -62,6 +62,12 @@ _LABELS_ARENES = ["A1", "A2", "A3", "A4"]
 # largement sous le premier palier de fps caméra usuel (24/25/30).
 _TOLERANCE_FPS = 0.5
 
+# `st.video` sur un chemin local charge TOUT le fichier en mémoire
+# (streamlit/runtime/memory_media_file_storage.py, `f.read()`) : au-delà,
+# le lecteur ne s'affiche que sur demande. Le visualiseur frame à frame,
+# lui, ne lit qu'une frame à la fois via OpenCV, quelle que soit la taille.
+_LECTEUR_MAX_OCTETS = 500 * 1024 ** 2
+
 
 # ============================================================
 # Sonde vidéo — mise en cache
@@ -80,6 +86,60 @@ def _probe_cache(chemin: str) -> V.VideoInfo:
     jamais une sonde périmée après un re-pointage.
     """
     return V.probe(Path(chemin))
+
+
+@st.cache_data(show_spinner=False, max_entries=300)
+def _frame_cache(chemin: str, index: int) -> bytes | None:
+    return V.frame_png_bytes(Path(chemin), index=index, max_width=1280)
+
+
+def _decaler(cle: str, pas: int, n: int) -> None:
+    st.session_state[cle] = max(0, min(n - 1, st.session_state.get(cle, 0) + pas))
+
+
+def _visualiseur(chemin: Path, session_id: str) -> None:
+    """Frame à frame (OpenCV) + lecteur navigateur.
+
+    L'index de frame est partagé entre les vidéos d'une même session (même
+    nombre de frames) : passer de la source à la vidéo annotée garde la
+    même image, pour comparer un keypoint à l'animal réel.
+    """
+    info = _probe_cache(str(chemin))
+    if not info.exists or not info.n_frames:
+        st.warning(f"`{chemin.name}` ne s'ouvre pas avec OpenCV (codec, fichier corrompu).")
+        return
+    n = info.n_frames
+    cle = f"videos_frame_{session_id}"
+    # Borné AVANT de créer le slider : une vidéo plus courte que la
+    # précédente ne doit pas recevoir un index hors bornes.
+    st.session_state[cle] = min(st.session_state.get(cle, 0), n - 1)
+
+    col_prec, col_slider, col_suiv = st.columns([1, 10, 1], vertical_alignment="center")
+    col_prec.button("◀", key=f"{cle}_prec", on_click=_decaler, args=(cle, -1, n),
+                    help="Frame précédente")
+    col_suiv.button("▶", key=f"{cle}_suiv", on_click=_decaler, args=(cle, 1, n),
+                    help="Frame suivante")
+    with col_slider:
+        index = st.slider("Frame", 0, max(n - 1, 1), key=cle,
+                          label_visibility="collapsed", disabled=n < 2)
+
+    t = index / info.fps if info.fps else None
+    png = _frame_cache(str(chemin), index)
+    legende = f"Frame {index} / {n - 1}" + (f" — {t:.2f} s" if t is not None else "")
+    if png:
+        st.image(png, caption=legende, width="stretch")
+    else:
+        st.caption(f"{legende} : frame illisible.")
+
+    taille = chemin.stat().st_size
+    if taille <= _LECTEUR_MAX_OCTETS or st.toggle(
+        f"Lecteur vidéo ({taille / 1024 ** 3:.1f} Go, chargés en mémoire)",
+        key=f"{cle}_lecteur",
+    ):
+        st.video(str(chemin), start_time=int(t or 0))
+        st.caption("Le lecteur démarre à la frame choisie. Une vidéo annotée "
+                   "écrite par OpenCV (codec mp4v) peut ne pas se lire dans le "
+                   "navigateur : le visualiseur ci-dessus, lui, la lit toujours.")
 
 
 def _fps_declare(meta: dict) -> float | None:
@@ -163,8 +223,14 @@ def _tableau_comparaison(meta: dict, info: V.VideoInfo) -> pd.DataFrame:
 # Onglet Sessions — vignette, lecteur, comparaison, metadata, re-pointage
 # ============================================================
 
-def _section_video_session(session_id: str, meta: dict) -> None:
+def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
     st.markdown(lucide_title("video", f"Session {session_id}"), unsafe_allow_html=True)
+
+    videos = V.session_videos(projet, session_id, meta)
+    if videos:
+        libelle = st.radio("Vidéo", list(videos), horizontal=True,
+                           key=f"videos_choix_{session_id}")
+        _visualiseur(videos[libelle], session_id)
 
     source = meta.get("source_video")
     chemin = Path(source) if source else None
@@ -188,16 +254,6 @@ def _section_video_session(session_id: str, meta: dict) -> None:
                 "OpenCV sur cette machine)."
             )
         else:
-            col_vignette, col_lecteur = st.columns([1, 2])
-            with col_vignette:
-                png = V.frame_png_bytes(chemin, index=0, max_width=400)
-                if png:
-                    st.image(png, caption="Première frame", width="stretch")
-                else:
-                    st.caption("Vignette indisponible.")
-            with col_lecteur:
-                st.video(str(chemin))
-
             if info.fps is None:
                 st.warning(
                     "Le fps réel n'a pas pu être lu dans le fichier — la "
@@ -336,8 +392,15 @@ def _onglet_sessions(projet: Path) -> None:
         key="videos_session_choisie",
     )
 
+    ligne = df.loc[df["session_id"] == session_id].iloc[0]
+    st.caption("Pipeline : " + " · ".join(
+        f"{etape} {'✅' if ligne[etape] == 'OK' else '—'}"
+        for etape in df.columns[2:]
+        if etape != "split" or project_kind(projet) == "multi"
+    ))
+
     meta = S.load_metadata(projet, session_id) or {}
-    _section_video_session(session_id, meta)
+    _section_video_session(projet, session_id, meta)
     _section_arenes_session(projet, meta)
 
     manquantes = list(df.loc[df["vidéo"] == "manque", "session_id"])
