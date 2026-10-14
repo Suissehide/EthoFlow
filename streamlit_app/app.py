@@ -373,6 +373,70 @@ else:
     )
 
 # ============================================================
+# Sidebar — Avancement du pipeline
+# ============================================================
+# ponytail: cache de 10 s, l'avancement peut retarder d'autant après la fin
+# d'un job ; list_sessions relit chaque metadata.yaml, à chaque clic sinon.
+@st.cache_data(ttl=10, show_spinner=False)
+def _avancement(projet: str, multi: bool) -> list[dict]:
+    from lib.sessions import avancement
+    return avancement(Path(projet), multi=multi)
+
+
+if project_name:
+    from html import escape
+
+    from lib import runner
+    from lib.config import project_kind
+
+    _etapes = _avancement(str(_projet_courant), project_kind(_projet_courant) == "multi")
+    _lignes = []
+    for e in _etapes:
+        fini = e["total"] and e["fait"] == e["total"]
+        icone = "✓" if fini else ("◐" if e["fait"] else "○")
+        classe = "done" if fini else ("current" if e["en_cours"] else "todo")
+        pct = 100 * e["fait"] / e["total"] if e["total"] else 0
+        compte = f'{e["fait"]}/{e["total"]}' if e["total"] else "—"
+        _lignes.append(
+            f'<div class="ef-step ef-step-{classe}">'
+            f'<span class="ef-step-icone">{icone}</span>'
+            f'<span class="ef-step-nom">{escape(e["etape"])}</span>'
+            f'<span class="ef-step-compte">{compte}</span>'
+            f'<div class="ef-step-barre"><div style="width:{pct:.0f}%"></div></div>'
+            f'</div>'
+        )
+    st.sidebar.markdown('<p class="ef-section-label">Avancement</p>', unsafe_allow_html=True)
+    st.sidebar.markdown(
+        f"""<style>
+        .ef-steps {{ padding: 0 0.75rem 0.5rem; font-size: 0.8rem; }}
+        .ef-step {{ display: grid; grid-template-columns: 1.1rem 1fr auto;
+                    column-gap: 0.4rem; align-items: center; padding: 0.15rem 0; }}
+        .ef-step-icone {{ text-align: center; }}
+        .ef-step-compte {{ font-variant-numeric: tabular-nums; opacity: 0.75; }}
+        .ef-step-barre {{ grid-column: 2 / 4; height: 3px; border-radius: 2px;
+                          background: rgba(128,128,128,0.2); }}
+        .ef-step-barre > div {{ height: 100%; border-radius: 2px; background: {ACCENT}; }}
+        .ef-step-done {{ color: {ACCENT}; }}
+        .ef-step-todo {{ opacity: 0.55; }}
+        .ef-step-current {{ font-weight: 600; background: {ACCENT_BG};
+                            border-radius: 6px; padding: 0.25rem 0.35rem;
+                            margin: 0.1rem -0.35rem; }}
+        </style><div class="ef-steps">{"".join(_lignes)}</div>""",
+        unsafe_allow_html=True,
+    )
+
+    _courante = next((e for e in _etapes if e["en_cours"]), None)
+    if _courante and st.session_state.current_page != _courante["page"]:
+        if st.sidebar.button(f"Continuer : {_courante['etape']} →",
+                             key="btn_etape_courante", width="stretch"):
+            st.session_state.current_page = _courante["page"]
+            st.rerun()
+
+    if runner.is_running(_projet_courant):
+        _job = runner.current(_projet_courant)
+        st.sidebar.info(f"⏳ {_job.label if _job else 'Un job'} en cours", icon=None)
+
+# ============================================================
 # Sidebar — Navigation
 # ============================================================
 st.sidebar.markdown('<p class="ef-section-label">Navigation</p>', unsafe_allow_html=True)
