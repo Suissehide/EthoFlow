@@ -4,12 +4,12 @@
 Étape 3 : le transformer en `data/raw/<session>/metadata.yaml` via
 `sync_from_excel.py`.
 
-Aucune lecture d'Excel ici : le script est la seule autorité sur le
-format (feuille `Sessions` ou `Subjects`/`Trials_Videos`/`Arena_Mapping`,
-détection automatique du schéma). La page se contente de localiser le
-fichier (`lib.config.excel_path`, qui délègue à la même fonction que le
-script), de l'offrir au téléchargement/dépôt, et de construire les
-commandes via `lib.pipeline`.
+L'Excel est la source de vérité : son contenu se lit et se modifie ici
+(`lib.excel`, écriture cellule par cellule qui préserve la mise en forme),
+puis le sync le propage aux `metadata.yaml`, qui ne sont donc qu'affichés.
+Le script reste la seule autorité sur le format : chaque enregistrement
+et chaque dépôt est relu par `sync_from_excel.py` avant de remplacer le
+fichier.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+import lib.excel as XL
 import lib.pipeline as PL
 from lib.config import excel_path, project_kind, require_project
 from lib.icons import lucide_title
@@ -26,8 +27,6 @@ from lib.sessions import (
     list_sessions,
     load_metadata,
     metadata_fields,
-    save_arenes,
-    save_metadata_fields,
 )
 from views import _job
 from views._widgets import champ_chemin
@@ -112,12 +111,102 @@ def _section_excel(projet: Path) -> Path | None:
                 st.rerun()
         with col_confirmer:
             if st.button("Oui, écraser", key="btn_confirmer_upload_excel", type="primary"):
-                cible.write_bytes(upload.getvalue())
-                st.session_state[version_key] += 1
-                st.toast(f"`{cible.name}` remplacé")
-                st.rerun()
+                # Relu par sync_from_excel AVANT d'écraser : un fichier qui
+                # n'est pas un classeur EthoFlow ne remplace jamais le bon.
+                tmp = XL.dossier_sauvegardes(projet) / "depot.xlsx"
+                tmp.parent.mkdir(parents=True, exist_ok=True)
+                tmp.write_bytes(upload.getvalue())
+                try:
+                    XL.valider(tmp)
+                except ValueError as e:
+                    st.error(f"Fichier refusé, rien n'a été remplacé : {e}")
+                else:
+                    if cible.exists():
+                        cible.replace(XL.dossier_sauvegardes(projet) / XL.nom_sauvegarde(cible))
+                    tmp.replace(cible)
+                    st.session_state[version_key] += 1
+                    st.toast(f"`{cible.name}` remplacé")
+                    st.rerun()
+                finally:
+                    tmp.unlink(missing_ok=True)
 
     return chemin_excel
+
+
+# ============================================================
+# Section 1 bis : contenu de l'Excel, éditable
+# ============================================================
+
+def _section_contenu(projet: Path, chemin_excel: Path | None) -> None:
+    if chemin_excel is None:
+        return
+    st.markdown(lucide_title("table", "Contenu de l'Excel"), unsafe_allow_html=True)
+
+    if XL.ouvert_dans_excel(chemin_excel):
+        st.warning(
+            f"`{chemin_excel.name}` est ouvert dans Excel. Ferme-le avant "
+            "d'éditer ici : le prochain enregistrement d'Excel écraserait "
+            "les modifications faites dans l'app."
+        )
+    if XL.modifie_depuis_sync(projet, chemin_excel):
+        st.info(
+            "L'Excel a changé depuis la dernière synchronisation : relance "
+            "**Synchroniser** ci-dessous avec « Écraser » coché pour que les "
+            "metadata suivent."
+        )
+
+    try:
+        feuilles = XL.feuilles_editables(chemin_excel)
+    except Exception as e:  # classeur corrompu, pas un xlsx...
+        st.error(f"Lecture impossible : {e}")
+        return
+    if not feuilles:
+        st.error("Ni feuille `Sessions`, ni `Subjects`/`Trials_Videos`/`Arena_Mapping`.")
+        return
+    feuille = (st.radio("Feuille", feuilles, horizontal=True, key="donnees_excel_feuille")
+               if len(feuilles) > 1 else feuilles[0])
+
+    avant = XL.lire_feuille(chemin_excel, feuille)
+    # Clé versionnée : après un enregistrement, l'éditeur repart du
+    # fichier relu au lieu de rejouer ses modifications par-dessus.
+    version = st.session_state.setdefault("_donnees_excel_version", 0)
+    apres = st.data_editor(
+        avant,
+        column_config={c: st.column_config.TextColumn(c) for c in avant.columns},
+        num_rows="dynamic", hide_index=True, width="stretch",
+        key=f"donnees_excel_{feuille}_{version}",
+    )
+
+    col_nom, col_btn = st.columns([2, 1])
+    with col_nom:
+        nouvelle = st.text_input(
+            "Ajouter une colonne", key=f"donnees_excel_nouvelle_{version}",
+            placeholder="ex : regime_alimentaire",
+            help="Toute colonne devient un axe de comparaison dans les analyses.",
+        ).strip()
+    if nouvelle in avant.columns:
+        st.error(f"La colonne `{nouvelle}` existe déjà.")
+        nouvelle = ""
+    if nouvelle:
+        apres = apres.assign(**{nouvelle: ""})
+
+    with col_btn:
+        st.markdown("<div style='height:1.9rem'></div>", unsafe_allow_html=True)
+        enregistrer = st.button(
+            "Enregistrer dans l'Excel", key="btn_excel_enregistrer", type="primary",
+            disabled=not XL.a_change(avant, apres), width="stretch",
+        )
+    if enregistrer:
+        try:
+            sauvegarde = XL.enregistrer(projet, chemin_excel, feuille, avant, apres)
+        except ValueError as e:
+            st.error(f"Refusé par `sync_from_excel.py`, rien n'a été écrit : {e}")
+        except XL.ExcelVerrouille as e:
+            st.error(str(e))
+        else:
+            st.session_state["_donnees_excel_version"] = version + 1
+            st.toast(f"Enregistré — ancienne version : `{sauvegarde.name}`")
+            st.rerun()
 
 
 # ============================================================
@@ -229,24 +318,24 @@ def render() -> None:
 
     chemin_excel = _section_excel(projet)
     st.divider()
+    _section_contenu(projet, chemin_excel)
+    st.divider()
     _section_sync(projet, chemin_excel)
     st.divider()
     _section_sessions(projet)
 
 
 # ============================================================
-# Metadata d'une session — consultation et édition
+# Metadata d'une session — consultation
 # ============================================================
 
 def _section_metadata(projet: Path, sessions: list[str]) -> None:
-    """Voir et corriger la metadata d'une session sans rouvrir l'Excel.
+    """Ce que le sync a écrit pour une session, en lecture seule.
 
-    Les colonnes ne sont PAS codées en dur : elles sortent de ce que la
-    session contient réellement, parce que `sync_from_excel.py` recopie
-    toutes les colonnes de l'Excel, y compris celles que le chercheur
-    invente. Une correction ponctuelle (une souris mal saisie, un groupe à
-    rectifier) se fait ici ; une correction de fond se fait dans l'Excel
-    puis un re-sync.
+    Pas d'édition ici : l'Excel est la source de vérité, et un sync avec
+    `--overwrite` réécrit `metadata.yaml` depuis l'Excel — une correction
+    faite dans le YAML serait perdue au sync suivant. On corrige dans
+    « Contenu de l'Excel », puis on resynchronise.
     """
     if not sessions:
         return
@@ -255,8 +344,8 @@ def _section_metadata(projet: Path, sessions: list[str]) -> None:
     st.markdown(lucide_title("file-spreadsheet", "Metadata d'une session"),
                 unsafe_allow_html=True)
     st.caption(
-        "Édition ponctuelle. Pour une reprise de fond, corrige l'Excel et "
-        "relance le sync avec `--overwrite`."
+        "Lecture seule — ce que le sync a écrit dans `metadata.yaml`. Pour "
+        "corriger, modifie **Contenu de l'Excel** ci-dessus puis resynchronise."
     )
 
     session = st.selectbox("Session", options=sessions, key="donnees_meta_session")
@@ -267,54 +356,15 @@ def _section_metadata(projet: Path, sessions: list[str]) -> None:
 
     champs = metadata_fields(meta)
     if champs:
-        df_champs = pd.DataFrame(
-            [{"champ": c, "valeur": "" if v is None else str(v)}
-             for c, v in champs.items()]
-        )
-        edite = st.data_editor(
-            df_champs,
-            column_config={
-                "champ": st.column_config.TextColumn("Champ", disabled=True),
-                "valeur": st.column_config.TextColumn("Valeur"),
-            },
+        st.dataframe(
+            pd.DataFrame([{"champ": c, "valeur": "" if v is None else str(v)}
+                          for c, v in champs.items()]),
             hide_index=True, width="stretch",
-            key=f"donnees_meta_editor_{session}",
         )
-        if st.button("Enregistrer la metadata", key="donnees_meta_save"):
-            modifs = {
-                str(r["champ"]): r["valeur"] for _, r in edite.iterrows()
-            }
-            if save_metadata_fields(projet, session, modifs):
-                st.success(f"Metadata de `{session}` enregistrée.")
-                st.rerun()
-            else:
-                st.error("Écriture impossible.")
     else:
         st.caption("Cette session n'a aucun champ exploitable.")
 
     arenes = arenes_dataframe(meta)
     if not arenes.empty:
         st.markdown("**Arènes**")
-        st.caption(
-            "Les coordonnées viennent de `calibrate_arenes.py` et ne sont "
-            "pas éditables ici — elles sont préservées à l'enregistrement."
-        )
-        colonnes_editables = [c for c in arenes.columns if c != "coords"]
-        edite_ar = st.data_editor(
-            arenes,
-            column_config={
-                "coords": st.column_config.TextColumn("Coords", disabled=True),
-            },
-            num_rows="dynamic", hide_index=True, width="stretch",
-            key=f"donnees_arenes_editor_{session}",
-        )
-        if st.button("Enregistrer les arènes", key="donnees_arenes_save"):
-            lignes = [
-                {c: r[c] for c in colonnes_editables}
-                for _, r in edite_ar.iterrows()
-            ]
-            if save_arenes(projet, session, lignes):
-                st.success(f"Arènes de `{session}` enregistrées.")
-                st.rerun()
-            else:
-                st.error("Écriture impossible.")
+        st.dataframe(arenes, hide_index=True, width="stretch")

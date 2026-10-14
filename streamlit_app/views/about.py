@@ -21,8 +21,8 @@ def render() -> None:
 
         - **Projet** — ouvrir ou créer un projet, désigner le modèle DLC à
           utiliser, suivre l'avancement global.
-        - **Données** — étapes 2-3 : synchroniser l'Excel maître et générer
-          `metadata.yaml` par session.
+        - **Données** — étapes 2-3 : consulter et modifier l'Excel maître
+          (source de vérité), puis le synchroniser en `metadata.yaml` par session.
         - **Vidéos & calibration** — étapes 4 et 6a : localiser/recadrer les
           vidéos, calibrer l'échelle px/cm et les arènes, QC visuel des
           trajectoires.

@@ -122,11 +122,14 @@ def test_upload_demande_confirmation_avant_ecrasement(tmp_path, monkeypatch):
     excel_path = projet / f"{projet.name}_sessions.xlsx"
     write_starter_excel(excel_path, "single", projet.name)
     contenu_original = excel_path.read_bytes()
+    autre = tmp_path / "rempli.xlsx"
+    write_starter_excel(autre, "single", "autre-nom")
+    contenu_valide = autre.read_bytes()
 
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     uploader = at.file_uploader[0]
-    uploader.upload("rempli.xlsx", b"pas un vrai xlsx, juste un contenu de test").run()
+    uploader.upload("rempli.xlsx", contenu_valide).run()
     assert not at.exception, at.exception
 
     # La confirmation est demandée : le fichier original n'a pas bougé.
@@ -138,7 +141,7 @@ def test_upload_demande_confirmation_avant_ecrasement(tmp_path, monkeypatch):
 
     boutons["btn_confirmer_upload_excel"].click().run()
     assert not at.exception, at.exception
-    assert excel_path.read_bytes() == b"pas un vrai xlsx, juste un contenu de test"
+    assert excel_path.read_bytes() == contenu_valide
 
 
 def test_sync_dry_run_reel_bout_en_bout(tmp_path, monkeypatch):
@@ -191,3 +194,35 @@ def test_sync_dry_run_reel_bout_en_bout(tmp_path, monkeypatch):
     # Dry-run : rien n'a dû être écrit sous data/raw/.
     raw = projet / "data" / "raw"
     assert not any(raw.iterdir())
+
+
+def test_upload_d_un_fichier_invalide_refuse_sans_rien_ecraser(tmp_path, monkeypatch):
+    projet = _projet_vide(tmp_path)
+    excel_path = projet / f"{projet.name}_sessions.xlsx"
+    write_starter_excel(excel_path, "single", projet.name)
+    contenu_original = excel_path.read_bytes()
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    at.file_uploader[0].upload("faux.xlsx", b"pas un vrai xlsx").run()
+    {b.key: b for b in at.button}["btn_confirmer_upload_excel"].click().run()
+    assert not at.exception, at.exception
+    assert excel_path.read_bytes() == contenu_original
+    assert any("refusé" in e.value for e in at.error), [e.value for e in at.error]
+
+
+def test_editeur_excel_affiche_et_enregistre(tmp_path, monkeypatch):
+    projet = _projet_vide(tmp_path)
+    excel_path = projet / f"{projet.name}_sessions.xlsx"
+    write_starter_excel(excel_path, "single", projet.name)
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    bouton = {b.key: b for b in at.button}["btn_excel_enregistrer"]
+    assert bouton.disabled, "rien à enregistrer tant que rien n'a changé"
+
+    at.text_input(key="donnees_excel_nouvelle_0").input("regime").run()
+    {b.key: b for b in at.button}["btn_excel_enregistrer"].click().run()
+    assert not at.exception, at.exception
+
+    import openpyxl
+    entetes = next(openpyxl.load_workbook(excel_path)["Sessions"].iter_rows(values_only=True))
+    assert entetes[-1] == "regime"
