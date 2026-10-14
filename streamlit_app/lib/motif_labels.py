@@ -49,8 +49,14 @@ def load(project: Path) -> pd.DataFrame | None:
         return None
     # dtype=str + keep_default_na : une cellule vide reste "" et non NaN,
     # sinon on réécrirait "nan" dans le fichier de l'utilisateur.
-    return pd.read_csv(p, sep=SEP, dtype=str, keep_default_na=False,
-                       encoding=ENCODING)
+    df = pd.read_csv(p, sep=SEP, dtype=str, keep_default_na=False,
+                     encoding=ENCODING)
+    # Une fiche écrite à la main peut se limiter à motif_id;label;category :
+    # les colonnes absentes valent "" plutôt que de faire planter la page.
+    for colonne in COLUMNS:
+        if colonne not in df.columns:
+            df[colonne] = ""
+    return df
 
 
 def save(project: Path, df: pd.DataFrame) -> None:

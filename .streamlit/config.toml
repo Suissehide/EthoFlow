@@ -18,6 +18,9 @@ linkColor = "#4f46c8"
 font = "'IBM Plex Sans':https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&display=swap, sans-serif"
 codeFont = "'IBM Plex Mono':https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap, monospace"
 baseRadius = "6px"
+# Corps de texte à 14 px comme la maquette : alertes, cases, champs et
+# boutons Streamlit s'alignent sur le texte des pages.
+baseFontSize = 14
 showWidgetBorder = true
 showSidebarBorder = false
 

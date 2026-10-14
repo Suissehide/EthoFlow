@@ -125,7 +125,8 @@ def _banniere_echec(projet: Path, job) -> None:
         from lib.etapes import etape_du_script
         etape = etape_du_script(job.script)
         verrou = verrou_etape(etape.nom) if etape else None
-        with action:
+        # Bouton calé sur le bord droit de la carte, comme sur le tableau de bord.
+        with action, st.container(horizontal_alignment="right"):
             if st.button("Relancer", key=f"relancer_{job.job_id}", type="primary",
                          disabled=runner.is_running(projet) or verrou is not None,
                          help=verrou):
@@ -169,7 +170,7 @@ def panneau(projet: Path, *, lignes: int = 30) -> None:
     entete, action = st.columns([5, 1], vertical_alignment="center")
     with entete:
         st.markdown(_ligne_job(job), unsafe_allow_html=True)
-    with action:
+    with action, st.container(horizontal_alignment="right"):
         if job.state == "running":
             if st.button("Annuler", key=f"annuler_{job.job_id}"):
                 runner.cancel(projet, job.job_id)

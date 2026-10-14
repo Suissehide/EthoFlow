@@ -33,6 +33,15 @@ def test_chargement(project, vame_project):
     assert df.loc[0, "usage_pct"] == "10.00"
 
 
+def test_fiche_minimale_ecrite_a_la_main(project, vame_project):
+    """motif_id;label;category seulement : les autres colonnes valent ""."""
+    (vame_project / "motif_labels.csv").write_text("motif_id;label;category\n0;grooming;\n",
+                                                   encoding="utf-8-sig")
+    df = ML.load(project)
+    assert set(ML.COLUMNS) <= set(df.columns)
+    assert df.loc[0, "usage_pct"] == "" and df.loc[0, "label"] == "grooming"
+
+
 def test_ecriture_conserve_separateur_et_encodage(project, vame_project):
     _csv_factice(vame_project)
     ML.set_fields(project, 0, label="grooming_face", category="Grooming")

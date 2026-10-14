@@ -196,6 +196,8 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
   background: #fcf3f2 !important; border-color: #efc9c4 !important; padding: 20px 24px !important;
 }
 .ef-echec { display: grid; grid-template-columns: 28px 1fr; gap: 14px; align-items: start; }
+/* La raison du verrou s'aligne sur le texte, pas sur l'icône (28 + 14 px). */
+.st-key-carte_echec [data-testid="stCaptionContainer"] { padding-left: 42px; }
 [data-testid="stMarkdownContainer"] p.ef-echec-titre { font: 600 17px 'IBM Plex Sans', sans-serif !important; margin: 0 0 6px; }
 [data-testid="stMarkdownContainer"] p.ef-echec-cause { font-size: 14px !important; line-height: 1.55; color: #56534d; margin: 0; max-width: 640px; }
 
@@ -205,6 +207,12 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
   font: 600 15px 'IBM Plex Sans', sans-serif !important; color: #1c1b19;
   margin: 18px 0 2px !important;
 }
+/* Titre suivi d'un champ (pas d'une légende) : 8 px d'air, pas 2. */
+[data-testid="stElementContainer"]:has(p.ef-section):not(:has(+ [data-testid="stElementContainer"] [data-testid="stCaptionContainer"])) p.ef-section {
+  margin-bottom: 8px !important;
+}
+/* Onglets : un peu d'air entre les libellés. */
+[data-baseweb="tab-list"] { gap: 24px; }
 /* Cartes radio : bordure 1.5 px, sélection indigo. */
 .st-key-pose_mode [role="radiogroup"] { gap: 8px; width: 100%; }
 .st-key-pose_mode [role="radiogroup"] > label {

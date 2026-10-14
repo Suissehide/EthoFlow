@@ -148,10 +148,17 @@ def entete_etape(projet: Path) -> None:
     from lib.etapes import ETAPES, PAR_PAGE
 
     etape = PAR_PAGE[st.session_state.get("current_page", "")]
+    entete_page(f"{projet.name} · Étape {etape.n} / {len(ETAPES)}", etape.titre, etape.description)
+
+
+def entete_page(etiquette: str, titre: str, description: str) -> None:
+    """En-tête commun à toutes les pages : étiquette, titre, phrase."""
+    from html import escape
+
     st.markdown(
-        f'<p class="ef-label">{escape(projet.name)} · Étape {etape.n} / {len(ETAPES)}</p>'
-        f'<h1 class="ef-titre-etape">{escape(etape.titre)}</h1>'
-        f'<p class="ef-description-etape">{escape(etape.description)}</p>',
+        f'<p class="ef-label">{escape(etiquette)}</p>'
+        f'<h1 class="ef-titre-etape">{escape(titre)}</h1>'
+        f'<p class="ef-description-etape">{escape(description)}</p>',
         unsafe_allow_html=True,
     )
 

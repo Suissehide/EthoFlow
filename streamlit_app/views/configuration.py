@@ -34,7 +34,7 @@ from lib.icons import lucide_html, lucide_title
 
 import streamlit as st
 
-from views._widgets import champ_chemin
+from views._widgets import champ_chemin, entete_page
 
 _CLE_RESULTATS = "_config_probe_results"
 
@@ -149,8 +149,7 @@ def _section_environnements() -> None:
 # ============================================================
 
 def render() -> None:
-    st.title("Configuration")
-    st.caption("Chemins de préférence et santé des environnements conda")
+    entete_page("EthoFlow", "Configuration", "Chemins de préférence et santé des environnements conda.")
 
     st.divider()
     _section_racines()

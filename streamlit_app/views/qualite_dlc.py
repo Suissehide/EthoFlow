@@ -23,6 +23,7 @@ import streamlit as st
 import lib.dlc_qualite as Q
 from lib.config import require_project
 from views import _graphiques as G
+from views._widgets import entete_page
 
 
 # ============================================================
@@ -193,16 +194,14 @@ def _confiances(projet: Path) -> None:
 
 def render() -> None:
     projet = require_project()
-    st.title("Qualité DLC")
-    st.caption(
-        "Le modèle DeepLabCut du projet, en lecture seule : l'entraînement "
-        "se fait au terminal (`scripts/dlc_model-training/`), cette page "
-        "montre ce que ses scripts de diagnostic en disent."
-    )
+    entete_page(f"{projet.name} · Outil", "Qualité du modèle DLC",
+                "Le modèle DeepLabCut du projet, en lecture seule : l'entraînement se fait "
+                "au terminal (scripts/dlc_model-training/), cette page montre ce que ses "
+                "scripts de diagnostic en disent.")
     model_dir = Q.modele_dir(projet)
     if model_dir is None:
-        st.info("Aucun modèle DLC configuré (ou introuvable) — page **Projet**, "
-                "section Modèle DLC.")
+        st.info("Aucun modèle DLC configuré (ou introuvable) — tableau de bord → "
+                "menu du projet (son nom) → Modèle DLC.")
         return
     st.caption(f"Modèle : `{model_dir}`")
 

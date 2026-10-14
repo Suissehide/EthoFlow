@@ -38,7 +38,7 @@ def _lancer(tmp_path: Path, monkeypatch) -> AppTest:
 def test_page_se_charge_sans_projet_ouvert(tmp_path, monkeypatch):
     at = _lancer(tmp_path, monkeypatch)
     assert not at.exception, at.exception
-    assert any("Configuration" in t.value for t in at.title)
+    assert any("ef-titre-etape\">Configuration<" in m.value for m in at.markdown)
 
 
 def test_racine_absente_est_signalee(tmp_path, monkeypatch):

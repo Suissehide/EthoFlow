@@ -4,10 +4,11 @@ from __future__ import annotations
 import streamlit as st
 
 from lib.project import ROOT
+from views._widgets import entete_page
 
 
 def render() -> None:
-    st.title("À propos")
+    entete_page("EthoFlow", "À propos", "Ce que fait l'app, et comment elle s'organise.")
     st.markdown(
         """
         **EthoFlow** est une interface web légère pour orchestrer l'analyse
