@@ -91,3 +91,12 @@ def test_session_sans_h5_leve_une_erreur_explicite(dlc_out, tmp_path):
     (dlc_out / "BV-961").mkdir()
     with pytest.raises(FileNotFoundError, match="Aucun .h5"):
         IS.inspect_session(tmp_path, "BV-961", dlc_out, fps=25.0)
+
+
+def test_inspection_en_tableaux(dlc_out, tmp_path):
+    from lib.sessions import inspection
+    _write_h5(dlc_out / "BV-961" / f"BV-961{DLC_SUFFIX}.h5")
+    sessions, keypoints = inspection(tmp_path)
+    assert list(sessions["Session"]) == ["BV-961"]
+    assert sessions.loc[0, "Fichier"] == f"BV-961{DLC_SUFFIX}.h5"
+    assert "Verdict" in sessions and list(keypoints.columns) == ["BV-961"]

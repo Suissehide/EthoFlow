@@ -174,6 +174,23 @@ def dlc_config_path(project: Path) -> str | None:
     return _paths.normalize_dlc_config(value) if value else None
 
 
+def dlc_bodyparts(project: Path) -> list[str]:
+    """Keypoints du modèle DLC configuré (`bodyparts` de son config.yaml),
+    ou [] si aucun modèle lisible. Un projet multi-animal DLC les range
+    sous `multianimalbodyparts` + `uniquebodyparts`."""
+    chemin = dlc_config_path(project)
+    if not chemin or not Path(chemin).is_file():
+        return []
+    try:
+        cfg = yaml.safe_load(Path(chemin).read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return []
+    noms = cfg.get("bodyparts")
+    if not isinstance(noms, list) or noms == ["MULTI!"]:
+        noms = (cfg.get("multianimalbodyparts") or []) + (cfg.get("uniquebodyparts") or [])
+    return [str(n) for n in noms]
+
+
 def dlc_config_status(project: Path) -> tuple[str, str | None]:
     """Trois états pour le modèle DLC configuré, pas juste présent/absent.
 

@@ -12,7 +12,6 @@ def test_toutes_les_commandes_portent_project_dir_et_no_prompt(project):
         PL.diagnose_dlc_model(project),
         PL.prepare_vame_input(project, likelihood_threshold=0.7, max_speed=5.0),
         PL.assign_arenas(project, all_sessions=True),
-        PL.inspect_session(project, all_sessions=True),
         PL.vame_stage(project, "train"),
         PL.analyze_vame(project),
         PL.motif_gif(project, session="S1"),

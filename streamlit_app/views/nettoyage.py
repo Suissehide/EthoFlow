@@ -28,10 +28,22 @@ from lib.config import (
     require_project,
 )
 from lib.icons import lucide_title
+from lib.project import dlc_bodyparts
 from lib import sessions as S
 from views import _job
 from views import _widgets
 from views._widgets import champ_chemin
+
+def _champ_keypoint(projet: Path, label: str, *, cle: str, defaut: str = "tail_base") -> str:
+    """Liste des keypoints du modèle DLC du projet ; champ libre seulement
+    si aucun modèle lisible n'est configuré (une faute de frappe y passait
+    sans erreur, et le graphe sortait vide)."""
+    keypoints = dlc_bodyparts(projet)
+    if not keypoints:
+        return st.text_input(label, value=defaut, key=cle)
+    index = keypoints.index(defaut) if defaut in keypoints else 0
+    return st.selectbox(label, keypoints, index=index, key=cle)
+
 
 # Ligne "[i/n] session_id" imprimée avant chaque session traitée.
 _RE_SESSION = re.compile(r"^\[\d+/\d+\]\s+(\S+)\s*$")
@@ -184,9 +196,8 @@ def _section_nettoyage(projet: Path) -> None:
             min_value=1, value=25, step=1, key="nettoyage_interp_limit",
         )
 
-    qc_bodypart = st.text_input(
-        "`--qc-bodypart`", value="tail_base", key="nettoyage_qc_bodypart",
-    )
+    qc_bodypart = _champ_keypoint(projet, "Keypoint des graphes de contrôle",
+                                  cle="nettoyage_qc_bodypart")
     st.caption(
         "`tail_base` par défaut : c'est le point le plus stable du corps — "
         "il ne disparaît jamais sous l'animal et bouge peu par rapport au "
@@ -268,8 +279,10 @@ def _section_resume(projet: Path) -> None:
 
     st.markdown(lucide_title("circle-check", "Résumé et QC"), unsafe_allow_html=True)
 
-    job = runner.current(projet)
-    if job is None or job.script != "prepare_vame_input_custom.py" or job.state != "succeeded":
+    # Le dernier nettoyage réussi, pas le job courant : une inspection ou un
+    # autre job lancé ensuite faisait disparaître ce résumé.
+    job = _dernier_job_nettoyage(projet)
+    if job is None:
         st.caption(
             "Le résumé (% de frames utilisables, frames réparées par "
             "session) apparaît ici après un nettoyage réussi."
@@ -323,16 +336,39 @@ def _section_resume(projet: Path) -> None:
     _section_galerie_qc(projet)
 
     st.divider()
+    _section_inspection(projet)
+
+
+@st.cache_data(show_spinner="Lecture des .h5…", max_entries=8)
+def _inspection_cache(projet: str, signature: tuple):
+    # `signature` (chemins + dates de modification des .h5) invalide le
+    # cache dès qu'un nettoyage ou une inférence réécrit un fichier.
+    return S.inspection(Path(projet))
+
+
+def _section_inspection(projet: Path) -> None:
+    st.markdown(lucide_title("search", "Bilan qualité par session"), unsafe_allow_html=True)
     st.caption(
-        "Contrôle qualité chiffré indépendant du nettoyage — `inspect_session.py` "
-        "resynthétise les statistiques de validité sans rien modifier."
+        "Couverture (frames avec au moins un keypoint valide), trous et "
+        "validité par keypoint, sur le `.h5` le plus abouti de chaque "
+        "session (nettoyé s'il existe). Ne modifie rien."
     )
-    choisies, tout = _widgets.selecteur_sessions(projet, cle="nettoyage_inspect")
-    cmd = PL.inspect_session(projet, sessions=choisies, all_sessions=tout)
-    _job.bouton_lancer(
-        projet, "Inspecter la qualité", cmd,
-        cle="btn_nettoyage_inspect", type="secondary",
+    if not st.toggle("Afficher le bilan", key="nettoyage_inspection"):
+        return
+    signature = tuple(sorted((str(h), h.stat().st_mtime)
+                             for h in dlc_output_dir(projet).glob("*/*.h5")))
+    sessions, keypoints = _inspection_cache(str(projet), signature)
+    if sessions.empty:
+        st.info("Aucun `.h5` dans `data/dlc-output/` — lance d'abord la pose.")
+        return
+    st.dataframe(
+        sessions, hide_index=True, width="stretch",
+        column_config={"Couverture (%)": st.column_config.ProgressColumn(
+            "Couverture (%)", min_value=0, max_value=100, format="%.1f %%")},
     )
+    st.caption("Validité par keypoint (% de frames), du moins au plus fiable :")
+    st.dataframe(keypoints.loc[keypoints.mean(axis=1).sort_values().index],
+                 width="stretch")
 
 
 # ============================================================
@@ -342,10 +378,10 @@ def _section_resume(projet: Path) -> None:
 def _dernier_job_nettoyage(projet: Path):
     """Dernier job `prepare_vame_input_custom.py` réussi, courant ou passé.
 
-    `runner.current` seul ne suffit pas : si l'utilisateur a lancé
-    `inspect_session.py` (juste en dessous sur cette page) après le
-    nettoyage, ce dernier n'est plus le job « courant » mais reste bien
-    celui dont les seuils doivent servir à la régénération.
+    `runner.current` seul ne suffit pas : si un autre job (régénération
+    des graphes, VAME…) a tourné après le nettoyage, ce dernier n'est plus
+    le job « courant » mais reste celui dont le résumé et les seuils
+    comptent.
     """
     from lib import runner
 
@@ -396,9 +432,7 @@ def _section_regenerer_keypoint(projet: Path, keypoints_existants: list[str]) ->
         "donc aucun graphe du tout."
     )
 
-    nouveau_kp = st.text_input(
-        "`--qc-bodypart`", value="tail_base", key="nettoyage_qc_regen_bodypart",
-    )
+    nouveau_kp = _champ_keypoint(projet, "Keypoint", cle="nettoyage_qc_regen_bodypart")
     if nouveau_kp and nouveau_kp in keypoints_existants:
         st.caption(
             f"Un graphe existe déjà pour `{nouveau_kp}` — il sera "

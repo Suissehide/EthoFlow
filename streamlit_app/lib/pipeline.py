@@ -27,7 +27,6 @@ SCRIPT_ENVS: dict[str, str] = {
     "sync_from_excel.py": "ethoflow",
     "crop_arenes.py": "ethoflow",
     "assign_arenas.py": "ethoflow",
-    "inspect_session.py": "ethoflow",
     "diagnose_dlc_model.py": "ethoflow",
     "motif_gif.py": "ethoflow",
     "post_process_cropped.py": "ethoflow",
@@ -296,22 +295,6 @@ def assign_arenas(project: Path, *, sessions: list[str] | None = None,
     if not clean:
         args.append("--no-clean")
     return _cmd("assign_arenas.py", args, "Split par arène")
-
-
-def inspect_session(project: Path, *, sessions: list[str] | None = None,
-                    all_sessions: bool = False,
-                    input_dir: str | Path | None = None,
-                    fps: float | None = None) -> Command:
-    args = _base(project)
-    if all_sessions or not sessions:
-        args.append("--all")
-    else:
-        args += list(sessions)
-    if input_dir:
-        args += ["--input-dir", str(input_dir)]
-    if fps is not None:
-        args += ["--fps", str(fps)]
-    return _cmd("inspect_session.py", args, "Inspection qualité")
 
 
 def filter_keypoints(*, input_dir: str | Path, output_dir: str | Path,

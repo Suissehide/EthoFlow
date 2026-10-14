@@ -187,3 +187,59 @@ def test_toutes_les_sessions_ignore_la_selection_perimee(tmp_path, monkeypatch):
     at.checkbox(key="nettoyage_clean_all").check().run()
     assert not at.exception, at.exception
     assert appels[-1]["sessions"] == []
+
+
+def _job(projet: Path, job_id: str, script: str, log: str) -> None:
+    import json
+    d = projet / ".ethoflow" / "jobs"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{job_id}.json").write_text(json.dumps({
+        "job_id": job_id, "script": script, "env": "ethoflow", "label": script,
+        "argv": ["python", script, "--project-dir", str(projet), "--no-prompt"],
+        "started_at": "2026-01-01T00:00:00", "ended_at": "2026-01-01T00:01:00",
+        "returncode": 0, "pid": None, "state": "succeeded",
+        "cancel_requested": False, "owner_pid": None,
+    }), encoding="utf-8")
+    (d / f"{job_id}.log").write_text(log, encoding="utf-8")
+
+
+def test_keypoint_choisi_dans_la_liste_du_modele(tmp_path, monkeypatch):
+    projet = _projet(tmp_path)
+    modele = tmp_path / "modele"
+    modele.mkdir()
+    (modele / "config.yaml").write_text(yaml.safe_dump({"bodyparts": ["nose", "tail_base", "paw"]}))
+    P.set_dlc_config(projet, modele)
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    choix = at.selectbox(key="nettoyage_qc_bodypart")
+    assert choix.options == ["nose", "tail_base", "paw"] and choix.value == "tail_base"
+
+
+def test_resume_survit_a_un_job_lance_apres_le_nettoyage(tmp_path, monkeypatch):
+    projet = _projet(tmp_path)
+    _job(projet, "20260101-000000-000000-nettoyage", "prepare_vame_input_custom.py",
+         "[1/1] S1\n  ✓ 1000 frames | 12 kpts | médian | réparées 50 | 95.0% utilisables\n")
+    _job(projet, "20260101-000100-000000-vame", "run_vame.py", "ok\n")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    resume = [d.value for d in at.dataframe if "Réparées" in d.value.columns]
+    assert resume and resume[0].loc[0, "Session"] == "S1"
+
+
+def test_bilan_qualite_en_tableau(tmp_path, monkeypatch):
+    import numpy as np
+    import pandas as pd
+    projet = _projet(tmp_path)
+    cols = pd.MultiIndex.from_product([["DLC"], ["nose", "tail_base"], ["x", "y", "likelihood"]],
+                                      names=["scorer", "bodyparts", "coords"])
+    sortie = projet / "data" / "dlc-output" / "S1"
+    sortie.mkdir(parents=True)
+    valeurs = np.ones((20, 6))
+    valeurs[:5, 0] = np.nan                     # nose absent sur 5 frames
+    pd.DataFrame(valeurs, columns=cols).to_hdf(sortie / "S1DLC_resnet.h5", key="df")
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    at.toggle(key="nettoyage_inspection").set_value(True).run()
+    assert not at.exception, at.exception
+    bilan = next(d.value for d in at.dataframe if "Verdict" in d.value.columns)
+    assert bilan.loc[0, "Session"] == "S1" and bilan.loc[0, "Couverture (%)"] == 100.0
+    par_kp = next(d.value for d in at.dataframe if "S1" in d.value.columns)
+    assert par_kp.loc["nose", "S1"] == 75.0

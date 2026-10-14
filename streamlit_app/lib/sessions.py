@@ -209,3 +209,37 @@ def avancement(project: Path, *, multi: bool) -> list[dict]:
     for e in etapes:
         e["en_cours"] = e is courante
     return etapes
+
+
+def inspection(project: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Bilan de `inspect_session.py` en tableaux, sans passer par un job.
+
+    Mêmes fichiers (le `.h5` le plus abouti, ou un par arène) et mêmes
+    calculs que le script — on réutilise ses fonctions, seul l'affichage
+    change. Retourne `(une ligne par fichier, keypoints × fichiers en %)`.
+    """
+    import inspect_session as IS
+
+    project = Path(project)
+    racine = dlc_output_dir(project)
+    lignes, validite = [], {}
+    for session_id in IS.list_sessions(racine):
+        fps = IS.get_session_fps(project, session_id)
+        for libelle, h5 in IS.resolve_h5_files(racine / session_id, session_id):
+            stats = IS.analyze_h5(h5)
+            n = max(stats["n_frames"], 1)
+            couverture = 100 * stats["frames_some_valid"] / n
+            trous = stats["gap_lengths"]
+            nom = session_id if libelle == "Single-animal" else f"{session_id} · {libelle}"
+            lignes.append({
+                "Session": nom,
+                "Fichier": h5.name,
+                "Frames": stats["n_frames"],
+                "Couverture (%)": round(couverture, 1),
+                "Tous keypoints (%)": round(100 * stats["frames_all_valid"] / n, 1),
+                "Trous": len(trous),
+                "Plus long trou (s)": round(trous.max() / fps, 1) if len(trous) else 0.0,
+                "Verdict": IS.verdict(couverture),
+            })
+            validite[nom] = {bp: round(100 * p, 1) for bp, p in stats["per_kp_pct"].items()}
+    return pd.DataFrame(lignes), pd.DataFrame(validite)

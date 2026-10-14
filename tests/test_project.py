@@ -348,3 +348,16 @@ def test_dlc_config_path_repare_un_dossier_deja_enregistre(project, tmp_path):
 
     assert P.dlc_config_path(project) == str(modele / "config.yaml")
     assert P.dlc_config_status(project)[0] == "ok"
+
+
+def test_dlc_bodyparts(project, tmp_path):
+    from lib import project as P
+    assert P.dlc_bodyparts(project) == []
+    m = tmp_path / "modele"
+    m.mkdir()
+    (m / "config.yaml").write_text(yaml.safe_dump({"bodyparts": ["nose", "tail_base"]}))
+    P.set_dlc_config(project, m)
+    assert P.dlc_bodyparts(project) == ["nose", "tail_base"]
+    (m / "config.yaml").write_text(yaml.safe_dump({
+        "bodyparts": "MULTI!", "multianimalbodyparts": ["nose"], "uniquebodyparts": ["led"]}))
+    assert P.dlc_bodyparts(project) == ["nose", "led"]
