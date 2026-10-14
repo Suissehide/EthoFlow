@@ -219,3 +219,21 @@ def test_onglet_usage_par_groupe_graphique_et_tableau(tmp_path, monkeypatch):
 def test_onglet_usage_sans_segmentation_l_explique(tmp_path, monkeypatch):
     at = _lancer_sur_projet(tmp_path, monkeypatch, _projet(tmp_path))
     assert any("Aucune segmentation" in i.value for i in at.info)
+
+
+def test_arene_vide_seulement_en_multi_et_avec_sa_source(tmp_path, monkeypatch):
+    """`--mask-empty` sans `--validity-source` ne masquait rien : la page
+    passe les poses par arène, et ne propose l'option qu'en multi-animal."""
+    projet = _projet(tmp_path)
+    _ecrire_job_list_columns_succeeded(projet, SORTIE_LIST_COLUMNS)
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert "analyses_mask_empty" not in {c.key for c in at.checkbox}
+
+    (projet / "configs" / "pipeline_config.yaml").write_text(
+        yaml.safe_dump({"kind": "multi"}), encoding="utf-8")
+    at.run()
+    [c for c in at.checkbox if c.key == "analyses_mask_empty"][0].set_value(True).run()
+    assert not at.exception, at.exception
+    commande = " ".join(c.value for c in at.code if "analyze_vame" in c.value)
+    assert "--mask-empty" in commande
+    assert f"--validity-source {projet / 'data' / 'dlc-output'}" in commande

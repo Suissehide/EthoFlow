@@ -49,6 +49,11 @@ def _section_generation(projet: Path) -> None:
         "Pas encore de clips ni de fiche des motifs pour ce projet : "
         "génère-les ci-dessous (après le découpage en motifs de l'étape VAME)."
     )
+    st.caption(
+        "Tu obtiens un court clip par motif et une fiche avec une ligne par "
+        "motif, à remplir ici. Relancer plus tard n'efface jamais une fiche "
+        "déjà remplie."
+    )
     cmd = PL.vame_stage(projet, "motif-videos")
     cmd_fiche = PL.vame_stage(projet, "motif-labels")
     with st.container(horizontal=True, vertical_alignment="center"):
@@ -143,7 +148,9 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
                 "Pas de clip pour ce motif : le fichier vidéo est introuvable."
             )
         usage = row.get("usage_pct") or ""
-        st.metric("Usage", f"{usage} %" if usage else "—")
+        st.metric("Usage", f"{usage} %" if usage else "—",
+                  help="Part des images attribuées à ce motif, toutes "
+                       "sessions confondues.")
 
     with col_form:
         label_key = f"motifs_label_{motif_id}"
@@ -199,7 +206,8 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
 
         st.text_input(
             "Confiance", key=conf_key,
-            help="Champ libre. Motif impossible à interpréter (erreur de "
+            help="Champ libre, par exemple `high` quand le comportement est "
+                 "net dans le clip. Motif impossible à interpréter (erreur de "
                  "suivi, animal hors champ) : écris `artifact` et les "
                  "analyses l'écarteront au lieu de le compter comme un "
                  "comportement.",
@@ -279,6 +287,11 @@ def _tab_table(projet: Path, df: pd.DataFrame) -> None:
     df_affiche = df.copy()
     df_affiche["category"] = df_affiche["category"].replace("", None)
 
+    st.caption(
+        "Les modifications s'enregistrent toutes seules. Seuls « label » et "
+        "« category » se modifient ici ; la confiance se saisit dans "
+        "l'onglet « Par motif »."
+    )
     edited = st.data_editor(
         df_affiche,
         column_config=_column_config(df_affiche, cats),
@@ -325,6 +338,22 @@ def render() -> None:
     df = _tri_par_usage(df)
 
     _section_legacy(projet)
+
+    with st.expander("Comment bien nommer les motifs", expanded=False):
+        st.markdown(
+            "- **Regarde le clip, puis nomme ce que fait l'animal.** Le label "
+            "est libre mais précis (`grooming_face`, `walking_slow`) ; garde "
+            "le même vocabulaire d'un motif à l'autre.\n"
+            "- **La catégorie compte plus que le label** : les analyses "
+            "regroupent les motifs par catégorie. Deux motifs qui montrent le "
+            "même comportement prennent la même catégorie.\n"
+            "- **Commence par les motifs les plus fréquents.** Un motif sous "
+            "1 % d'usage pèse à peine dans les analyses.\n"
+            "- **Bruit de suivi, animal hors champ** : écris `artifact` dans "
+            "« Confiance », le motif sera exclu des statistiques.\n"
+            "- Un motif sans nom apparaît comme `motif_0`, `motif_1`… dans "
+            "les figures."
+        )
 
     onglet_motif, onglet_table = st.tabs(["Par motif", "Tableau"])
     with onglet_motif:

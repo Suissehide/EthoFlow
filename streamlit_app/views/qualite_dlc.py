@@ -67,6 +67,21 @@ def _entrainement(model_dir: Path) -> None:
             grille[i % 2].altair_chart(
                 G.petit_multiple(df, "step", c, _titre_court(c), titre_x="Epoch"),
                 width="stretch")
+    with st.expander("Comment lire ces courbes", expanded=False):
+        st.markdown(
+            "- **Train et Eval descendent ensemble** : le modèle apprend. "
+            "Si **Eval remonte pendant que Train descend**, il apprend par "
+            "cœur tes images au lieu de généraliser : ajoute des images "
+            "variées au jeu d'entraînement (README, Parcours B.3).\n"
+            "- **Cassures nettes vers les epochs 160 et 190** : le pas "
+            "d'apprentissage baisse, la phase de raffinement démarre. "
+            "C'est elle qui rend les points précis — d'où les 200 epochs, à "
+            "ne pas raccourcir.\n"
+            "- **Assez entraîné ?** Si `test.rmse_pcutoff` baisse encore sur "
+            "les derniers epochs, le run était court ; si elle plafonne, "
+            "c'est bon. Le meilleur état (meilleure mAP de test, vérifiée "
+            "tous les 10 epochs) est gardé à part et sert à l'inférence."
+        )
     st.caption(f"`{source['chemin']}`")
 
 
@@ -79,7 +94,10 @@ _entrainement_en_direct = st.fragment(run_every=60)(_entrainement)
 
 def _erreurs(model_dir: Path) -> None:
     pcutoff = st.slider("Seuil de confiance (pcutoff)", 0.05, 0.95,
-                        float(Q.DEFAULT_PCUTOFF), 0.05, key="qualite_pcutoff")
+                        float(Q.DEFAULT_PCUTOFF), 0.05, key="qualite_pcutoff",
+                        help="Une prédiction au-dessus de ce seuil compte comme "
+                             "« confiante ». Baisse-le (ex : 0,3) pour voir ce "
+                             "que donnerait un seuil plus permissif.")
     try:
         tab, confusions, fichier = Q.erreurs_keypoints(model_dir, pcutoff)
     except (FileNotFoundError, ValueError) as e:
@@ -93,6 +111,14 @@ def _erreurs(model_dir: Path) -> None:
     c1.metric("RMSE (toutes)", f"{total['rmse']:.1f} px")
     c2.metric("RMSE (confiantes)", f"{total['rmse_seuil']:.1f} px")
     c3.metric("Au-dessus du seuil", f"{total['pct_au_dessus_seuil']:.0f} %")
+    st.caption(
+        "Repère pour la RMSE confiante (vidéo vue de dessous en 2048×2048, "
+        "souris d'environ 300 px du nez à la base de la queue) : sous 8 px, "
+        "c'est bon ; de 8 à 15 px, utilisable mais améliorable ; au-dessus "
+        "de 15 px, il manque des images sur certaines situations ou les "
+        "annotations sont incohérentes. À une autre résolution, raisonne "
+        "en part du corps (8 px ≈ 2,7 %)."
+    )
 
     st.caption(
         "Par keypoint : RMSE sur toutes les prédictions et sur les seules "
@@ -133,6 +159,12 @@ def _erreurs(model_dir: Path) -> None:
     retour = confusions.get("retournement")
     if paires or retour:
         st.markdown("**Confusions**")
+        st.caption(
+            "Un point posé sur son jumeau (patte gauche sur la droite, par "
+            "exemple) trahit souvent des inversions gauche/droite dans les "
+            "annotations : refais l'audit gauche/droite (README, B.3.4) et "
+            "regarde les frames listées."
+        )
         if paires:
             st.dataframe(pd.DataFrame([{
                 "Keypoint": p["keypoint"],
@@ -163,6 +195,22 @@ def _confiances(projet: Path) -> None:
         "mesurée sur les vidéos d'entraînement ; ici, c'est la confiance "
         "réelle sur une vidéo du projet."
     )
+    with st.expander("Comment lire ce graphique", expanded=False):
+        st.markdown(
+            "- **Médiane au-dessus de 0,6 sur la plupart des points** : le "
+            "modèle est à l'aise, la vidéo ressemble à celles de "
+            "l'entraînement.\n"
+            "- **Médiane haute sauf sur 2 ou 3 points** : normal, ces points "
+            "sont cachés une partie du temps (pattes sous le corps).\n"
+            "- **Médiane entre 0,05 et 0,3 sur tous les points** : le modèle "
+            "ne reconnaît pas cette vidéo (autre éclairage, caméra, zoom). "
+            "Baisser le seuil n'y changera rien : annote des images de "
+            "cette vidéo (README, B.6) ou vérifie qu'elle vient du même "
+            "dispositif.\n"
+            "- Une confiance basse n'est pas toujours une erreur : le point "
+            "peut être au bon endroit mais flou. Vérifie sur la vidéo "
+            "annotée à 0,3."
+        )
     # `>0.3` etc. : le point serait lu comme un accès imbriqué par Vega-Lite.
     seuils = {c: f"pct_{i}" for i, c in enumerate(tab.columns) if c.startswith(">")}
     donnees = tab.rename(columns=seuils).reset_index(names="keypoint")

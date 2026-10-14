@@ -228,17 +228,25 @@ def _tab_manifold(projet: Path, sessions: list[str]) -> None:
     output_format = st.radio(
         "Format", options=["gif", "mp4"], horizontal=True,
         key="visu_manifold_format",
+        help="Avec la vidéo à côté, préfère mp4 au-delà de 30 s : le gif "
+             "grossit vite.",
     )
     with_video = st.checkbox(
         "Vidéo de la session à côté", value=False,
         key="visu_manifold_with_video",
         help="Il faut que la vidéo de la session soit trouvée. Ralentit un "
-             "peu le rendu.",
+             "peu le rendu. Si elle est introuvable (disque débranché, "
+             "fichier déplacé), le rendu se fait sans elle : son nom ne "
+             "contient alors pas « _sidebyside ».",
     )
     labeled_video = st.checkbox(
         "Vidéo annotée (points du corps dessinés) à la place",
         value=False, key="visu_manifold_labeled",
-        help="Utilise la vidéo annotée par la pose, si elle existe.",
+        help="Montre à la fois les points du corps et la position dans le "
+             "manifold : utile pour repérer un motif qui ne serait qu'une "
+             "erreur de suivi. Mêmes images que la source, donc la "
+             "synchronisation est gardée. Si aucune vidéo annotée n'existe, "
+             "le rendu se fait sans vidéo.",
     )
     labeled_pcutoff = None
     if labeled_video:
@@ -252,6 +260,9 @@ def _tab_manifold(projet: Path, sessions: list[str]) -> None:
     pool_all_sessions = st.checkbox(
         "Fond commun à toutes les sessions (rendus comparables entre eux)",
         value=False, key="visu_manifold_pool",
+        help="Sans cette case, le nuage de fond ne montre que la session "
+             "animée. Avec, il montre tout le projet : un même endroit du "
+             "nuage correspond au même comportement d'une figure à l'autre.",
     )
     if pool_all_sessions:
         st.warning(
@@ -289,15 +300,31 @@ def _tab_dendrogramme(projet: Path) -> None:
         "L'arbre de parenté des motifs, avec leurs noms plutôt que leurs "
         "numéros."
     )
+    with st.expander("Comment lire ce graphique", expanded=False):
+        st.markdown(
+            "Deux motifs sont proches quand ils mènent aux mêmes motifs "
+            "suivants : la proximité est calculée sur les enchaînements "
+            "d'un motif à l'autre, toutes sessions confondues. Plus deux "
+            "motifs se rejoignent bas dans l'arbre, plus ils se ressemblent "
+            "de ce point de vue. Si tu as rempli les catégories dans "
+            "**Motifs**, le nom de chaque motif prend la couleur de sa "
+            "catégorie (légende à droite)."
+        )
 
     algo = st.selectbox("Méthode de découpage", options=_algos_presents(projet),
                         key="visu_dendro_algo", width=320)
     group = st.text_input(
         "Groupe (facultatif, ex : MCCiECKO)", value="", key="visu_dendro_group", width=320,
+        help="Une valeur de la colonne `group` (ou `condition`) de ton "
+             "Excel : l'arbre ne porte alors que sur ces sessions. Vide = "
+             "toutes les sessions. Un fichier par groupe, ils ne "
+             "s'écrasent pas.",
     )
     linkage = st.selectbox(
         "Méthode de liaison", options=["ward", "average", "complete", "single"],
         key="visu_dendro_linkage", width=320,
+        help="ward (par défaut) forme des familles compactes. Garde-le "
+             "sauf raison précise.",
     )
     labels = _champ_labels(projet, cle="visu_dendro_labels")
 

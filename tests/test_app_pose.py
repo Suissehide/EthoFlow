@@ -154,6 +154,10 @@ def test_custom_avec_modele_introuvable_pointe_vers_diagnostiquer(tmp_path, monk
 def test_batch_size_visible_seulement_si_video_adapt(tmp_path, monkeypatch):
     projet = _projet(tmp_path, kind="single", modele="ok")
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    # L'adaptation n'existe que pour SuperAnimal.
+    assert [c for c in at.checkbox if c.key == "pose_video_adapt"] == []
+    _radio_mode(at).set_value("superanimal").run()
+    assert not at.exception, at.exception
 
     assert [n for n in at.number_input if n.key == "pose_video_adapt_batch_size"] == []
 
@@ -197,3 +201,18 @@ def test_choisir_le_modele_depuis_la_page_pose(tmp_path, monkeypatch):
     assert P.dlc_config_path(projet) == str(modele / "config.yaml")
     assert not at.button(key="btn_pose_lancer").disabled
     assert "pose_modele_dlc_libre" not in {t.key for t in at.text_input}
+
+
+def test_decocher_ignorer_refait_toutes_les_sessions(tmp_path, monkeypatch):
+    """`--all` ne prend que les sessions non traitées : décocher « Ignorer »
+    avec « Toutes » doit passer la liste complète, sinon rien n'est refait."""
+    projet = _projet(tmp_path, kind="single", modele="ok")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+
+    def commande():
+        return " ".join(c.value for c in at.code if "run_dlc_inference" in c.value)
+
+    assert "--all" in commande()
+    [c for c in at.checkbox if c.key == "pose_skip_existing"][0].set_value(False).run()
+    assert not at.exception, at.exception
+    assert "--all" not in commande() and "S1" in commande()

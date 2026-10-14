@@ -175,42 +175,53 @@ def _section_setup(projet: Path, etat: dict) -> None:
             help="Nombre de motifs à produire. C'est autant de clips à "
                  "nommer à l'étape Motifs — 15 se labellisent en ~1 h, 30 "
                  "en une demi-journée. Modifiable ensuite : chaque valeur "
-                 "a son propre dossier de résultats.",
+                 "a son propre dossier de résultats. 15 est le défaut de "
+                 "VAME, pas une règle ; au-delà de ~40 sur un jeu de données "
+                 "modeste, tu découpes le même comportement en sous-motifs "
+                 "presque identiques.",
         )
     with col_w:
         time_window = st.number_input(
             "Fenêtre d'analyse (images)", min_value=5, max_value=300, value=30, step=5,
             key="vame_setup_time_window",
-            help="Durée que le modèle regarde d'un coup. 30 images = 1 s à "
-                 "30 images par seconde. Plus court : motifs brefs ; plus "
-                 "long : les gestes courts se noient.",
+            help="Durée que le modèle regarde d'un coup pour décider d'un "
+                 "motif, comptée en images de ta vidéo : 30 images = 1 s à "
+                 "30 images par seconde, 1,2 s à 25. Plus court (15) : motifs "
+                 "brefs, plus de transitions ; plus long (60) : motifs amples, "
+                 "les gestes courts se noient.",
         )
     col_e, col_c = st.columns(2)
     with col_e:
         max_epochs = st.number_input(
             "Durée maximale d'entraînement (cycles)", min_value=10, max_value=5000, value=500, step=50,
             key="vame_setup_max_epochs",
-            help="500 (défaut) : 3 à 8 h sur GPU ; 100 pour un premier essai "
-                 "de bout en bout. L'entraînement s'arrête aussi plus tôt "
-                 "s'il ne progresse plus.",
+            help="Un cycle (epoch) = un passage complet sur toutes les "
+                 "données. 500 (défaut) : 3 à 8 h sur GPU ; 100 (~1 h) pour "
+                 "un premier essai de bout en bout. L'entraînement s'arrête "
+                 "aussi plus tôt s'il ne progresse plus.",
         )
     with col_c:
         pose_confidence = st.number_input(
             "Confiance minimale des points", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
             key="vame_setup_pose_confidence",
-            help="0,6 comme au nettoyage. La valeur par défaut de VAME (0,99) "
-                 "écarterait la plupart des points.",
+            help="Un point détecté avec une confiance plus basse est masqué "
+                 "(traité comme absent). 0,6 comme au nettoyage. La valeur "
+                 "par défaut de VAME (0,99) écarterait la plupart des points.",
         )
     copie = st.radio(
         "Vidéos dans le projet VAME",
         ["Auto", "Copier", "Lien, sans copie"],
         index=0, horizontal=True, key="vame_setup_copie",
-        help="Auto : copie sous Windows, lien ailleurs (les liens demandent "
+        help="Le projet VAME doit contenir les vidéos. Copier prend de la "
+             "place disque ; un lien pointe vers l'original sans le dupliquer. "
+             "Auto : copie sous Windows, lien ailleurs (les liens demandent "
              "le mode développeur sous Windows).",
     )
     force = st.checkbox(
         "Recréer le projet VAME s'il existe déjà",
         value=False, key="vame_setup_force",
+        help="Vide entièrement le projet VAME existant, modèle entraîné et "
+             "résultats compris, avant de le recréer.",
     )
 
     with st.expander("Réglages avancés", expanded=False):
@@ -248,7 +259,13 @@ def _section_setup(projet: Path, etat: dict) -> None:
         projet, "Créer le projet VAME", cmd, cle="btn_vame_setup",
         type="secondary" if etat["setup"] else "primary",
     )
-    _widgets.details_techniques(cmd)
+    _widgets.details_techniques(cmd, notes=[
+        "Les quatre réglages sont écrits dans `data/vame/config.yaml` : tu "
+        "peux encore les modifier à la main avant l'entraînement.",
+        "Erreur « no such file: cropped/<session>/<session>_A1.mp4 » en "
+        "multi-animal : VAME veut les vidéos découpées par arène. Lance "
+        "`crop_arenes.py --all` avant de créer le projet VAME.",
+    ])
 
 
 # ============================================================
@@ -345,6 +362,21 @@ def _courbes(projet: Path) -> None:
                  if meilleur else None),
         width="stretch",
     )
+    with st.expander("Comment lire ces courbes", expanded=False):
+        st.markdown(
+            "- **Train et Test doivent descendre** puis se stabiliser. Si "
+            "Test remonte pendant que Train continue de descendre, le modèle "
+            "apprend par cœur tes données (surapprentissage).\n"
+            "- **Bande « annealing KL »** : phase de démarrage où le poids "
+            "de la divergence KL monte progressivement. Aucun modèle n'est "
+            "sauvegardé pendant cette phase.\n"
+            "- **Meilleur modèle** : le cycle où la loss Test a été la plus "
+            "basse, après cette phase. C'est ce modèle "
+            "qui sert au découpage en motifs.\n"
+            "- **Sans amélioration** : nombre de cycles depuis ce meilleur "
+            "modèle. Quand il dépasse la limite, l'entraînement s'arrête "
+            "de lui-même."
+        )
 
     composantes = {"reconstruction": "Reconstruction (MSE)", "kl": "KL",
                    "kmeans": "K-means", "prediction": "Prédiction"}
@@ -414,7 +446,14 @@ def _section_train(projet: Path, etat: dict) -> None:
         disabled=manque,
         help="Prépare d'abord le jeu d'entraînement." if manque else None,
     )
-    _widgets.details_techniques(cmd)
+    _widgets.details_techniques(cmd, notes=[
+        "Suivi détaillé dans TensorBoard, depuis un second terminal : "
+        "`conda activate vame` puis `tensorboard --logdir "
+        "<projet>/data/vame/logs/tensorboard --port 6006`, et ouvre "
+        "http://localhost:6006. Pointer sur `tensorboard/` superpose tous "
+        "les essais du projet.",
+        "Pertes sauvées aussi en `.npy` dans `data/vame/model/model_losses/`.",
+    ])
 
 
 # ============================================================
@@ -480,6 +519,9 @@ def _section_segment(projet: Path, etat: dict) -> None:
         "Nombre de motifs pour ce découpage",
         min_value=2, value=int(n_actuel) if n_actuel else 15, step=1,
         key="vame_segment_n_clusters",
+        help="Change ce nombre pour essayer une autre finesse de découpage "
+             "sans réentraîner le modèle. C'est autant de motifs à nommer "
+             "ensuite.",
     )
     st.caption(
         "Chaque nombre de motifs a ses propres résultats : rien n'est "
@@ -493,7 +535,13 @@ def _section_segment(projet: Path, etat: dict) -> None:
         disabled=manque,
         help="Aucun modèle entraîné pour l'instant : lance d'abord l'entraînement." if manque else None,
     )
-    _widgets.details_techniques(cmd)
+    _widgets.details_techniques(cmd, notes=[
+        "Sortie : `data/vame/results/<session>/<model>/hmm-<N>/`, un fichier "
+        "`<N>_hmm_label_<session>.npy` par session (un numéro de motif par "
+        "image).",
+    ])
+    st.caption("Étape suivante : la page Motifs, pour visionner un clip par "
+               "motif et lui donner un nom.")
 
 
 # ============================================================

@@ -34,15 +34,16 @@ from views import _job
 from views import _widgets
 from views._widgets import champ_chemin
 
-def _champ_keypoint(projet: Path, label: str, *, cle: str, defaut: str = "tail_base") -> str:
+def _champ_keypoint(projet: Path, label: str, *, cle: str, defaut: str = "tail_base",
+                    help: str | None = None) -> str:
     """Liste des keypoints du modèle DLC du projet ; champ libre seulement
     si aucun modèle lisible n'est configuré (une faute de frappe y passait
     sans erreur, et le graphe sortait vide)."""
     keypoints = dlc_bodyparts(projet)
     if not keypoints:
-        return st.text_input(label, value=defaut, key=cle, width=320)
+        return st.text_input(label, value=defaut, key=cle, width=320, help=help)
     index = keypoints.index(defaut) if defaut in keypoints else 0
-    return st.selectbox(label, keypoints, index=index, key=cle, width=320)
+    return st.selectbox(label, keypoints, index=index, key=cle, width=320, help=help)
 
 
 # Ligne "[i/n] session_id" imprimée avant chaque session traitée.
@@ -85,7 +86,8 @@ def _section_arenes(projet: Path) -> None:
             help="En dessous, un point est considéré comme non détecté.")
         interp = st.number_input(
             "Plus long trou reconstitué (images)", min_value=1, value=25, step=1,
-            key="nettoyage_arenes_interp", width=220)
+            key="nettoyage_arenes_interp", width=220,
+            help="Les trous plus longs restent vides.")
 
     n = _widgets.nb_sessions(projet, choisies, tout)
     cmd = PL.assign_arenas(
@@ -127,9 +129,13 @@ def _section_nettoyage(projet: Path) -> None:
     qc_plot = st.checkbox("Produire les graphes de contrôle", value=True,
                           key="nettoyage_qc_plot",
                           help="Un graphe de trajectoire par session, pour repérer "
-                               "d'un coup d'œil un saut ou un point bloqué.")
-    qc_bodypart = _champ_keypoint(projet, "Point suivi sur les graphes",
-                                  cle="nettoyage_qc_bodypart")
+                               "d'un coup d'œil un saut ou un point bloqué. Coûte "
+                               "quelques secondes par session.")
+    qc_bodypart = _champ_keypoint(
+        projet, "Point suivi sur les graphes", cle="nettoyage_qc_bodypart",
+        help="tail_base par défaut : le point le plus stable du corps, jamais caché "
+             "sous l'animal. Un saut sur sa trajectoire est donc forcément une erreur "
+             "de suivi, pas un vrai mouvement.")
 
     # --- Filtre 3 : il lui faut l'échelle -------------------------------
     echelle = px_per_cm(projet)
@@ -142,7 +148,9 @@ def _section_nettoyage(projet: Path) -> None:
         )
         saisie = st.number_input("Pixels par cm (pour ce nettoyage)", min_value=0.0,
                                  value=0.0, step=0.5, width=220,
-                                 key="nettoyage_px_per_cm_fallback")
+                                 key="nettoyage_px_per_cm_fallback",
+                                 help="Mesure-la de préférence sur une règle filmée avec "
+                                      "ton setup. 0 = filtre désactivé.")
         echelle = saisie if saisie > 0 else None
 
     with st.expander("Réglages avancés"):
@@ -155,17 +163,27 @@ def _section_nettoyage(projet: Path) -> None:
             likelihood_threshold = st.number_input(
                 "Confiance minimale", min_value=0.0, max_value=1.0, value=0.70,
                 step=0.05, key="nettoyage_likelihood",
-                help="0,70 est la valeur recommandée par l'équipe de VAME.")
+                help="La confiance que le modèle donne à chaque point, de 0 à 1. "
+                     "Plus haut = plus sévère, plus de points reconstitués. "
+                     "0,70 est la valeur recommandée par l'équipe de VAME. "
+                     "Un point peut être sûr de lui et faux : les filtres 3 et 4 "
+                     "sont là pour ça.")
             max_speed = st.number_input(
                 "Vitesse maximale (m/s)", min_value=0.1, value=5.0, step=0.5,
-                key="nettoyage_max_speed")
+                key="nettoyage_max_speed",
+                help="Au-delà, un déplacement d'une image à l'autre est jugé "
+                     "impossible. Si des sauts restent visibles sur les graphes, "
+                     "descends à 4. Sans échelle, ce filtre ne tourne pas.")
         with col2:
             interp_limit = st.number_input(
                 "Plus long trou reconstitué (images)", min_value=1, value=25,
                 step=1, key="nettoyage_interp_limit",
-                help="25 images ≈ 1 seconde à 25 images par seconde.")
+                help="25 images ≈ 1 seconde à 25 images par seconde. Les trous plus "
+                     "longs restent vides : ce sont souvent de vraies occlusions.")
             sticky_detection = st.checkbox(
-                "Repérer les points collés", value=True, key="nettoyage_sticky")
+                "Repérer les points collés", value=True, key="nettoyage_sticky",
+                help="Filtre 4 : un point qui retombe souvent au même endroit, "
+                     "dispersé dans le temps (reflet, coin d'arène).")
         if echelle is not None:
             st.caption(f"Échelle utilisée : {echelle} pixels par cm.")
 
@@ -190,7 +208,15 @@ def _section_nettoyage(projet: Path) -> None:
         help=None if n else ("Toutes ces sessions sont déjà nettoyées." if skip_existing
                              else "Choisis au moins une session."),
     )
-    _widgets.details_techniques(cmd)
+    _widgets.details_techniques(cmd, notes=[
+        "Sorties : `data/dlc-output/<session>/<session>_clean.h5` (un fichier "
+        "nettoyé par session) et `data/dlc-output/_qc_trajectories/<session>_<point>.png`.",
+        "Étape facultative : sans `_clean.h5`, VAME prend le `.h5` le plus abouti "
+        "du dossier (`*_filtered.h5` avant la sortie brute de DLC).",
+        "Pas de `_filtered.h5` produit par `dlc.filterpredictions` : la vidéo a "
+        "sans doute été déplacée depuis la pose. Le `.h5` doit être à côté de la "
+        "vidéo indiquée dans les métadonnées.",
+    ])
 
 
 # ============================================================
@@ -323,6 +349,19 @@ def _section_inspection(projet: Path) -> None:
     st.caption("Fiabilité de chaque point du corps (% des images), du moins au plus fiable :")
     st.dataframe(keypoints.loc[keypoints.mean(axis=1).sort_values().index],
                  width="stretch")
+    with st.expander("Comment lire ce bilan"):
+        st.markdown(
+            "- **Verdict** : d'après la couverture. 90 % ou plus excellent, 80 % bon, "
+            "70 % limite, en dessous insuffisant.\n"
+            "- **Plus long trou** : un trou de plusieurs secondes est une occlusion "
+            "ou une perte de suivi. VAME risque d'en faire un motif à lui tout seul.\n"
+            "- **Points les moins fiables** (en haut du second tableau) : souvent une "
+            "patte arrière ou le bout de la queue. Un point vers 40 % se retire "
+            "(**Outils avancés → Retirer les points trop peu fiables**) plutôt que de "
+            "polluer la segmentation.\n\n"
+            "C'est ce bilan qu'il faut regarder avant de lancer des heures "
+            "d'entraînement VAME."
+        )
 
 
 # ============================================================
@@ -452,6 +491,10 @@ def _section_galerie_qc(projet: Path) -> None:
         "montre **aucun saut anormal**, sans avoir eu à jeter beaucoup de "
         "points (VAME découpe mal les trous)."
     )
+    st.caption(
+        "Des sauts restent visibles ? Baisse la vitesse maximale (4 m/s) ou "
+        "monte la confiance minimale, dans les réglages avancés du nettoyage."
+    )
 
     galerie = S.list_qc_trajectories(projet)
     if not galerie:
@@ -513,6 +556,9 @@ def _section_avancee(projet: Path) -> None:
             "Fiabilité minimale d'un point (0 = ne rien retirer)",
             min_value=0.0, max_value=1.0, value=0.0, step=0.05,
             key="nettoyage_fk_min_validity",
+            help="Retire les points du corps dont la fiabilité moyenne, sur tous "
+                 "les fichiers, est sous ce seuil. Utile quand un point très peu "
+                 "fiable (bout de queue) fait planter l'entraînement VAME.",
         )
         fk_dry_run = st.checkbox("Aperçu seulement (n'écrit rien)", value=True, key="nettoyage_fk_dry_run")
         cmd_fk = PL.filter_keypoints(
@@ -530,6 +576,8 @@ def _section_avancee(projet: Path) -> None:
 
         # --- fill_nan_h5 --------------------------------------------------
         st.markdown('<p class="ef-section">Combler tous les trous restants</p>', unsafe_allow_html=True)
+        st.caption("Bouche aussi les longs trous que le nettoyage laisse vides. "
+                   "À utiliser seulement si VAME refuse des fichiers à cause d'eux.")
         fn_root = champ_chemin(
             "Dossier source", cle="nettoyage_fn_root",
             valeur_defaut=str(dlc_output_dir(projet)),

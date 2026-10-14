@@ -43,6 +43,7 @@ import lib.vame as VA
 from lib.analysis import (csv_separator, group_analysis_files,
                           parse_list_columns, usage_par_groupe)
 from lib.config import require_project
+from lib.project import dlc_output_dir, project_kind
 from lib.icons import FOND, SERIES
 from lib import runner
 from views import _job
@@ -108,7 +109,8 @@ def _section_group_by(axes: list[dict]) -> list[str]:
         "Le test s'adapte au nombre de groupes (Mann-Whitney à 2, "
         "Kruskal-Wallis à 3 ou plus), pas au nombre de sessions : 6 groupes "
         "sur 16 sessions ne donnent pas de résultats fiables. Vérifie les "
-        "effectifs avant de conclure."
+        "effectifs avant de conclure. Cocher deux critères donne deux séries "
+        "de figures indépendantes, pas un croisement."
     )
     return [axe["nom"] for axe in axes if _case_group_by(axe)]
 
@@ -119,6 +121,14 @@ def _section_cross(noms_axes: list[str]) -> list[tuple[str, str]]:
         st.session_state[_CLE_CROSS] = []
     paires: list[tuple[str, str]] = st.session_state[_CLE_CROSS]
 
+    st.caption(
+        "Croiser crée un critère combiné (ex : génotype × traitement donne "
+        "4 groupes) pour voir chaque combinaison. Ce n'est pas un test "
+        "d'interaction : à 3 groupes ou plus, le test dit seulement qu'au "
+        "moins un groupe diffère. Pour une interaction, fais une ANOVA à deux "
+        "facteurs dans R à partir de `analysis_global_long.csv`. Surveille "
+        "les effectifs : 16 sessions croisées donnent 4 groupes de 4."
+    )
     if len(noms_axes) < 2:
         st.caption("Il faut au moins deux critères pour les croiser.")
     else:
@@ -152,7 +162,12 @@ def _section_extended(noms_axes: list[str],
     extended = st.checkbox(
         "Ajouter les épisodes, le temps près des bords et l'évolution par quart de session",
         key="analyses_extended",
-        help="Plus long que l'analyse de base.",
+        help="Compte 5 à 10 min de plus : relit le motif de chaque image. "
+             "Ajoute la durée moyenne d'un épisode (« plus souvent » ou "
+             "« plus longtemps » ?), l'évolution sur les 4 quarts de la "
+             "session (effet réel ou habituation ?) et la part du temps au "
+             "centre de l'arène (thigmotaxie, mesure d'anxiété). Tourne une "
+             "seule fois, sur le critère choisi ci-dessous.",
     )
     extended_by = None
     if extended:
@@ -205,20 +220,34 @@ def _section_options_avancees(projet: Path) -> dict:
                 key="analyses_n_clusters",
             ))
 
-        mask_empty = st.checkbox(
-            "Exclure les images où l'arène est vide, en début et fin "
-            "d'enregistrement", key="analyses_mask_empty",
-        )
+        # Les arènes vides se repèrent sur les poses par arène
+        # (data/dlc-output/<session>/<session>_A1.h5) : plusieurs animaux par
+        # vidéo seulement.
+        multi = project_kind(projet) == "multi"
+        mask_empty, min_edge_frames = False, 25
+        if multi:
+            mask_empty = st.checkbox(
+                "Exclure les images où l'arène est vide, en début et fin "
+                "d'enregistrement", key="analyses_mask_empty",
+                help="Avant que la souris soit posée dans l'arène et après "
+                     "qu'elle en est retirée, il n'y a rien à analyser : ces "
+                     "images sont retirées du calcul de l'usage.",
+            )
         col1, col2 = st.columns(2)
-        with col1:
-            min_edge_frames = int(st.number_input(
-                "Arène vide pendant au moins (images)", min_value=1, value=25, step=1,
-                key="analyses_min_edge_frames",
-            ))
+        if multi:
+            with col1:
+                min_edge_frames = int(st.number_input(
+                    "Arène vide pendant au moins (images)", min_value=1, value=25, step=1,
+                    key="analyses_min_edge_frames",
+                    help="Un trou plus court en début ou fin est un raté de "
+                         "détection ponctuel, pas une arène vide.",
+                ))
         with col2:
             fps = float(st.number_input(
                 "Images par seconde", min_value=1.0, value=30.0, step=1.0,
                 key="analyses_fps",
+                help="Cadence réelle de tes vidéos. Sert à convertir les "
+                     "durées d'épisodes en secondes.",
             ))
     return {
         "algo": algo, "n_clusters": n_clusters, "mask_empty": mask_empty,
@@ -256,6 +285,7 @@ def _tab_lancer(projet: Path, axes: list[dict]) -> None:
         extended=extended,
         extended_by=extended_by,
         mask_empty=options["mask_empty"],
+        validity_source=dlc_output_dir(projet) if options["mask_empty"] else None,
         min_edge_frames=options["min_edge_frames"],
         fps=options["fps"],
     )
@@ -335,6 +365,8 @@ def _tab_resultats(projet: Path, axes: list[dict]) -> None:
     axes_connus = [axe["nom"] for axe in axes] or None
     globaux, par_axe, autres = group_analysis_files(fichiers, axes_connus)
 
+    _aide_lecture()
+
     if globaux:
         st.subheader("Général")
         _affiche_fichiers(globaux)
@@ -352,6 +384,53 @@ def _tab_resultats(projet: Path, axes: list[dict]) -> None:
                 "pour ne pas disparaître, pas forcément à ignorer."
             )
             _affiche_autres(autres)
+
+
+def _aide_lecture() -> None:
+    with st.expander("Comment lire ces résultats", expanded=False):
+        st.markdown(
+            "- **Par où commencer** : `heatmap_usage_by_<critère>.png`. Une "
+            "ligne par session, triée par groupe. Si une bande verticale "
+            "change de teinte d'un bloc à l'autre, ce motif distingue tes "
+            "groupes. Elle montre aussi les sessions aberrantes.\n"
+            "- **Barres** (`mean_by_…`) : l'ampleur de l'effet, motif par "
+            "motif. **Boîtes** (`boxplots_top_by_…`) : les 6 motifs aux "
+            "moyennes les plus écartées — les plus *différents*, pas "
+            "forcément les plus *significatifs*. Elles montrent si l'effet "
+            "tient à deux ou trois sessions extrêmes.\n"
+            "- **Significativité** (`stats_by_motif_<critère>.csv`) : "
+            "Mann-Whitney à 2 groupes, Kruskal-Wallis à 3 ou plus. "
+            "`p_value` est brute ; `p_adj_bh` est corrigée "
+            "(Benjamini-Hochberg) sur tous les motifs testés. Lis "
+            "`p_adj_bh` : un motif est retenu sous 0,05. Un motif dont un "
+            "groupe a moins de 3 sessions n'est pas testé et n'apparaît pas.\n"
+            "- **Catégories** (`…_by_category_…`) : les mêmes vues par "
+            "catégorie de comportement, si tu as rempli les catégories dans "
+            "**Motifs**. C'est ce niveau qui se raconte dans un papier.\n"
+            "- **Unités** : en suffixe des colonnes. `_prop` = proportion "
+            "des images (0–1), `_s` = secondes, `_frames` = nombre "
+            "d'images, `_sessions` = effectif du test."
+        )
+    with st.expander("Emporter les données dans R ou Python", expanded=False):
+        st.markdown(
+            "`analysis_global_long.csv` empile toutes les mesures, une "
+            "ligne par session × mesure, avec l'unité et toutes les "
+            "colonnes de ton Excel. Séparateur `;`, décimale `.`. Filtre "
+            "toujours sur `level` (`motif`, `category` ou `session`) avant "
+            "une moyenne : sinon tu additionnes des motifs avec la "
+            "catégorie qui les contient déjà."
+        )
+        st.code(
+            'd <- read.csv("analysis_global_long.csv", sep = ";")\n'
+            'usage <- subset(d, level == "motif" & metric == "usage")',
+            language="r",
+        )
+        st.code(
+            "import pandas as pd\n"
+            'd = pd.read_csv("analysis_global_long.csv", sep=";")\n'
+            "usage = d.query(\"level == 'motif' and metric == 'usage'\")",
+            language="python",
+        )
 
 
 # ============================================================

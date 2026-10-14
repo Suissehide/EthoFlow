@@ -29,7 +29,9 @@ def _section_modele_dlc(projet: Path) -> None:
     st.caption(
         "Le modèle vit hors du projet et n'est jamais copié. Un même modèle "
         "sert à autant de projets que tu veux. Pour en entraîner un nouveau, "
-        "voir le Parcours B du README — ça se fait au terminal."
+        "voir le Parcours B du README — ça se fait au terminal. Pas encore "
+        "de modèle ? Laisse vide : tu le désigneras avant l'estimation de pose. "
+        "Le dossier du modèle ou son `config.yaml` conviennent tous les deux."
     )
     actuel = dlc_config_path(projet)
     if actuel:
@@ -49,10 +51,15 @@ def _section_modele_dlc(projet: Path) -> None:
         _job.bouton_lancer(projet, "Diagnostiquer", PL.diagnose_dlc_model(projet),
                            cle="btn_diag", type="secondary",
                            disabled=not actuel,
-                           help="Répond à l'erreur « Could not find a shuffle… ».")
+                           help="Répond à l'erreur « Could not find a shuffle… ». "
+                                "Vérifie que le modèle a bien été entraîné et "
+                                "qu'il n'a pas été déplacé depuis.")
     with col2:
         _job.bouton_lancer(projet, "Réparer", PL.diagnose_dlc_model(projet, fix=True),
-                           cle="btn_fix", type="secondary", disabled=not actuel)
+                           cle="btn_fix", type="secondary", disabled=not actuel,
+                           help="Corrige ce qui peut l'être dans le config.yaml "
+                                "du modèle : son emplacement après un déplacement, "
+                                "et l'entraînement à utiliser. Ne réentraîne rien.")
 
 
 # ============================================================

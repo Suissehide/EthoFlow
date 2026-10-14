@@ -273,6 +273,11 @@ def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
                 _tableau_comparaison(meta, info),
                 width="stretch", hide_index=True,
             )
+            st.caption(
+                "Déclaré : ce qu'indique l'Excel (colonnes `FPS`, `Width`, "
+                "`Height`). Réel : mesuré dans le fichier. « — » : "
+                "l'information n'est pas dans l'Excel."
+            )
 
     st.markdown(lucide_title("clipboard-list", "Informations de la session"), unsafe_allow_html=True)
     champs = S.metadata_fields(meta)
@@ -438,6 +443,19 @@ def _onglet_crop(projet: Path) -> None:
             "l'onglet **Calibration arènes**."
         )
 
+    with st.expander("Ce que fait le découpage"):
+        st.markdown(
+            "- Chaque arène calibrée devient sa propre vidéo, rangée dans "
+            "`data/cropped/<session>/<session>_A1.mp4`, `_A2.mp4`…\n"
+            "- Les coordonnées propres à une session passent avant celles de "
+            "l'onglet **Calibration arènes**. Une arène sans coordonnées est "
+            "ignorée.\n"
+            "- Si la session a un début ou une fin fixés (`start_time_s`, "
+            "`end_time_s`), seul ce morceau de la vidéo est gardé.\n"
+            "- Tu as choisi le découpage ? Il faut le lancer avant VAME : "
+            "sinon VAME ne trouve pas les vidéos découpées."
+        )
+
     choisies, tout = _widgets.selecteur_sessions(projet, cle="videos_crop")
     tout_nouveau = st.checkbox(
         "Seulement les sessions pas encore découpées",
@@ -530,7 +548,8 @@ def _onglet_calibration_arenes(projet: Path) -> None:
     st.caption(
         "Deux clics par arène, sur deux coins opposés du rectangle, dans "
         "l'ordre A1 → A2 → A3 → A4. Ces arènes servent pour toutes les "
-        "sessions du projet qui n'ont pas les leurs."
+        "sessions du projet qui n'ont pas les leurs. Choisis une image où les "
+        "bords des arènes sont bien visibles."
     )
 
     choix = _choisir_frame_session(projet, cle="calib_arenes")
@@ -630,7 +649,9 @@ def _onglet_echelle(projet: Path) -> None:
     st.markdown(lucide_title("scan-line", "Échelle (pixels par cm)"), unsafe_allow_html=True)
     st.caption(
         "Sert au nettoyage à repérer les déplacements impossibles : sans "
-        "échelle, un déplacement en pixels ne se convertit pas en vitesse."
+        "échelle, un déplacement en pixels ne se convertit pas en vitesse. "
+        "À faire une fois par réglage de caméra : si la caméra ou sa hauteur "
+        "change, recalibre."
     )
     st.info(
         "**Conseil** : photographie une règle plutôt que de "
@@ -718,6 +739,8 @@ def _onglet_echelle(projet: Path) -> None:
                 known_cm = st.number_input(
                     "Distance réelle entre les deux points cliqués (cm)",
                     min_value=0.01, value=10.0, step=0.5, key="echelle_known_cm",
+                    help="Lue sur la règle : par exemple 10 si tu as cliqué "
+                         "les graduations 0 et 10 cm.",
                 )
                 valeur_calculee = distance_px / known_cm
                 st.write(
@@ -740,6 +763,8 @@ def _onglet_echelle(projet: Path) -> None:
     )
     valeur_directe = st.number_input(
         "Pixels par cm", width=220, min_value=0.0, value=0.0, step=0.1, key="echelle_valeur_directe",
+        help="Par exemple la valeur d'un autre projet filmé avec la même "
+             "caméra, au même réglage. Remplace l'échelle enregistrée.",
     )
     if st.button(
         "Enregistrer cette valeur", key="echelle_enregistrer_directe",

@@ -77,6 +77,9 @@ def _mode_par_defaut(projet: Path) -> str:
 
 def _section_mode(projet: Path) -> str:
     st.markdown(lucide_title("brain", "Modèle à utiliser"), unsafe_allow_html=True)
+    st.caption("Un modèle entraîné pour ton setup caméra est en général plus précis, "
+               "et sert à tous les projets filmés avec ce même setup. SuperAnimal "
+               "marche tout de suite, sans entraînement.")
 
     defaut = _mode_par_defaut(projet)
     statut, chemin = dlc_config_status(projet)
@@ -102,7 +105,9 @@ def _section_mode(projet: Path) -> str:
                            f"{chemin}. Choisis-le à son nouvel emplacement.")
             else:
                 st.caption("Aucun modèle n'est encore désigné pour ce projet. Choisis le "
-                           "dossier du modèle entraîné : il sert pour toutes les sessions.")
+                           "dossier du modèle entraîné : il sert pour toutes les sessions. "
+                           "Pas encore de modèle ? Prends SuperAnimal ci-dessus, ou "
+                           "entraînes-en un (Parcours B du README, au terminal).")
             _widgets.choix_modele_dlc(projet, cle="pose_modele")
     return mode
 
@@ -114,7 +119,8 @@ def _section_options(projet: Path, mode: str) -> dict:
          "video_adapt_batch_size": 2}
     o["skip_existing"] = st.checkbox("Ignorer les sessions déjà traitées",
                                      value=True, key="pose_skip_existing")
-    o["video_adapt"] = st.checkbox(
+    # L'adaptation ne concerne que SuperAnimal : le script l'ignore en mode custom.
+    o["video_adapt"] = mode != "custom" and st.checkbox(
         "Adapter le modèle à mes vidéos :gray[(plus lent, plus précis)]",
         value=False, key="pose_video_adapt",
         help="Court ré-entraînement de SuperAnimal sur tes propres vidéos : "
@@ -134,7 +140,10 @@ def _section_options(projet: Path, mode: str) -> dict:
                      "départ sur une carte de 16 Go ; baisse si sa mémoire sature."))
             o["fp16"] = st.checkbox(
                 "Calcul en demi-précision :gray[(≈ 2× plus rapide, écart sous le pixel)]",
-                value=False, key="pose_fp16")
+                value=False, key="pose_fp16",
+                help="Utilise mieux les cartes graphiques récentes. L'écart sur les "
+                     "positions reste sous le pixel, bien en dessous de la précision "
+                     "du modèle (2 à 3 pixels).")
         if not o["video_adapt"] and mode != "custom":
             st.caption("Aucun réglage avancé pour ce modèle.")
     return o
@@ -155,21 +164,50 @@ def _section_lancement(projet: Path, mode: str, o: dict) -> None:
         aide = ("Toutes ces sessions sont déjà traitées." if o["skip_existing"]
                 else "Choisis au moins une session.")
 
+    # `--all` ne prend que les sessions non traitées : pour tout refaire, on
+    # passe la liste complète.
+    sessions, tout = o["choisies"], o["tout"]
+    if tout and not o["skip_existing"]:
+        from lib.sessions import list_sessions
+        sessions, tout = list(list_sessions(projet)["session_id"]), False
     cmd = PL.run_dlc_inference(
-        projet, mode=mode, sessions=o["choisies"], all_sessions=o["tout"],
+        projet, mode=mode, sessions=sessions, all_sessions=tout,
         skip_existing=o["skip_existing"], video_adapt=o["video_adapt"],
         video_adapt_batch_size=o["video_adapt_batch_size"],
         batch_size=o["batch_size"], fp16=o["fp16"],
     )
+    st.caption("Avec une carte graphique, compte quelques dizaines de minutes par "
+               "vidéo de 20 min, plus si tu adaptes le modèle. Sans carte graphique, "
+               "ça marche aussi, mais 10 à 50 fois plus lentement.")
     _job.bouton_lancer(
         projet, _widgets.libelle_lancer(n), cmd,
         cle="btn_pose_lancer", disabled=modele_manquant or n == 0, help=aide,
     )
     _job.panneau(projet)
+    with st.expander("Vérifier le résultat avant le nettoyage"):
+        st.markdown(
+            "- Avec « Mon modèle entraîné », aucune vidéo annotée n'est produite. "
+            "Pour voir les points sur la vidéo, il faut les redessiner à partir du "
+            "fichier de poses (quelques dizaines de secondes, sans refaire la pose : "
+            "voir **Détails techniques**).\n"
+            "- Deux vidéos sortent : seuil 0,3 et seuil 0,6. La 0,6 efface les points "
+            "dont le modèle doute, donc elle paraît propre et cache les hésitations. "
+            "Compare les deux.\n"
+            "- Sauts rares et brefs : le nettoyage les répare. Sauts fréquents, ou "
+            "pattes gauche et droite inversées tout le temps : c'est le modèle qu'il "
+            "faut reprendre (Parcours B du README)."
+        )
     _widgets.details_techniques(cmd, notes=[
         f"Mode d'inférence : `{mode}`.",
         "Sorties : `data/dlc-output/<session>/` (un `.h5` de coordonnées par "
         "session ; vidéos annotées `_labeled.mp4` hors mode `custom`).",
+        "Redessiner les points (mode `custom` seulement), env `dlc` : "
+        "`python scripts/relabel_video.py --session <session>` → "
+        "`<stem>_labeled_p30.mp4` et `<stem>_labeled_p60.mp4`.",
+        "Erreur « Could not find a shuffle… » : bouton **Diagnostiquer** dans la "
+        "page **Projet** (souvent un modèle déplacé, réparable).",
+        "Pose très lente : la carte graphique n'est peut-être pas vue. Diagnostic "
+        "dans l'env `dlc` : `python scripts/diagnose_gpu.py`.",
     ])
 
 

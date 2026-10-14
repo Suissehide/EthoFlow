@@ -47,16 +47,22 @@ def _section_excel(projet: Path) -> Path | None:
     with st.expander("Colonnes attendues", expanded=False):
         st.markdown(
             "- **`id`** (obligatoire) — le nom du fichier vidéo, sans "
-            "extension : `970-M1` pour `970-M1.mp4`. Une ligne = une session.\n"
+            "extension : `970-M1` pour `970-M1.mp4`. Une ligne = une session, "
+            "nommée `BV-970-M1`. Deux lignes ne peuvent pas avoir le même `id`.\n"
             "- **`mouse_id`** (recommandée) — l'animal. Il se répète si la "
             "même souris est filmée plusieurs fois.\n"
             "- **`group`** (recommandée) — le groupe à comparer.\n"
             "- **Toutes les autres colonnes sont libres** : chacune devient un "
             "critère de comparaison dans **Analyses**. Une colonne "
-            "`regime_alimentaire` ajoutée ici y apparaîtra.\n\n"
+            "`regime_alimentaire` ajoutée ici y apparaîtra. Celles du modèle "
+            "(`sex`, `cage`, `genotype_*`…) sont des exemples : renomme-les "
+            "ou supprime-les. Une cellule vide est acceptée.\n\n"
             "Projet à plusieurs animaux par vidéo : trois feuilles "
             "(`Subjects`, `Trials_Videos`, `Arena_Mapping`) au lieu de "
-            "`Sessions`, reconnues automatiquement."
+            "`Sessions`, reconnues automatiquement. Obligatoires : "
+            "`TrialCode` dans `Trials_Videos` et dans `Arena_Mapping`, plus "
+            "`Arena` et `MouseID` dans `Arena_Mapping` (une ligne par vidéo × "
+            "arène). Les lignes grisées sont un exemple : supprime-les."
         )
 
     chemin_excel = excel_path(projet)
@@ -221,18 +227,29 @@ def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
         valeur_defaut=st.session_state.get("_donnees_videos_dir", ""),
         placeholder="ex : E:/data/bottom_view/08062026",
         titre_dialogue="Dossier des vidéos à synchroniser",
+        help="Les vidéos doivent être directement dans ce dossier, pas dans "
+             "un sous-dossier. Vidéos réparties sur plusieurs dossiers (un par "
+             "jour d'acquisition, par exemple) ? Crée les sessions une fois par "
+             "dossier : l'Excel reste le même.",
     )
     st.session_state["_donnees_videos_dir"] = videos_dir
 
     col_ext, col_overwrite = st.columns([1, 2], vertical_alignment="bottom")
     with col_ext:
-        ext = st.text_input("Extension des vidéos", value="mp4", key="donnees_video_ext")
+        ext = st.text_input(
+            "Extension des vidéos", value="mp4", key="donnees_video_ext",
+            help="Sans le point. EthoFlow cherche `<id>.<extension>` dans le "
+                 "dossier. À plusieurs animaux par vidéo, ce champ ne sert "
+                 "pas : la vidéo est la colonne `Original file name`, sinon "
+                 "`<TrialCode>.mp4`.",
+        )
     with col_overwrite:
         overwrite = st.checkbox(
             "Mettre à jour les sessions déjà créées",
             value=False, key="donnees_overwrite",
             help="Réécrit leurs informations depuis l'Excel. À cocher après "
-                 "une correction dans l'Excel.",
+                 "une correction dans l'Excel. Sans cette case, les sessions "
+                 "déjà créées sont laissées telles quelles.",
         )
 
     pas_de_videos_dir = not videos_dir.strip()
@@ -296,6 +313,10 @@ def _section_sessions(projet: Path) -> None:
             f"{n_total - n_video_ok} session(s) dont la vidéo est introuvable : "
             "retrouve-les depuis la page **Vidéos & calibration**."
         )
+    st.caption(
+        "Étape suivante : la page **Vidéos & calibration**, pour vérifier "
+        "chaque vidéo et régler l'échelle en pixels par cm."
+    )
 
 
 # ============================================================
