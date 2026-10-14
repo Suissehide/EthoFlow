@@ -9,18 +9,30 @@ from lib import runner
 from lib.erreurs import expliquer
 from views._widgets import verrou_etape
 
+# Pastille (code couleur unique de la refonte) et libellé par état.
 _ETATS = {
-    "running":     ("⏳", "En cours"),
-    "succeeded":   ("✅", "Terminé"),
-    "failed":      ("❌", "Échec"),
-    "cancelled":   ("⛔", "Annulé"),
-    "interrupted": ("⚠️", "Interrompu (l'app a été arrêtée pendant le job)"),
+    "running":     ("#c27a12", "En cours"),
+    "succeeded":   ("#2f9567", "Terminé"),
+    "failed":      ("#c9473f", "Échec"),
+    "cancelled":   ("#b9b5ac", "Annulé"),
+    "interrupted": ("#c9473f", "Interrompu : l'app a été fermée pendant le job"),
 }
+
+
+def _ligne_job(job, *, heure_debut: bool = True) -> str:
+    from html import escape
+
+    from views._activite import heure
+
+    couleur, texte = _ETATS.get(job.state, ("#b9b5ac", job.state))
+    quand = f" · {heure(job.started_at)}" if heure_debut else ""
+    return (f'<span class="ef-dot" style="background:{couleur}"></span> '
+            f"<b>{escape(job.label)}</b> — {texte}{quand}")
 
 
 def bouton_lancer(projet: Path, label: str, cmd, *, cle: str,
                   type: str = "primary", disabled: bool = False,
-                  help: str | None = None) -> None:
+                  help: str | None = None, afficher_raison: bool = True) -> None:
     """Bouton de lancement d'un job, désactivé si un autre job tourne déjà.
 
     Gère `JobBusy` (course entre l'affichage du bouton et le clic) en
@@ -36,7 +48,8 @@ def bouton_lancer(projet: Path, label: str, cmd, *, cle: str,
         # n'a aucun moyen de savoir ce qui bloque le bouton (ruling R9.1).
         en_cours = runner.current(projet)
         if en_cours is not None:
-            aide = f"« {en_cours.label} » tourne déjà (démarré à {en_cours.started_at})."
+            from views._activite import heure
+            aide = f"« {en_cours.label} » tourne déjà (démarré à {heure(en_cours.started_at)})."
         else:
             aide = "Un autre job tourne déjà."
     bloque = disabled or occupe or verrou is not None
@@ -48,8 +61,12 @@ def bouton_lancer(projet: Path, label: str, cmd, *, cle: str,
             st.error(str(e))
     # Un bouton désactivé dit toujours pourquoi, en toutes lettres (handoff) :
     # l'infobulle seule ne se voit pas.
-    if bloque and aide:
+    # Le verrou d'étape est le même pour tous les boutons d'une page : écrit
+    # sous le premier seulement (les suivants le gardent en infobulle).
+    vues = st.session_state.setdefault("_raisons_vues", set())
+    if bloque and aide and afficher_raison and not (aide == verrou and aide in vues):
         st.caption(aide)
+        vues.add(aide)
 
 
 @st.fragment(run_every=2.0)
@@ -115,6 +132,7 @@ def _banniere_echec(projet: Path, job) -> None:
                 st.rerun()
         if verrou:
             st.caption(verrou)
+            st.session_state.setdefault("_raisons_vues", set()).add(verrou)
         st.markdown(f'<p class="ef-label" style="margin-top:12px">Dernières lignes du journal · '
                     f"code de retour {job.returncode}</p>", unsafe_allow_html=True)
         st.code(fin or "(pas de sortie)", language="text")
@@ -143,15 +161,13 @@ def panneau(projet: Path, *, lignes: int = 30) -> None:
     if job.state == "failed":
         # La bannière dit tout, en clair : pas d'en-tête technique au-dessus.
         _banniere_echec(projet, job)
-        with st.expander("Log complet", expanded=False):
+        with st.expander("Journal complet", expanded=False):
             st.code(runner.read_log(projet, job.job_id) or "(vide)", language="text")
         return
-    icone, texte = _ETATS.get(job.state, ("•", job.state))
 
-    entete, action = st.columns([5, 1])
+    entete, action = st.columns([5, 1], vertical_alignment="center")
     with entete:
-        st.markdown(f"**{icone} {job.label}** — {texte}")
-        st.caption(f"`{job.script}` (env `{job.env}`) · démarré {job.started_at}")
+        st.markdown(_ligne_job(job), unsafe_allow_html=True)
     with action:
         if job.state == "running":
             if st.button("Annuler", key=f"annuler_{job.job_id}"):
@@ -164,7 +180,7 @@ def panneau(projet: Path, *, lignes: int = 30) -> None:
         st.code(runner.read_log(projet, job.job_id, tail=lignes) or "(pas de sortie)",
                 language="text")
 
-    with st.expander("Log complet", expanded=False):
+    with st.expander("Journal complet", expanded=False):
         st.code(runner.read_log(projet, job.job_id) or "(vide)", language="text")
 
 
@@ -174,14 +190,13 @@ def historique(projet: Path, limite: int = 10) -> None:
     jobs = runner.history(projet, limit=limite)
     if not jobs:
         return
-    with st.expander(f"Jobs précédents ({len(jobs)})", expanded=False):
+    with st.expander(f"Journaux des jobs précédents ({len(jobs)})", expanded=False):
         for job in jobs:
-            icone, texte = _ETATS.get(job.state, ("•", job.state))
-            st.markdown(f"{icone} **{job.label}** — {texte} · {job.started_at}")
+            st.markdown(_ligne_job(job), unsafe_allow_html=True)
             # Pas d'expander imbriqué (déconseillé par Streamlit) : la
             # visibilité du log de CE job se pilote par une case à cocher,
             # à plat dans l'expander parent — lisible même avec dix jobs.
-            if st.checkbox("Voir le log", key=f"voir_log_{job.job_id}"):
+            if st.checkbox("Voir le journal", key=f"voir_log_{job.job_id}"):
                 st.code(runner.read_log(projet, job.job_id, tail=200) or "(vide)",
                         language="text")
             st.divider()

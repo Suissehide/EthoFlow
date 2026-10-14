@@ -27,7 +27,6 @@ import lib.pipeline as PL
 from lib.config import (
     cropped_videos_exist,
     dlc_config_status,
-    dlc_output_dir,
     require_project,
 )
 from lib.icons import lucide_title
@@ -38,22 +37,17 @@ from views import _job, _widgets
 # voie A), single-animal (N animaux déjà croppés, voie B).
 _MODES = ["custom", "superanimal", "single-animal"]
 
-_EXPLICATIONS = {
-    "custom": (
-        "Un modèle DLC que tu as entraîné toi-même, désigné par "
-        "`dlc_project_config`. Le cas typique pour **1 animal par vidéo** "
-        "(ex. bottom-view)."
-    ),
-    "superanimal": (
-        "Le modèle SuperAnimal multi-animal pré-entraîné, lancé sur la "
-        "vidéo entière — pas de crop. Le défaut pour **N animaux par "
-        "vidéo** sans modèle custom (voie A de l'étape 4)."
-    ),
-    "single-animal": (
-        "SuperAnimal contraint à un seul individu, lancé sur des vidéos "
-        "**déjà croppées par arène** (voie B de l'étape 4, via "
-        "`crop_arenes.py`)."
-    ),
+# Libellés et descriptions en clair (handoff) ; le nom du mode reste dans
+# « Détails techniques ».
+_TITRES = {
+    "custom": "Mon modèle entraîné",
+    "superanimal": "SuperAnimal, vidéo entière",
+    "single-animal": "SuperAnimal, vidéos découpées",
+}
+_DESCRIPTIONS = {
+    "custom": "Le modèle DLC désigné pour ce projet{nom}. Le bon choix pour 1 animal par vidéo.",
+    "superanimal": "Modèle pré-entraîné, plusieurs animaux à la fois. Sans entraînement préalable.",
+    "single-animal": "Un animal par vidéo, sur des vidéos déjà découpées par arène.",
 }
 
 
@@ -82,197 +76,97 @@ def _mode_par_defaut(projet: Path) -> str:
 
 
 def _section_mode(projet: Path) -> str:
-    st.markdown(lucide_title("brain", "Mode d'inférence"), unsafe_allow_html=True)
+    st.markdown(lucide_title("brain", "Modèle à utiliser"), unsafe_allow_html=True)
 
     defaut = _mode_par_defaut(projet)
+    statut, chemin = dlc_config_status(projet)
+    nom = f" ({Path(chemin).parent.name})" if statut == "ok" else ""
     mode = st.radio(
-        "Mode",
-        _MODES,
-        index=_MODES.index(defaut),
-        format_func=lambda m: {
-            "custom": "custom — modèle DLC maison",
-            "superanimal": "superanimal — SuperAnimal multi-animal (vidéo entière)",
-            "single-animal": "single-animal — SuperAnimal sur vidéos croppées",
-        }[m],
-        key="pose_mode",
+        "Modèle à utiliser", _MODES, index=_MODES.index(defaut),
+        format_func=lambda m: _TITRES[m] + (
+            " :violet-badge[Recommandé pour ce projet]" if m == defaut else ""),
+        captions=[_DESCRIPTIONS[m].format(nom=nom) for m in _MODES],
+        key="pose_mode", label_visibility="collapsed", width="stretch",
     )
-    st.caption(_EXPLICATIONS[mode])
 
-    if mode == "custom":
-        statut, chemin = dlc_config_status(projet)
-        if statut == "absent":
-            st.warning(
-                "Aucun modèle DLC n'est configuré pour ce projet. Avec "
-                "`--no-prompt`, `run_dlc_inference.py --mode custom` "
-                "échouerait immédiatement au lieu de demander un modèle à "
-                "l'invite — désigne d'abord un modèle dans la section "
-                "**Modèle DLC** de la page **Projet**."
-            )
-        elif statut == "introuvable":
-            st.warning(
-                f"Le modèle configuré (`{chemin}`) est introuvable — déplacé "
-                "ou supprimé depuis. `run_dlc_inference.py --mode custom` "
-                "échouerait immédiatement en `--no-prompt`. Va dans "
-                "**Projet → Modèle DLC → Diagnostiquer** pour réparer, ou "
-                "redésigne un modèle valide."
-            )
-
+    if mode == "custom" and statut == "absent":
+        st.warning("Aucun modèle DLC n'est désigné pour ce projet. Choisis-en un : "
+                   "tableau de bord → menu du projet (son nom) → Modèle DLC.")
+    elif mode == "custom" and statut == "introuvable":
+        st.warning(f"Le modèle désigné est introuvable (déplacé ou supprimé) : {chemin}. "
+                   "Tableau de bord → menu du projet → Modèle DLC → Diagnostiquer.")
     return mode
 
 
-def _section_options(
-    projet: Path, mode: str,
-) -> tuple[list[str], bool, bool, bool, int, int | None, bool]:
-    st.markdown(lucide_title("settings", "Options"), unsafe_allow_html=True)
+def _section_options(projet: Path, mode: str) -> dict:
+    choisies, tout = _widgets.selecteur_sessions(projet, cle="pose", colonne="DLC")
 
-    choisies, tout = _widgets.selecteur_sessions(projet, cle="pose")
+    o = {"choisies": choisies, "tout": tout, "batch_size": None, "fp16": False,
+         "video_adapt_batch_size": 2}
+    o["skip_existing"] = st.checkbox("Ignorer les sessions déjà traitées",
+                                     value=True, key="pose_skip_existing")
+    o["video_adapt"] = st.checkbox(
+        "Adapter le modèle à mes vidéos :gray[(plus lent, plus précis)]",
+        value=False, key="pose_video_adapt",
+        help="Court ré-entraînement de SuperAnimal sur tes propres vidéos : "
+             "utile quand elles diffèrent beaucoup de celles d'origine.")
 
-    col_skip, col_adapt = st.columns(2)
-    with col_skip:
-        skip_existing = st.checkbox(
-            "Sauter les sessions déjà traitées (`--skip-existing`)",
-            value=True, key="pose_skip_existing",
-        )
-    with col_adapt:
-        video_adapt = st.checkbox(
-            "Adapter le modèle aux vidéos (`--video-adapt`)",
-            value=False, key="pose_video_adapt",
-            help="Fine-tuning court de SuperAnimal sur les statistiques de "
-                 "tes propres vidéos — plus lent, améliore la précision sur "
-                 "des vidéos assez différentes du jeu d'entraînement.",
-        )
-
-    video_adapt_batch_size = 2
-    if video_adapt:
-        video_adapt_batch_size = st.number_input(
-            "`--video-adapt-batch-size`",
-            min_value=1, max_value=32, value=2, step=1,
-            key="pose_video_adapt_batch_size",
-            help="2 sur GPU 16 Go, 4 à 8 sur GPU 24 Go. Le défaut du script "
-                 "(8) déborde la VRAM d'un RTX 4080/5080.",
-        )
-
-    # Mode custom uniquement : le script ignore ces deux flags sinon.
-    batch_size, fp16 = None, False
-    if mode == "custom":
-        col_batch, col_fp16 = st.columns(2)
-        with col_batch:
-            batch_size = int(st.number_input(
-                "`--batch-size`",
-                min_value=1, max_value=128, value=16, step=1,
-                key="pose_batch_size",
-                help="Frames traitées ensemble par la GPU. Sans ce flag, DLC "
-                     "retombe sur 1 — très lent. 16 est un bon départ sur "
-                     "une GPU 16 Go ; baisse si CUDA out of memory.",
-            ))
-        with col_fp16:
-            fp16 = st.checkbox(
-                "Demi-précision (`--fp16`)",
-                value=False, key="pose_fp16",
-                help="Autocast float16 : utilise les Tensor Cores, "
-                     "typiquement 2x plus rapide. Écart sur les positions "
-                     "sous le pixel.",
-            )
-
-    return (choisies, tout, skip_existing, video_adapt,
-            int(video_adapt_batch_size), batch_size, fp16)
+    with st.expander("Réglages avancés"):
+        if o["video_adapt"]:
+            o["video_adapt_batch_size"] = int(st.number_input(
+                "Lot d'adaptation", min_value=1, max_value=32, value=2,
+                step=1, key="pose_video_adapt_batch_size", width=220,
+                help="2 sur une carte graphique de 16 Go, 4 à 8 sur 24 Go."))
+        if mode == "custom":
+            o["batch_size"] = int(st.number_input(
+                "Images par lot", min_value=1,
+                max_value=128, value=16, step=1, key="pose_batch_size", width=220,
+                help="Images traitées ensemble par la carte graphique. 16 est un bon "
+                     "départ sur une carte de 16 Go ; baisse si sa mémoire sature."))
+            o["fp16"] = st.checkbox(
+                "Calcul en demi-précision :gray[(≈ 2× plus rapide, écart sous le pixel)]",
+                value=False, key="pose_fp16")
+        if not o["video_adapt"] and mode != "custom":
+            st.caption("Aucun réglage avancé pour ce modèle.")
+    return o
 
 
-def _section_lancement(
-    projet: Path, mode: str, choisies: list[str], tout: bool,
-    skip_existing: bool, video_adapt: bool, video_adapt_batch_size: int,
-    batch_size: int | None = None, fp16: bool = False,
-) -> None:
-    # "absent" ET "introuvable" désactivent le bouton : dans les deux cas
-    # `--mode custom --no-prompt` échouerait à coup sûr (ruling R12.1),
-    # lancer un job qui va échouer n'aide personne.
+def _section_lancement(projet: Path, mode: str, o: dict) -> None:
+    # Modèle "absent" ET "introuvable" désactivent le bouton : dans les deux
+    # cas `--mode custom --no-prompt` échouerait à coup sûr (ruling R12.1).
     statut, _ = dlc_config_status(projet)
     modele_manquant = mode == "custom" and statut != "ok"
-    pas_de_sessions = not tout and not choisies
+    n = _widgets.nb_sessions(projet, o["choisies"], o["tout"], colonne="DLC",
+                             ignorer_faites=o["skip_existing"])
 
     aide = None
     if modele_manquant:
-        aide = "Modèle DLC absent ou introuvable — voir l'avertissement ci-dessus."
-    elif pas_de_sessions:
-        aide = "Sélectionne au moins une session, ou coche « Toutes les sessions »."
+        aide = "Désigne d'abord un modèle DLC (voir l'avertissement ci-dessus)."
+    elif n == 0:
+        aide = ("Toutes ces sessions sont déjà traitées." if o["skip_existing"]
+                else "Choisis au moins une session.")
 
     cmd = PL.run_dlc_inference(
-        projet, mode=mode,
-        sessions=choisies, all_sessions=tout,
-        skip_existing=skip_existing,
-        video_adapt=video_adapt,
-        video_adapt_batch_size=video_adapt_batch_size,
-        batch_size=batch_size, fp16=fp16,
+        projet, mode=mode, sessions=o["choisies"], all_sessions=o["tout"],
+        skip_existing=o["skip_existing"], video_adapt=o["video_adapt"],
+        video_adapt_batch_size=o["video_adapt_batch_size"],
+        batch_size=o["batch_size"], fp16=o["fp16"],
     )
     _job.bouton_lancer(
-        projet, "Lancer l'inférence DLC", cmd,
-        cle="btn_pose_lancer",
-        disabled=modele_manquant or pas_de_sessions,
-        help=aide,
+        projet, _widgets.libelle_lancer(n), cmd,
+        cle="btn_pose_lancer", disabled=modele_manquant or n == 0, help=aide,
     )
-
     _job.panneau(projet)
-    _job.historique(projet)
-
-
-def _section_artefacts(projet: Path) -> None:
-    from lib import runner
-
-    job = runner.current(projet)
-    if job is None or job.script != "run_dlc_inference.py" or job.state != "succeeded":
-        return
-
-    st.markdown(lucide_title("circle-check", "Artefacts produits"), unsafe_allow_html=True)
-
-    racine = dlc_output_dir(projet)
-    if not racine.is_dir():
-        st.info("Aucune sortie trouvée sous `data/dlc-output/`.")
-        return
-
-    trouve = False
-    for session_dir in sorted(racine.iterdir()):
-        if not session_dir.is_dir():
-            continue
-        # Récursif, pas un glob à plat : en mode single-animal,
-        # run_superanimal_cropped écrit ses _labeled.mp4 dans un sous-dossier
-        # scratch dlc-output/<session>/cropped-raw/, pas directement dans
-        # dlc-output/<session>/ — un glob() plat les raterait précisément
-        # dans le mode où le QC visuel compte le plus (ruling R12.2). En
-        # mode custom, DLC (`analyze_videos`) n'écrit jamais de
-        # _labeled.mp4 : une liste vide dans ce mode est normale, pas un
-        # signe de problème.
-        h5 = sorted(session_dir.rglob("*.h5"))
-        labeled = sorted(session_dir.rglob("*_labeled.mp4"))
-        if not h5 and not labeled:
-            continue
-        trouve = True
-        with st.expander(session_dir.name, expanded=False):
-            for f in h5 + labeled:
-                st.caption(f"`{f.relative_to(projet)}`")
-
-    if not trouve:
-        st.info("Aucun `.h5` ni `_labeled.mp4` trouvé sous `data/dlc-output/`.")
-    else:
-        st.caption(
-            "Pour un contrôle qualité visuel des `_labeled.mp4`, voir la "
-            "page **Vidéos & calibration**."
-        )
+    _widgets.details_techniques(cmd, notes=[
+        f"Mode d'inférence : `{mode}`.",
+        "Sorties : `data/dlc-output/<session>/` (un `.h5` de coordonnées par "
+        "session ; vidéos annotées `_labeled.mp4` hors mode `custom`).",
+    ])
 
 
 def render() -> None:
     projet = require_project()
-
     _widgets.entete_etape(projet)
-
     mode = _section_mode(projet)
-    st.divider()
-    (choisies, tout, skip_existing, video_adapt, video_adapt_batch_size,
-     batch_size, fp16) = _section_options(projet, mode)
-    st.divider()
-    _section_lancement(
-        projet, mode, choisies, tout,
-        skip_existing, video_adapt, video_adapt_batch_size,
-        batch_size, fp16,
-    )
-    st.divider()
-    _section_artefacts(projet)
+    options = _section_options(projet, mode)
+    _section_lancement(projet, mode, options)

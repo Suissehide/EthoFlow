@@ -51,15 +51,15 @@ def _algos_presents(projet: Path) -> list[str]:
 def _champ_labels(projet: Path, *, cle: str) -> str | None:
     defaut = str(ML.path(projet)) if ML.exists(projet) else ""
     valeur = st.text_input(
-        "`--labels`", value=defaut, key=cle,
-        help="motif_labels.csv (auto : <vame>/motif_labels.csv).",
+        "Fiche des motifs", value=defaut, key=cle,
+        help="Trouvée automatiquement dans le projet ; à changer seulement "
+             "pour utiliser une autre fiche.",
     )
     if not valeur:
         st.caption(
-            "Pas de `motif_labels.csv` pour ce projet — sans lui, ce "
-            "rendu affichera `motif_0`, `motif_1`, … au lieu des noms de "
-            "comportements. Remplis-le dans la page **Motifs** avant de "
-            "produire une figure destinée à une publication."
+            "Pas encore de noms de motifs : ce rendu affichera « motif_0, "
+            "motif_1… ». Remplis-les dans la page **Motifs** avant une figure "
+            "de publication."
         )
     return valeur or None
 
@@ -101,31 +101,31 @@ def _affiche_rendu(rendu: RD.Render, *, cle: str) -> None:
 def _lignes_params(params: dict) -> list[str]:
     """Format lisible des kwargs recouvrés — une ligne par render."""
     if "projection" in params:      # manifold
-        morceaux = [f"session `{params['session']}`", f"algo `{params['algo']}`",
-                   f"projection `{params['projection']}`"]
+        morceaux = [f"session {params['session']}", f"méthode {params['algo']}",
+                   f"projection {params['projection']}"]
         if params.get("start"):
             morceaux.append(f"début {params['start']:g}s")
         if params.get("duration"):
             morceaux.append(f"durée {params['duration']:g}s")
-        morceaux.append(f"format `{params['output_format']}`")
+        morceaux.append(f"format {params['output_format']}")
         if params.get("with_video"):
             morceaux.append("avec vidéo")
         if params.get("pool_all_sessions"):
-            morceaux.append("pool-all-sessions")
+            morceaux.append("fond commun à toutes les sessions")
     elif "session" in params:       # bande de motifs
-        morceaux = [f"session `{params['session']}`", f"algo `{params['algo']}`"]
+        morceaux = [f"session {params['session']}", f"méthode {params['algo']}"]
         if params.get("start"):
             morceaux.append(f"début {params['start']:g}s")
         if params.get("duration"):
             morceaux.append(f"durée {params['duration']:g}s")
-        morceaux.append(f"format `{params['output_format']}`")
+        morceaux.append(f"format {params['output_format']}")
     else:                           # dendrogramme
-        morceaux = [f"algo `{params['algo']}`", f"linkage `{params['linkage']}`"]
+        morceaux = [f"méthode {params['algo']}", f"liaison {params['linkage']}"]
         if params.get("group"):
-            morceaux.append(f"groupe `{params['group']}`")
+            morceaux.append(f"groupe {params['group']}")
     return [
         " · ".join(morceaux),
-        "avec labels" if params.get("labels") else "sans labels (`motif_0`, `motif_1`, …)",
+        "avec les noms des motifs" if params.get("labels") else "sans noms (motif_0, motif_1…)",
     ]
 
 
@@ -144,41 +144,37 @@ def _section_rendus(projet: Path, rendus: list[RD.Render], *, cle: str) -> None:
 
 def _tab_motif_gif(projet: Path, sessions: list[str]) -> None:
     st.caption(
-        "Vidéo (ou GIF) de la session, avec un bandeau color-codé sous "
-        "l'image indiquant le motif VAME actif à chaque instant. Env "
-        "`ethoflow` — `motif_gif.py`."
+        "La vidéo de la session, avec sous l'image un bandeau coloré qui "
+        "indique le motif en cours à chaque instant."
     )
 
     session = st.selectbox("Session", options=sessions, key="visu_motif_session")
-    algo = st.selectbox("`--algo`", options=_algos_presents(projet), key="visu_motif_algo")
+    algo = st.selectbox("Méthode de découpage", options=_algos_presents(projet),
+                        key="visu_motif_algo")
 
+    limiter = st.checkbox("Limiter la durée", value=False, key="visu_motif_limiter")
     col_start, col_duration = st.columns(2)
     with col_start:
-        start = st.number_input("`--start` (s)", min_value=0.0, value=0.0,
+        start = st.number_input("Début (s)", min_value=0.0, value=0.0,
                                 step=1.0, key="visu_motif_start")
-    with col_duration:
-        limiter = st.checkbox("Limiter la durée (`--duration`)", value=False,
-                              key="visu_motif_limiter")
-        duration = None
-        if limiter:
-            duration = st.number_input("`--duration` (s)", min_value=0.1, value=30.0,
+    duration = None
+    if limiter:
+        with col_duration:
+            duration = st.number_input("Durée (s)", min_value=0.1, value=30.0,
                                        step=1.0, key="visu_motif_duration")
 
     if not limiter:
         st.caption(
-            "Sans `--duration`, `motif_gif.py` n'inscrit pas `--start` dans "
-            "le nom de fichier (`<session>_annotated.mp4`, toujours le "
-            "même) : ce rendu **remplacera** un précédent rendu de la même "
-            "session, quel que soit son `--start`. Renseigne aussi une "
-            "durée si tu veux garder plusieurs rendus distincts pour "
-            "comparer."
+            "Sans durée limitée, ce rendu **remplace** le précédent rendu "
+            "de la même session, quel que soit son début. Limite la durée "
+            "pour garder plusieurs rendus à comparer."
         )
 
     output_format = st.radio(
-        "`--output-format`", options=["mp4", "gif"], horizontal=True,
+        "Format", options=["mp4", "gif"], horizontal=True,
         key="visu_motif_format",
-        help="mp4 pour archivage/analyse ; gif pour partage web (garde "
-             "`--duration` < 120 s pour un gif raisonnable).",
+        help="mp4 pour archiver ; gif pour partager (moins de 2 minutes "
+             "pour un fichier raisonnable).",
     )
     labels = _champ_labels(projet, cle="visu_motif_labels")
 
@@ -202,78 +198,67 @@ def _tab_motif_gif(projet: Path, sessions: list[str]) -> None:
 
 def _tab_manifold(projet: Path, sessions: list[str]) -> None:
     st.caption(
-        "Reproduit la visu « behavior manifold » du README VAME : la "
-        "trajectoire de la session dans l'espace latent, animée — avec "
-        "en option la vraie vidéo à côté. Env `vame` (umap + sklearn) — "
-        "`behavior_structure_gif.py`."
+        "La trajectoire animée de la session dans l'espace des "
+        "comportements appris par VAME, avec en option la vidéo à côté."
     )
 
     session = st.selectbox("Session", options=sessions, key="visu_manifold_session")
     col_algo, col_proj = st.columns(2)
     with col_algo:
-        algo = st.selectbox("`--algo`", options=_algos_presents(projet),
+        algo = st.selectbox("Méthode de découpage", options=_algos_presents(projet),
                             key="visu_manifold_algo")
     with col_proj:
         projection = st.radio(
-            "`--projection`", options=["umap", "pca"], horizontal=True,
+            "Projection", options=["umap", "pca"], horizontal=True,
             key="visu_manifold_projection",
-            help="umap par défaut (bascule automatiquement sur pca si "
-                 "umap-learn est absent de l'env).",
+            help="umap par défaut ; pca si umap n'est pas installé.",
         )
 
+    limiter = st.checkbox("Limiter la durée", value=False, key="visu_manifold_limiter")
     col_start, col_duration = st.columns(2)
     with col_start:
-        start = st.number_input("`--start` (s)", min_value=0.0, value=0.0,
+        start = st.number_input("Début (s)", min_value=0.0, value=0.0,
                                 step=1.0, key="visu_manifold_start")
-    with col_duration:
-        limiter = st.checkbox("Limiter la durée (`--duration`)", value=False,
-                              key="visu_manifold_limiter")
-        duration = None
-        if limiter:
-            duration = st.number_input("`--duration` (s)", min_value=0.1, value=30.0,
+    duration = None
+    if limiter:
+        with col_duration:
+            duration = st.number_input("Durée (s)", min_value=0.1, value=30.0,
                                        step=1.0, key="visu_manifold_duration")
 
     output_format = st.radio(
-        "`--output-format`", options=["gif", "mp4"], horizontal=True,
+        "Format", options=["gif", "mp4"], horizontal=True,
         key="visu_manifold_format",
     )
     with_video = st.checkbox(
-        "`--with-video` — panneau vidéo à côté du manifold", value=False,
+        "Vidéo de la session à côté", value=False,
         key="visu_manifold_with_video",
-        help="Nécessite OpenCV et un `source_video` valide dans "
-             "`metadata.yaml`. Ralentit un peu le rendu.",
+        help="Il faut que la vidéo de la session soit trouvée. Ralentit un "
+             "peu le rendu.",
     )
     labeled_video = st.checkbox(
-        "`--labeled-video` — vidéo annotée DLC (keypoints) dans le panneau",
+        "Vidéo annotée (points du corps dessinés) à la place",
         value=False, key="visu_manifold_labeled",
-        help="Remplace la vidéo brute par celle de `data/dlc-output/<session>/` "
-             "(implique `--with-video`). Si elle manque : "
-             "`relabel_video.py --session <s> --pcutoffs 0.3`.",
+        help="Utilise la vidéo annotée par la pose, si elle existe.",
     )
     labeled_pcutoff = None
     if labeled_video:
         labeled_pcutoff = st.number_input(
-            "pcutoff (vide = la plus récente)",
+            "Seuil de confiance de la vidéo annotée (vide = la plus récente)",
             min_value=0.0, max_value=1.0, value=None, step=0.05,
-            key="visu_manifold_labeled_pcutoff",
-            help="Avec un seuil : exactement la vidéo `*_labeled_pXX.mp4` "
-                 "produite à ce seuil, sans repli sur une autre.",
+            key="visu_manifold_labeled_pcutoff", width=320,
+            help="Avec un seuil : exactement la vidéo annotée à ce seuil, "
+                 "sans en prendre une autre.",
         )
     pool_all_sessions = st.checkbox(
-        "`--pool-all-sessions` — référentiel commun à toutes les sessions",
+        "Fond commun à toutes les sessions (rendus comparables entre eux)",
         value=False, key="visu_manifold_pool",
     )
     if pool_all_sessions:
         st.warning(
-            "**Lent, et documenté comme pouvant se bloquer** (voir la "
-            "section Troubleshooting du README, « Rendu "
-            "`behavior_structure_gif` bloqué en mode `--pool-all-sessions` "
-            "»). UMAP tourne alors sur les points de TOUTES les sessions "
-            "du projet, pas seulement celle-ci — jusqu'à plusieurs "
-            "dizaines de minutes sur un gros projet. C'est en échange ce "
-            "qui rend les rendus comparables entre eux (même fond "
-            "commun) — mieux vaut le savoir avant de lancer plutôt que de "
-            "le découvrir après vingt minutes d'attente."
+            "**Lent, et peut se bloquer** : le calcul porte alors sur toutes "
+            "les sessions du projet, jusqu'à plusieurs dizaines de minutes "
+            "sur un gros projet. C'est ce qui rend les rendus comparables "
+            "entre eux (même fond)."
         )
 
     labels = _champ_labels(projet, cle="visu_manifold_labels")
@@ -301,19 +286,18 @@ def _tab_manifold(projet: Path, sessions: list[str]) -> None:
 
 def _tab_dendrogramme(projet: Path) -> None:
     st.caption(
-        "Refait la dendrogramme des communautés de motifs VAME, avec les "
-        "noms du CSV de labels au lieu des identifiants numériques. Env "
-        "`vame` (scipy) — `community_dendrogram.py`."
+        "L'arbre de parenté des motifs, avec leurs noms plutôt que leurs "
+        "numéros."
     )
 
-    algo = st.selectbox("`--algo`", options=_algos_presents(projet), key="visu_dendro_algo")
+    algo = st.selectbox("Méthode de découpage", options=_algos_presents(projet),
+                        key="visu_dendro_algo", width=320)
     group = st.text_input(
-        "`--group` (optionnel — filtre par groupe, ex : `MCCiECKO`)",
-        value="", key="visu_dendro_group",
+        "Groupe (facultatif, ex : MCCiECKO)", value="", key="visu_dendro_group", width=320,
     )
     linkage = st.selectbox(
-        "`--linkage`", options=["ward", "average", "complete", "single"],
-        key="visu_dendro_linkage",
+        "Méthode de liaison", options=["ward", "average", "complete", "single"],
+        key="visu_dendro_linkage", width=320,
     )
     labels = _champ_labels(projet, cle="visu_dendro_labels")
 

@@ -46,27 +46,24 @@ from views import _widgets
 
 def _section_generation(projet: Path) -> None:
     st.info(
-        "Aucun `motif_labels.csv` pour ce projet. L'app ne le fabrique "
-        "jamais elle-même — lance l'une des commandes ci-dessous (env "
-        "`vame`)."
+        "Pas encore de clips ni de fiche des motifs pour ce projet : "
+        "génère-les ci-dessous (après le découpage en motifs de l'étape VAME)."
     )
-    col1, col2 = st.columns(2)
-    with col1:
-        cmd = PL.vame_stage(projet, "motif-videos")
+    cmd = PL.vame_stage(projet, "motif-videos")
+    cmd_fiche = PL.vame_stage(projet, "motif-labels")
+    with st.container(horizontal=True, vertical_alignment="center"):
         _job.bouton_lancer(
-            projet, "Générer les clips + le CSV (motif-videos)", cmd,
-            cle="btn_motifs_videos",
-            help="Long : un clip par motif ET motif_labels.csv pré-rempli "
-                 "(`usage_pct`, `video`).",
+            projet, "Générer les clips et la fiche", cmd, cle="btn_motifs_videos",
+            help="Long : un clip vidéo par motif, et la fiche à remplir.",
         )
-    with col2:
-        cmd = PL.vame_stage(projet, "motif-labels")
         _job.bouton_lancer(
-            projet, "Régénérer le CSV seul (motif-labels)", cmd,
-            cle="btn_motifs_labels", type="secondary",
-            help="Rapide : seulement si les clips existent déjà "
-                 "(`results/community_videos/`).",
+            projet, "Refaire la fiche seule", cmd_fiche, cle="btn_motifs_labels",
+            type="secondary", help="Rapide : seulement si les clips existent déjà.",
         )
+    _widgets.details_techniques(cmd, notes=[
+        "Fiche : `data/vame/motif_labels.csv` ; clips : "
+        "`data/vame/results/community_videos/`. « Refaire la fiche seule » : "
+        "`run_vame.py motif-labels`."])
 
 
 # ============================================================
@@ -78,21 +75,18 @@ def _section_legacy(projet: Path) -> None:
     if not fichiers:
         return
     with st.expander(
-        f"Reprendre d'anciens labels — {len(fichiers)} fichier(s) YAML "
-        "trouvé(s)", expanded=False,
+        f"Reprendre des noms saisis avec l'ancienne version ({len(fichiers)} fichier(s))",
+        expanded=False,
     ):
         st.caption(
-            "Une ancienne version de l'app écrivait les labels dans "
-            "`analysis/motif_labels_<algo>.yaml`, un fichier que rien ne "
-            "lisait en aval — ce travail était invisible pour "
-            "`analyze_vame.py`. Tu peux reprendre la colonne `label` de "
-            "ces fichiers dans le nouveau CSV ; rien n'est écrasé sans "
-            "confirmation explicite ci-dessous."
+            "L'ancienne version de l'app rangeait les noms de motifs dans "
+            "un fichier que les analyses ne lisaient pas. Tu peux les "
+            "reprendre ici ; rien n'est écrasé sans ton clic."
         )
         for f in fichiers:
             if st.button(f"Importer « {f.name} »", key=f"btn_import_{f.name}"):
                 n = ML.migrate_from_yaml(projet, f)
-                st.success(f"{n} label(s) repris depuis `{f.name}`.")
+                st.success(f"{n} nom(s) repris depuis {f.name}.")
                 st.rerun()
 
 
@@ -146,9 +140,7 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
             st.video(str(clip))
         else:
             st.warning(
-                "Pas de clip pour ce motif — colonne `video` vide ou "
-                "fichier introuvable. Relance `motif-videos` depuis la "
-                "page **VAME**."
+                "Pas de clip pour ce motif : le fichier vidéo est introuvable."
             )
         usage = row.get("usage_pct") or ""
         st.metric("Usage", f"{usage} %" if usage else "—")
@@ -193,28 +185,24 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
         if hors_liste:
             st.warning(
                 f"Catégorie « {valeur_actuelle} » hors de la liste fermée "
-                "des 8 valeurs ETHOGRAM : conservée telle quelle (rien "
-                "n'est perdu si tu enregistres sans y toucher), mais "
-                "`analyze_vame.py` ne la reconnaîtra pas pour grouper les "
-                "motifs. Choisis une des 8 valeurs pour corriger, sinon "
-                "laisse en l'état."
+                "des 8 catégories : conservée telle quelle (rien n'est perdu "
+                "si tu enregistres sans y toucher), mais les analyses ne "
+                "pourront pas l'utiliser pour regrouper les motifs. Choisis "
+                "une des 8 catégories pour corriger."
             )
         st.selectbox(
             "Catégorie", options=options_cat, key=cat_key,
             placeholder="— non catégorisé —",
-            help="Liste fermée (8 valeurs ETHOGRAM), utilisée par "
-                 "`analyze_vame.py` pour grouper les motifs. Une valeur "
-                 "hors liste casse le regroupement.",
+            help="Liste fermée de 8 catégories, utilisée par les analyses "
+                 "pour regrouper les motifs.",
         )
 
         st.text_input(
             "Confiance", key=conf_key,
-            help="Champ libre. Motif ininterprétable (bruit de tracking, "
-                 "animal hors champ) : mets `artifact` ici et "
-                 "`analyze_vame.py` l'exclura des stats au lieu de le "
-                 "compter comme un comportement. C'est l'emplacement "
-                 "canonique ; `artifact` dans Catégorie fonctionne aussi, "
-                 "pour les CSV déjà annotés ainsi.",
+            help="Champ libre. Motif impossible à interpréter (erreur de "
+                 "suivi, animal hors champ) : écris `artifact` et les "
+                 "analyses l'écarteront au lieu de le compter comme un "
+                 "comportement.",
         )
 
         if st.button("Enregistrer", key=f"motifs_save_{motif_id}", type="primary"):
@@ -228,14 +216,12 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
             st.rerun()
 
         with st.expander(
-            "Vocabulaire suggéré — exemples pour `label`", expanded=False,
+            "Vocabulaire suggéré", expanded=False,
         ):
             st.caption(
-                "Exemples de termes pour remplir `label` de façon "
-                "cohérente d'un motif à l'autre. À ne pas confondre avec "
-                "`Catégorie` ci-dessus (liste fermée) : cliquer un terme "
-                "remplit seulement le champ `Label`, puis clique "
-                "Enregistrer."
+                "Des noms cohérents d'un motif à l'autre. Cliquer un terme "
+                "remplit le champ « Label » (pas la catégorie) ; clique "
+                "ensuite Enregistrer."
             )
             for groupe, termes in VOCABULAIRE_SUGGERE.items():
                 st.caption(f"**{groupe}**")
@@ -278,10 +264,9 @@ def _column_config(df: pd.DataFrame, cats: list[str]) -> dict:
     })
     config["category"] = st.column_config.SelectboxColumn(
         "category", options=[*cats, *valeurs_hors_liste],
-        help="Liste fermée (8 valeurs ETHOGRAM), utilisée par "
-             "`analyze_vame.py` pour grouper les motifs. Les valeurs hors "
-             "liste déjà présentes dans le fichier sont gardées ici pour "
-             "ne rien perdre, mais ne sont pas reconnues par les analyses.",
+        help="Liste fermée de 8 catégories, utilisée par les analyses. Les "
+             "valeurs hors liste déjà saisies sont gardées pour ne rien perdre, "
+             "mais les analyses ne les reconnaissent pas.",
     )
     return config
 
@@ -335,7 +320,7 @@ def render() -> None:
 
     df = ML.load(projet)
     if df is None or df.empty:
-        st.warning("`motif_labels.csv` existe mais est vide ou illisible.")
+        st.warning("La fiche des motifs existe mais est vide ou illisible.")
         return
     df = _tri_par_usage(df)
 

@@ -23,7 +23,7 @@ ETATS = {"succeeded": "Terminé", "running": "En cours", "failed": "Échec",
          "cancelled": "Annulé", "interrupted": "Interrompu"}
 
 
-def _heure(iso: str | None) -> str:
+def heure(iso: str | None) -> str:
     try:
         return datetime.fromisoformat(iso).strftime("%H:%M")
     except (TypeError, ValueError):
@@ -61,7 +61,7 @@ def _job_en_cours(projet: Path) -> None:
                 st.rerun()
         compte = (f"{prog['i'] - 1} / {prog['n']}" if prog.get("n")
                   else f"{prog['pct']} %" if prog.get("pct") is not None
-                  else f"depuis {_heure(job.started_at)}")
+                  else f"depuis {heure(job.started_at)}")
         reste = temps_restant(job.started_at, valeur) or ""
         st.markdown(
             f'<div class="ef-barre"><div style="width:{100 * valeur:.0f}%"></div></div>'
@@ -79,7 +79,7 @@ def _historique(projet: Path, sauf: str | None) -> None:
         lignes.append(
             f'<div class="ef-historique-ligne"><span class="ef-dot" style="background:{couleur}"></span>'
             f"<div><b>{escape(job.label)}</b>"
-            f"<span>{ETATS.get(job.state, job.state)} · {_heure(job.ended_at or job.started_at)}</span>"
+            f"<span>{ETATS.get(job.state, job.state)} · {heure(job.ended_at or job.started_at)}</span>"
             "</div></div>")
     if lignes:
         st.markdown(f'<div class="ef-historique">{"".join(lignes[:6])}</div>',

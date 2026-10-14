@@ -328,7 +328,7 @@ def _section_creation(racine: Path) -> None:
         st.session_state.pop("_creation_en_cours", None)
         st.error(
             f"Échec de la création de `{cible.name}` "
-            f"(code de retour {notre_job.returncode}). Voir le log ci-dessous."
+            f"(code de retour {notre_job.returncode}). Voir le journal ci-dessous."
         )
     elif notre_job is not None and notre_job.state in ("cancelled", "interrupted"):
         st.session_state.pop("_creation_en_cours", None)
@@ -360,7 +360,6 @@ def _section_creation(racine: Path) -> None:
 # ============================================================
 
 def _section_modele_dlc(projet: Path) -> None:
-    st.subheader("Modèle DLC")
     st.caption(
         "Le modèle vit hors du projet et n'est jamais copié. Un même modèle "
         "sert à autant de projets que tu veux. Pour en entraîner un nouveau, "
@@ -374,7 +373,7 @@ def _section_modele_dlc(projet: Path) -> None:
         )
     else:
         st.warning(
-            "Aucun modèle configuré. `run_dlc_inference --mode custom` en a besoin."
+            "Aucun modèle désigné. L'estimation de pose avec « Mon modèle entraîné » en a besoin."
         )
 
     modeles = list_dlc_models(models_root())

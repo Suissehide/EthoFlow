@@ -40,38 +40,31 @@ from views._widgets import champ_chemin
 def _section_excel(projet: Path) -> Path | None:
     st.markdown(lucide_title("file-spreadsheet", "Fichier Excel"), unsafe_allow_html=True)
     st.caption(
-        "`create_project.py` a généré un classeur starter à la racine du "
-        "projet — une ligne par vidéo à remplir, puis à redéposer ici."
+        "Le classeur du projet : une ligne par vidéo. Modifie-le directement "
+        "ci-dessous, ou télécharge-le, remplis-le et redépose-le."
     )
 
     with st.expander("Colonnes attendues", expanded=False):
         st.markdown(
-            "- **`id`** (obligatoire) — nom du fichier vidéo sans extension "
-            "(`970-M1` → cherche `970-M1.mp4`). C'est la clé unique de la "
-            "session, elle devient le nom du dossier sous `data/raw/`.\n"
-            "- **`mouse_id`** (recommandée) — identifie l'ANIMAL ; se répète "
-            "d'une ligne à l'autre pour un même animal filmé à plusieurs "
-            "timepoints dans un design longitudinal.\n"
-            "- **`group`** (recommandée) — la variable de comparaison "
-            "principale.\n"
-            "- **toutes les autres colonnes sont libres** : `sync_from_excel.py` "
-            "les recopie telles quelles dans `metadata.yaml`, et chacune "
-            "devient un axe de comparaison utilisable dans `analyze_vame.py`. "
-            "Inventer une colonne `regime_alimentaire` la fait arriver "
-            "jusqu'au bout de la chaîne sans toucher au code.\n\n"
-            "Pour un projet multi-animaux, le classeur a trois feuilles "
-            "(`Subjects`, `Trials_Videos`, `Arena_Mapping`) au lieu d'une "
-            "seule `Sessions` — `sync_from_excel.py` détecte le schéma "
-            "tout seul, la page n'a pas à le demander."
+            "- **`id`** (obligatoire) — le nom du fichier vidéo, sans "
+            "extension : `970-M1` pour `970-M1.mp4`. Une ligne = une session.\n"
+            "- **`mouse_id`** (recommandée) — l'animal. Il se répète si la "
+            "même souris est filmée plusieurs fois.\n"
+            "- **`group`** (recommandée) — le groupe à comparer.\n"
+            "- **Toutes les autres colonnes sont libres** : chacune devient un "
+            "critère de comparaison dans **Analyses**. Une colonne "
+            "`regime_alimentaire` ajoutée ici y apparaîtra.\n\n"
+            "Projet à plusieurs animaux par vidéo : trois feuilles "
+            "(`Subjects`, `Trials_Videos`, `Arena_Mapping`) au lieu de "
+            "`Sessions`, reconnues automatiquement."
         )
 
     chemin_excel = excel_path(projet)
 
     if chemin_excel is None:
         st.warning(
-            f"Aucun Excel trouvé à la racine de `{projet.name}`. Il devrait "
-            f"s'appeler `{projet.name}_sessions.xlsx` — relance "
-            "`create_project.py` si besoin."
+            f"Aucun fichier Excel dans le dossier du projet. Dépose-en un "
+            f"ci-dessous ; il sera enregistré sous `{projet.name}_sessions.xlsx`."
         )
     else:
         st.success(f"Excel trouvé : `{chemin_excel.name}`")
@@ -82,7 +75,7 @@ def _section_excel(projet: Path) -> Path | None:
             key="btn_telecharger_excel",
         )
 
-    st.markdown("**Déposer une version remplie**")
+    st.markdown('<p class="ef-section">Déposer une version remplie</p>', unsafe_allow_html=True)
 
     # Astuce de clé versionnée (comme l'ancien navigateur de fichiers) :
     # après confirmation ou annulation, on incrémente la version pour que
@@ -151,9 +144,9 @@ def _section_contenu(projet: Path, chemin_excel: Path | None) -> None:
         )
     if XL.modifie_depuis_sync(projet, chemin_excel):
         st.info(
-            "L'Excel a changé depuis la dernière synchronisation : relance "
-            "**Synchroniser** ci-dessous avec « Écraser » coché pour que les "
-            "metadata suivent."
+            "L'Excel a changé depuis la création des sessions : relance "
+            "**Créer les sessions** ci-dessous avec « Mettre à jour les "
+            "sessions déjà créées » coché pour qu'elles suivent."
         )
 
     try:
@@ -201,7 +194,7 @@ def _section_contenu(projet: Path, chemin_excel: Path | None) -> None:
         try:
             sauvegarde = XL.enregistrer(projet, chemin_excel, feuille, avant, apres)
         except ValueError as e:
-            st.error(f"Refusé par `sync_from_excel.py`, rien n'a été écrit : {e}")
+            st.error(f"Refusé, rien n'a été écrit : {e}")
         except XL.ExcelVerrouille as e:
             st.error(str(e))
         else:
@@ -215,11 +208,11 @@ def _section_contenu(projet: Path, chemin_excel: Path | None) -> None:
 # ============================================================
 
 def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
-    st.markdown(lucide_title("play", "Synchroniser"), unsafe_allow_html=True)
+    st.markdown(lucide_title("play", "Créer les sessions"), unsafe_allow_html=True)
     st.caption(
-        "Transforme chaque ligne de l'Excel en `data/raw/<session>/metadata.yaml`. "
-        "Lance d'abord l'aperçu — il n'écrit rien — pour repérer un `id` "
-        "qui ne correspond à aucun fichier vidéo avant le sync réel."
+        "Une session par ligne de l'Excel, reliée à sa vidéo. Lance d'abord "
+        "l'aperçu : il n'écrit rien et signale les lignes dont la vidéo est "
+        "introuvable."
     )
 
     videos_dir = champ_chemin(
@@ -231,43 +224,45 @@ def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
     )
     st.session_state["_donnees_videos_dir"] = videos_dir
 
-    col_ext, col_overwrite = st.columns([1, 2])
+    col_ext, col_overwrite = st.columns([1, 2], vertical_alignment="bottom")
     with col_ext:
-        ext = st.text_input("Extension vidéo", value="mp4", key="donnees_video_ext")
+        ext = st.text_input("Extension des vidéos", value="mp4", key="donnees_video_ext")
     with col_overwrite:
-        st.markdown("<div style='height:1.9rem'></div>", unsafe_allow_html=True)
         overwrite = st.checkbox(
-            "Écraser les metadata déjà générées (--overwrite)",
-            value=False,
-            key="donnees_overwrite",
+            "Mettre à jour les sessions déjà créées",
+            value=False, key="donnees_overwrite",
+            help="Réécrit leurs informations depuis l'Excel. À cocher après "
+                 "une correction dans l'Excel.",
         )
 
     pas_de_videos_dir = not videos_dir.strip()
     aide = "Renseigne le dossier des vidéos d'abord." if pas_de_videos_dir else None
 
-    col_apercu, col_reel = st.columns(2)
-    with col_apercu:
-        cmd_apercu = PL.sync_from_excel(
-            projet, videos_dir=videos_dir, excel=chemin_excel,
-            video_ext=ext or "mp4", dry_run=True,
-        )
+    cmd_apercu = PL.sync_from_excel(
+        projet, videos_dir=videos_dir, excel=chemin_excel,
+        video_ext=ext or "mp4", dry_run=True,
+    )
+    cmd_reel = PL.sync_from_excel(
+        projet, videos_dir=videos_dir, excel=chemin_excel,
+        video_ext=ext or "mp4", overwrite=overwrite,
+    )
+    # Boutons côte à côte, raison écrite une fois, à leur droite (maquette).
+    with st.container(horizontal=True, vertical_alignment="center"):
         _job.bouton_lancer(
-            projet, "Aperçu (dry-run)", cmd_apercu,
+            projet, "Aperçu (n'écrit rien)", cmd_apercu,
             cle="btn_sync_apercu", type="secondary",
-            disabled=pas_de_videos_dir, help=aide,
-        )
-    with col_reel:
-        cmd_reel = PL.sync_from_excel(
-            projet, videos_dir=videos_dir, excel=chemin_excel,
-            video_ext=ext or "mp4", overwrite=overwrite,
+            disabled=pas_de_videos_dir, help=aide, afficher_raison=False,
         )
         _job.bouton_lancer(
-            projet, "Synchroniser", cmd_reel,
+            projet, "Créer les sessions", cmd_reel,
             cle="btn_sync_reel", type="primary",
             disabled=pas_de_videos_dir, help=aide,
         )
 
     _job.panneau(projet)
+    _widgets.details_techniques(cmd_reel, notes=[
+        "Aperçu : même commande avec `--dry-run`. Chaque session est écrite "
+        "dans `data/raw/<session>/metadata.yaml`."])
     _job.historique(projet)
 
 
@@ -276,31 +271,30 @@ def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
 # ============================================================
 
 def _section_sessions(projet: Path) -> None:
-    st.markdown(lucide_title("layout-dashboard", "Sessions synchronisées"), unsafe_allow_html=True)
+    st.markdown(lucide_title("layout-dashboard", "Sessions créées"), unsafe_allow_html=True)
 
     df = list_sessions(projet)
     if df.empty:
-        st.info("Aucune session pour l'instant — lance le sync ci-dessus.")
+        st.info("Aucune session pour l'instant : crée-les ci-dessus.")
         return
 
-    if project_kind(projet) != "multi":
-        df = df.drop(columns=["split"])
-
+    # Pas de matrice sessions × étapes (handoff) : l'avancement se lit par
+    # étape sur le tableau de bord ; ici, juste les sessions et leur vidéo.
+    df = df[["session_id", "vidéo"]].rename(columns={"session_id": "Session", "vidéo": "Vidéo"})
     n_total = len(df)
-    n_video_ok = int((df["vidéo"] == "OK").sum())
+    n_video_ok = int((df["Vidéo"] == "OK").sum())
 
-    col1, col2 = st.columns(2)
-    col1.metric("Sessions", n_total)
-    col2.metric("Vidéos localisées", f"{n_video_ok}/{n_total}")
+    st.caption(f"{n_total} session{'s' if n_total > 1 else ''} · "
+               f"{n_video_ok} vidéo{'s' if n_video_ok > 1 else ''} trouvée{'s' if n_video_ok > 1 else ''}")
+    st.dataframe(df.assign(Vidéo=df["Vidéo"].map({"OK": "trouvée", "manque": "introuvable"})),
+                 width="stretch", hide_index=True)
 
-    st.dataframe(df, width="stretch", hide_index=True)
-
-    _section_metadata(projet, df["session_id"].tolist())
+    _section_metadata(projet, df["Session"].tolist())
 
     if n_video_ok < n_total:
         st.caption(
-            f"{n_total - n_video_ok} session(s) sans vidéo localisable — "
-            "re-pointe les chemins depuis la page **Vidéos & calibration**."
+            f"{n_total - n_video_ok} session(s) dont la vidéo est introuvable : "
+            "retrouve-les depuis la page **Vidéos & calibration**."
         )
 
 
@@ -315,8 +309,9 @@ def render() -> None:
 
     chemin_excel = _section_excel(projet)
     st.divider()
-    _section_contenu(projet, chemin_excel)
-    st.divider()
+    if chemin_excel is not None:
+        _section_contenu(projet, chemin_excel)
+        st.divider()
     _section_sync(projet, chemin_excel)
     st.divider()
     _section_sessions(projet)
@@ -338,17 +333,18 @@ def _section_metadata(projet: Path, sessions: list[str]) -> None:
         return
 
     st.divider()
-    st.markdown(lucide_title("file-spreadsheet", "Metadata d'une session"),
+    st.markdown(lucide_title("file-spreadsheet", "Informations d'une session"),
                 unsafe_allow_html=True)
     st.caption(
-        "Lecture seule — ce que le sync a écrit dans `metadata.yaml`. Pour "
-        "corriger, modifie **Contenu de l'Excel** ci-dessus puis resynchronise."
+        "Lecture seule : ce que l'Excel a donné pour cette session. Pour "
+        "corriger, modifie le **Contenu de l'Excel** ci-dessus, puis recrée "
+        "les sessions avec « Mettre à jour les sessions déjà créées »."
     )
 
     session = st.selectbox("Session", options=sessions, key="donnees_meta_session")
     meta = load_metadata(projet, session)
     if meta is None:
-        st.error(f"`metadata.yaml` introuvable pour `{session}`.")
+        st.error(f"Informations introuvables pour la session {session}.")
         return
 
     champs = metadata_fields(meta)

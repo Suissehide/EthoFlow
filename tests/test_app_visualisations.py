@@ -146,7 +146,7 @@ def test_avertissement_pool_all_sessions_apparait_quand_coche(tmp_path, monkeypa
     assert not at.exception, at.exception
 
     avertissements = " ".join(w.value for w in at.warning)
-    assert "pool-all-sessions" in avertissements.lower() or "Troubleshooting" in avertissements
+    assert "toutes les sessions" in avertissements.lower()
     assert "bloqu" in avertissements.lower() or "Troubleshooting" in avertissements
 
 

@@ -94,9 +94,9 @@ def test_projet_sans_vame_seul_setup_actif(tmp_path, monkeypatch):
         assert bouton.disabled, cle
         assert bouton.help, f"{cle} grisé sans raison affichée"
 
-    assert "setup" in _bouton(at, "btn_vame_align").help
-    assert "align" in _bouton(at, "btn_vame_trainset").help
-    assert "trainset" in _bouton(at, "btn_vame_train").help
+    assert "projet VAME" in _bouton(at, "btn_vame_align").help
+    assert "Aligne" in _bouton(at, "btn_vame_trainset").help
+    assert "jeu d'entraînement" in _bouton(at, "btn_vame_train").help
     assert "modèle entraîné" in _bouton(at, "btn_vame_evaluate").help
     assert "modèle entraîné" in _bouton(at, "btn_vame_segment").help
 
@@ -187,7 +187,7 @@ def test_segment_affiche_n_clusters_courant_et_avertit_sur_le_csv(tmp_path, monk
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     captions = [c.value for c in at.caption]
-    assert any("n_clusters` actuel" in c and "15" in c for c in captions), captions
+    assert any("Nombre de motifs actuel" in c and "15" in c for c in captions), captions
 
     warnings = [w.value for w in at.warning]
     assert any("unique par projet" in w for w in warnings), warnings

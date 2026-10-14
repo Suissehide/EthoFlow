@@ -163,6 +163,9 @@ if has_project:
         _projet_courant, _job.script if _job else None)
     _activite.render(_projet_courant, st.session_state["_etat_pipeline"])
 
+# Raisons de verrou déjà écrites pendant ce rendu (views/_job.bouton_lancer).
+st.session_state["_raisons_vues"] = set()
+
 # ============================================================
 # Dispatch
 # ============================================================

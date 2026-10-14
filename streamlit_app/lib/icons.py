@@ -86,13 +86,14 @@ def lucide_html(name: str, size: int = 18, color: str = "currentColor") -> str:
     )
 
 
-def lucide_title(icon_name: str, text: str, size: str = "1.15rem", icon_size: int = 20, color: str = ACCENT) -> str:
-    """HTML pour un titre de section avec icône centrée. À passer dans st.markdown(..., unsafe_allow_html=True)."""
-    svg = lucide_html(icon_name, icon_size, color)
-    return (
-        f'<div style="display:flex;align-items:center;gap:8px">'
-        f'{svg}<b style="font-size:{size}">{text}</b></div>'
-    )
+def lucide_title(icon_name: str, text: str) -> str:
+    """HTML d'un titre de section, à passer dans st.markdown(..., unsafe_allow_html=True).
+
+    Refonte 1c : les sections n'ont plus d'icône (titre 600 15 px, style
+    `.ef-section` dans style.css). `icon_name` reste dans la signature pour
+    ne pas réécrire les 42 appels ; il n'est plus affiché.
+    """
+    return f'<p class="ef-section">{text}</p>'
 
 
 def lucide_data_uri(name: str, color_hex: str = "9ca3af") -> str:

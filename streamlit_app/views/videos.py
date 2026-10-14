@@ -116,20 +116,20 @@ def _visualiseur(chemin: Path, session_id: str) -> None:
 
     col_prec, col_slider, col_suiv = st.columns([1, 10, 1], vertical_alignment="center")
     col_prec.button("◀", key=f"{cle}_prec", on_click=_decaler, args=(cle, -1, n),
-                    help="Frame précédente")
+                    help="Image précédente")
     col_suiv.button("▶", key=f"{cle}_suiv", on_click=_decaler, args=(cle, 1, n),
-                    help="Frame suivante")
+                    help="Image suivante")
     with col_slider:
-        index = st.slider("Frame", 0, max(n - 1, 1), key=cle,
+        index = st.slider("Image", 0, max(n - 1, 1), key=cle,
                           label_visibility="collapsed", disabled=n < 2)
 
     t = index / info.fps if info.fps else None
     png = _frame_cache(str(chemin), index)
-    legende = f"Frame {index} / {n - 1}" + (f" — {t:.2f} s" if t is not None else "")
+    legende = f"Image {index} / {n - 1}" + (f" — {t:.2f} s" if t is not None else "")
     if png:
         st.image(png, caption=legende, width="stretch")
     else:
-        st.caption(f"{legende} : frame illisible.")
+        st.caption(f"{legende} : image illisible.")
 
     taille = chemin.stat().st_size
     if taille <= _LECTEUR_MAX_OCTETS or st.toggle(
@@ -137,7 +137,7 @@ def _visualiseur(chemin: Path, session_id: str) -> None:
         key=f"{cle}_lecteur",
     ):
         st.video(str(chemin), start_time=int(t or 0))
-        st.caption("Le lecteur démarre à la frame choisie. Une vidéo annotée "
+        st.caption("Le lecteur démarre à l'image choisie. Une vidéo annotée "
                    "écrite par OpenCV (codec mp4v) peut ne pas se lire dans le "
                    "navigateur : le visualiseur ci-dessus, lui, la lit toujours.")
 
@@ -193,27 +193,27 @@ def _tableau_comparaison(meta: dict, info: V.VideoInfo) -> pd.DataFrame:
     return pd.DataFrame([
         {
             "Caractéristique": "fps",
-            "Déclaré (metadata)": _fmt(camera.get("fps")),
+            "Déclaré (Excel)": _fmt(camera.get("fps")),
             "Réel (fichier)": _fmt(info.fps),
         },
         {
             "Caractéristique": "Largeur (px)",
-            "Déclaré (metadata)": _fmt(camera.get("width")),
+            "Déclaré (Excel)": _fmt(camera.get("width")),
             "Réel (fichier)": _fmt(info.width),
         },
         {
             "Caractéristique": "Hauteur (px)",
-            "Déclaré (metadata)": _fmt(camera.get("height")),
+            "Déclaré (Excel)": _fmt(camera.get("height")),
             "Réel (fichier)": _fmt(info.height),
         },
         {
-            "Caractéristique": "Frames",
-            "Déclaré (metadata)": "—",
+            "Caractéristique": "Images",
+            "Déclaré (Excel)": "—",
             "Réel (fichier)": _fmt(info.n_frames),
         },
         {
             "Caractéristique": "Durée (s)",
-            "Déclaré (metadata)": "—",
+            "Déclaré (Excel)": "—",
             "Réel (fichier)": _fmt(info.duration_s),
         },
     ])
@@ -240,10 +240,10 @@ def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
         # affiche ce qu'on sait et on renvoie vers le re-pointage plus bas —
         # jamais une page vide ou cassée.
         st.warning(
-            (f"Vidéo source introuvable : `{chemin}`." if chemin
-             else "Aucune `source_video` dans la metadata de cette session.")
+            (f"Vidéo introuvable : `{chemin}`." if chemin
+             else "Aucune vidéo associée à cette session.")
             + " Vidéo déplacée, disque débranché, ou changement de machine ? "
-              "Voir la section **Re-pointer des vidéos manquantes** ci-dessous."
+              "Voir **Retrouver les vidéos manquantes** ci-dessous."
         )
     else:
         info = _probe_cache(str(chemin))
@@ -263,12 +263,10 @@ def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
             if ecart:
                 declare, reel = ecart
                 st.error(
-                    f"**Écart de fps** : {declare:g} déclaré dans la metadata "
-                    f"contre {reel:.2f} mesuré dans le fichier. Toute "
-                    "conversion frame → secondes en aval (VAME, analyses) "
-                    "sera fausse tant que ce n'est pas corrigé — corrige la "
-                    "metadata ou reconfirme le fps réel avant de lancer "
-                    "l'inférence."
+                    f"**Images par seconde incohérentes** : {declare:g} déclarées "
+                    f"dans l'Excel, {reel:.2f} mesurées dans la vidéo. Toutes les "
+                    "durées calculées ensuite (motifs, analyses) seraient fausses : "
+                    "corrige l'Excel avant de lancer l'estimation de pose."
                 )
 
             st.dataframe(
@@ -276,7 +274,7 @@ def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
                 width="stretch", hide_index=True,
             )
 
-    st.markdown(lucide_title("clipboard-list", "Metadata de la session"), unsafe_allow_html=True)
+    st.markdown(lucide_title("clipboard-list", "Informations de la session"), unsafe_allow_html=True)
     champs = S.metadata_fields(meta)
     if champs:
         # `Valeur` en chaîne : les clés de metadata sont libres (§sync_from_excel),
@@ -284,11 +282,11 @@ def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
         # sérialisation Arrow de `st.dataframe` au premier projet dont les
         # types varient d'une clé à l'autre (même piège que `_fmt` ci-dessus).
         st.dataframe(
-            pd.DataFrame([{"Clé": k, "Valeur": _fmt(v)} for k, v in champs.items()]),
+            pd.DataFrame([{"Information": k, "Valeur": _fmt(v)} for k, v in champs.items()]),
             width="stretch", hide_index=True,
         )
     else:
-        st.caption("Aucun champ de metadata scalaire pour cette session.")
+        st.caption("Aucune information pour cette session.")
 
 
 def _section_arenes_session(projet: Path, meta: dict) -> None:
@@ -297,26 +295,24 @@ def _section_arenes_session(projet: Path, meta: dict) -> None:
     st.markdown(lucide_title("waypoints", "Arènes"), unsafe_allow_html=True)
     df_arenes = S.arenes_dataframe(meta)
     if df_arenes.empty:
-        st.caption("Aucune arène définie dans la metadata de cette session.")
+        st.caption("Aucune arène définie pour cette session.")
     else:
         st.dataframe(df_arenes, width="stretch", hide_index=True)
 
 
 def _section_relink(projet: Path, sessions_manquantes: list[str]) -> None:
     st.markdown(
-        lucide_title("folder-open", "Re-pointer des vidéos manquantes"),
+        lucide_title("folder-open", "Retrouver les vidéos manquantes"),
         unsafe_allow_html=True,
     )
     st.warning(
-        f"{len(sessions_manquantes)} session(s) sans vidéo source valide : "
+        f"{len(sessions_manquantes)} session(s) sans vidéo trouvée : "
         f"{', '.join(sessions_manquantes)}."
     )
     st.caption(
-        "Cas classique du Troubleshooting du README : la metadata porte des "
-        "chemins d'une autre machine (Windows → Linux, ou l'inverse), ou "
-        "d'un disque débranché depuis. Indique le dossier où se trouvent "
-        "réellement les vidéos aujourd'hui — la recherche se fait par "
-        "`<id>.mp4`, où `id` est la clé `id` de la metadata."
+        "Les vidéos ont changé de place (autre ordinateur, disque "
+        "débranché) ? Indique le dossier où elles se trouvent aujourd'hui : "
+        "EthoFlow les retrouve par leur nom de fichier."
     )
 
     dossier = champ_chemin(
@@ -345,7 +341,7 @@ def _section_relink(projet: Path, sessions_manquantes: list[str]) -> None:
         width="stretch", hide_index=True,
     )
 
-    if st.button(f"Re-pointer {len(relinks)} session(s)", key="btn_relink_demander"):
+    if st.button(f"Associer {len(relinks)} session(s)", key="btn_relink_demander"):
         st.session_state["_confirmer_relink"] = str(dossier_path)
 
     # Confirmation avant écriture (apply_relinks réécrit metadata.yaml) : le
@@ -354,9 +350,8 @@ def _section_relink(projet: Path, sessions_manquantes: list[str]) -> None:
     # pour la suppression de projet (views/projet.py).
     if st.session_state.get("_confirmer_relink") == str(dossier_path):
         st.warning(
-            "Réécrire `source_video` dans le `metadata.yaml` de ces "
-            "sessions ? Seule cette clé change, le reste de chaque fichier "
-            "est préservé tel quel."
+            "Associer ces sessions aux vidéos trouvées ? Seul l'emplacement "
+            "de la vidéo change, le reste des informations est conservé."
         )
         col_annuler, col_confirmer = st.columns(2)
         with col_annuler:
@@ -364,14 +359,14 @@ def _section_relink(projet: Path, sessions_manquantes: list[str]) -> None:
                 st.session_state.pop("_confirmer_relink", None)
                 st.rerun()
         with col_confirmer:
-            if st.button("Oui, re-pointer", key="btn_relink_confirmer", type="primary"):
+            if st.button("Oui, associer", key="btn_relink_confirmer", type="primary"):
                 # Recalcul juste avant l'écriture : le dossier a pu changer
                 # de contenu entre l'affichage du tableau et ce clic.
                 relinks_confirmes = V.find_relinks(projet, dossier_path)
                 n = V.apply_relinks(projet, relinks_confirmes)
                 st.session_state.pop("_confirmer_relink", None)
                 st.cache_data.clear()
-                st.toast(f"{n} session(s) re-pointée(s).")
+                st.toast(f"{n} session(s) associée(s) à leur vidéo.")
                 st.rerun()
 
 
@@ -388,13 +383,14 @@ def _onglet_sessions(projet: Path) -> None:
     session_id = st.selectbox(
         "Session",
         options=list(df["session_id"]),
-        format_func=lambda sid: f"{sid} (vidéo : {statuts[sid]})",
+        format_func=lambda sid: sid + ("" if statuts[sid] == "OK" else " · vidéo introuvable"),
         key="videos_session_choisie",
     )
 
     ligne = df.loc[df["session_id"] == session_id].iloc[0]
-    st.caption("Pipeline : " + " · ".join(
-        f"{etape} {'✅' if ligne[etape] == 'OK' else '—'}"
+    noms = {"DLC": "Pose", "split": "Séparation des arènes", "nettoyage": "Nettoyage", "VAME": "VAME"}
+    st.caption("Cette session : " + " · ".join(
+        f"{noms[etape]} {'✓' if ligne[etape] == 'OK' else '—'}"
         for etape in df.columns[2:]
         if etape != "split" or project_kind(projet) == "multi"
     ))
@@ -416,52 +412,37 @@ def _onglet_sessions(projet: Path) -> None:
 def _onglet_crop(projet: Path) -> None:
     if project_kind(projet) != "multi":
         st.caption(
-            "Projet détecté comme `single` — un seul animal par vidéo. Le "
-            "crop par arène (`crop_arenes.py`) n'a de sens que pour isoler "
-            "plusieurs animaux filmés dans le même cadre ; cette section ne "
-            "s'applique donc pas ici, l'inférence DLC tourne directement sur "
-            "la vidéo source (page **Pose (DLC)**)."
+            "Un seul animal par vidéo dans ce projet : découper la vidéo par "
+            "arène ne sert à rien ici. L'estimation de pose travaille "
+            "directement sur la vidéo (page **Pose (DLC)**)."
         )
         return
 
-    st.markdown(lucide_title("clapperboard", "Crop des arènes"), unsafe_allow_html=True)
-    st.caption(
-        "Étape 4 du README — pour un projet multi-animal, deux voies "
-        "possibles, à choisir une fois pour toutes avant l'inférence DLC :"
-    )
+    st.markdown(lucide_title("clapperboard", "Découper les vidéos par arène"), unsafe_allow_html=True)
+    st.caption("Plusieurs animaux par vidéo : deux façons de faire, à choisir avant l'estimation de pose.")
     st.markdown(
-        "- **Voie A — DLC multi-animal puis split.** `run_dlc_inference.py "
-        "--mode superanimal` tourne directement sur la vidéo entière (pas de "
-        "crop), puis `assign_arenas.py` sépare la sortie par arène. Plus "
-        "rapide dans l'ensemble : un seul passage DLC par vidéo entière.\n"
-        "- **Voie B — crop puis DLC single-animal.** Ce que fait cette "
-        "section (`crop_arenes.py`), suivi de `run_dlc_inference.py --mode "
-        "single-animal` sur chaque vidéo croppée. Sortie plus propre par "
-        "arène, et **indispensable** si tu comptes labelliser des frames "
-        "pour entraîner ou affiner un modèle DLC — la GUI DLC est bien plus "
-        "simple en single-animal."
-    )
-    st.caption(
-        "Le crop n'est donc pas « la » chose à faire par défaut : il ne sert "
-        "que si tu choisis la voie B, ou si tu prépares une labellisation "
-        "(README §4.2)."
+        "- **Sans découpage** (le plus rapide) : la pose tourne sur la vidéo "
+        "entière avec « SuperAnimal, vidéo entière », puis chaque animal est "
+        "séparé par arène au nettoyage.\n"
+        "- **Avec découpage** (ce que fait cette section) : une vidéo par "
+        "arène, puis la pose avec « SuperAnimal, vidéos découpées ». "
+        "Résultat plus propre par arène, et **indispensable** pour annoter "
+        "des images afin d'entraîner un modèle."
     )
 
     coords = arena_coords(projet)
     if not coords:
         st.info(
-            "Aucune coordonnée d'arène par défaut n'est configurée "
-            "(`default_arenes_coords`) — `crop_arenes.py` lira les "
-            "coordonnées propres à chaque session dans sa `metadata.yaml` "
-            "(`arenes[].coords`). Si elles n'y sont pas non plus, calibre-les "
-            "d'abord dans l'onglet **Calibration arènes**."
+            "Les arènes ne sont pas encore calibrées pour ce projet. Sans "
+            "coordonnées propres à chaque session, calibre-les d'abord dans "
+            "l'onglet **Calibration arènes**."
         )
 
     choisies, tout = _widgets.selecteur_sessions(projet, cle="videos_crop")
     tout_nouveau = st.checkbox(
-        "Seulement les sessions pas encore croppées (`--all-new`)",
+        "Seulement les sessions pas encore découpées",
         value=False, key="videos_crop_all_new", disabled=tout,
-        help="Ignoré si « Toutes les sessions » est coché.",
+        help="Sans effet quand « Toutes » est choisi.",
     )
 
     pas_de_sessions = not tout and not tout_nouveau and not choisies
@@ -470,14 +451,18 @@ def _onglet_crop(projet: Path) -> None:
         all_sessions=tout, all_new=(tout_nouveau and not tout),
     )
     _job.bouton_lancer(
-        projet, "Lancer le crop des arènes", cmd,
+        projet, "Découper les vidéos", cmd,
         cle="btn_videos_crop",
         disabled=pas_de_sessions,
         help=None if not pas_de_sessions else
-             "Sélectionne au moins une session, coche « Toutes les sessions » "
-             "ou « Seulement les nouvelles ».",
+             "Choisis au moins une session, ou « Seulement les sessions pas "
+             "encore découpées ».",
     )
     _job.panneau(projet)
+    _widgets.details_techniques(cmd, notes=[
+        "Coordonnées : celles de chaque session (`arenes[].coords` du "
+        "`metadata.yaml`), sinon `default_arenes_coords` de "
+        "`configs/pipeline_config.yaml`."])
     _job.historique(projet)
 
 
@@ -502,8 +487,8 @@ def _choisir_frame_session(projet: Path, *, cle: str) -> tuple[str, np.ndarray] 
     sessions = _sessions_avec_video(projet)
     if not sessions:
         st.info(
-            "Aucune session avec une vidéo source valide pour l'instant — "
-            "voir l'onglet **Sessions** pour re-pointer une vidéo manquante."
+            "Aucune session n'a encore de vidéo trouvée : onglet **Sessions**, "
+            "« Retrouver les vidéos manquantes »."
         )
         return None
 
@@ -512,18 +497,18 @@ def _choisir_frame_session(projet: Path, *, cle: str) -> tuple[str, np.ndarray] 
     chemin = Path(meta["source_video"])
     info = _probe_cache(str(chemin))
     if not info.n_frames:
-        st.warning(f"`{chemin}` : nombre de frames illisible, impossible d'en extraire une.")
+        st.warning(f"`{chemin}` : nombre d'images illisible, impossible d'en extraire une.")
         return None
 
     defaut = min(info.n_frames // 2, info.n_frames - 1)
     frame_idx = st.number_input(
-        "Index de la frame", min_value=0, max_value=info.n_frames - 1,
+        "Numéro de l'image", min_value=0, max_value=info.n_frames - 1,
         value=defaut, key=f"{cle}_frame",
-        help=f"Vidéo de {info.n_frames} frames.",
+        help=f"Vidéo de {info.n_frames} images.",
     )
     frame = V.grab_frame(chemin, index=int(frame_idx))
     if frame is None:
-        st.warning(f"Impossible d'extraire la frame {frame_idx} de `{chemin}`.")
+        st.warning(f"Impossible d'extraire l'image {frame_idx} de `{chemin}`.")
         return None
     return f"session:{chemin}#{frame_idx}", frame
 
@@ -543,11 +528,9 @@ def _reset_arenes_clics() -> None:
 def _onglet_calibration_arenes(projet: Path) -> None:
     st.markdown(lucide_title("waypoints", "Calibration des arènes"), unsafe_allow_html=True)
     st.caption(
-        "Deux clics par arène — les deux coins opposés du rectangle — dans "
-        "l'ordre A1 → A2 → A3 → A4. Écrit `default_arenes_coords` dans "
-        "`configs/pipeline_config.yaml` (via `calibrate_arenes.save_coords_default`), "
-        "utilisé par `crop_arenes.py`/`assign_arenas.py` comme repli pour "
-        "toute session sans coordonnées propres dans sa `metadata.yaml`."
+        "Deux clics par arène, sur deux coins opposés du rectangle, dans "
+        "l'ordre A1 → A2 → A3 → A4. Ces arènes servent pour toutes les "
+        "sessions du projet qui n'ont pas les leurs."
     )
 
     choix = _choisir_frame_session(projet, cle="calib_arenes")
@@ -644,14 +627,13 @@ def _reset_echelle_clics() -> None:
 
 
 def _onglet_echelle(projet: Path) -> None:
-    st.markdown(lucide_title("scan-line", "Échelle px/cm"), unsafe_allow_html=True)
+    st.markdown(lucide_title("scan-line", "Échelle (pixels par cm)"), unsafe_allow_html=True)
     st.caption(
-        "Nécessaire pour détecter les vitesses aberrantes dans "
-        "`prepare_vame_input_custom.py` — sans échelle, un déplacement en "
-        "pixels ne peut pas être converti en vitesse réelle."
+        "Sert au nettoyage à repérer les déplacements impossibles : sans "
+        "échelle, un déplacement en pixels ne se convertit pas en vitesse."
     )
     st.info(
-        "**Conseil du README** : photographie une règle plutôt que de "
+        "**Conseil** : photographie une règle plutôt que de "
         "mesurer les dimensions de l'arène — plus l'objet mesuré est "
         "grand, plus la distorsion de lentille fausse la conversion "
         "pixels → centimètres."
@@ -666,13 +648,13 @@ def _onglet_echelle(projet: Path) -> None:
 
     source = st.radio(
         "Source de l'image à cliquer",
-        ["Frame d'une vidéo de session", "Photo importée (règle)"],
+        ["Image d'une vidéo de session", "Photo importée (règle)"],
         key="echelle_source_mode", horizontal=True,
     )
 
     frame = None
     source_actuelle: str | None = None
-    if source == "Frame d'une vidéo de session":
+    if source == "Image d'une vidéo de session":
         choix = _choisir_frame_session(projet, cle="echelle")
         if choix is not None:
             source_actuelle, frame = choix
@@ -744,7 +726,7 @@ def _onglet_echelle(projet: Path) -> None:
                 )
                 if st.button("Enregistrer cette échelle", key="echelle_enregistrer_clics", type="primary"):
                     set_px_per_cm(projet, valeur_calculee)
-                    st.toast(f"px_per_cm = {valeur_calculee:.3f} enregistré dans pipeline_config.yaml.")
+                    st.toast(f"Échelle enregistrée : {valeur_calculee:.3f} pixels par cm.")
     else:
         st.caption(
             "Choisis une source d'image ci-dessus pour calibrer par les "
@@ -756,16 +738,15 @@ def _onglet_echelle(projet: Path) -> None:
         lucide_title("save", "Saisie directe d'une valeur déjà connue"),
         unsafe_allow_html=True,
     )
-    st.caption("Équivalent de `calibrate_scale.py --set <valeur>` : écrit px_per_cm sans clic.")
     valeur_directe = st.number_input(
-        "px/cm connu", min_value=0.0, value=0.0, step=0.1, key="echelle_valeur_directe",
+        "Pixels par cm", width=220, min_value=0.0, value=0.0, step=0.1, key="echelle_valeur_directe",
     )
     if st.button(
         "Enregistrer cette valeur", key="echelle_enregistrer_directe",
         disabled=valeur_directe <= 0,
     ):
         set_px_per_cm(projet, valeur_directe)
-        st.toast(f"px_per_cm = {valeur_directe:.3f} enregistré dans pipeline_config.yaml.")
+        st.toast(f"Échelle enregistrée : {valeur_directe:.3f} pixels par cm.")
 
 
 # ============================================================
@@ -778,7 +759,7 @@ def render() -> None:
     _widgets.entete_etape(projet)
 
     onglet_sessions, onglet_crop, onglet_calibration_arenes, onglet_echelle = st.tabs(
-        ["Sessions", "Crop", "Calibration arènes", "Échelle px/cm"]
+        ["Sessions", "Découpage", "Calibration arènes", "Échelle"]
     )
     with onglet_sessions:
         _onglet_sessions(projet)

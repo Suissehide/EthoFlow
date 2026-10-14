@@ -175,3 +175,54 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 .ef-echec { display: grid; grid-template-columns: 28px 1fr; gap: 14px; align-items: start; }
 [data-testid="stMarkdownContainer"] p.ef-echec-titre { font: 600 17px 'IBM Plex Sans', sans-serif !important; margin: 0 0 6px; }
 [data-testid="stMarkdownContainer"] p.ef-echec-cause { font-size: 14px !important; line-height: 1.55; color: #56534d; margin: 0; max-width: 640px; }
+
+/* ---------- Formulaires des étapes (maquette 1a/1c) ---------- */
+/* Titre de section : 600 15 px, sans icône, espacement régulier. */
+[data-testid="stMarkdownContainer"] p.ef-section {
+  font: 600 15px 'IBM Plex Sans', sans-serif !important; color: #1c1b19;
+  margin: 18px 0 2px !important;
+}
+/* Cartes radio : bordure 1.5 px, sélection indigo. */
+.st-key-pose_mode [role="radiogroup"] { gap: 8px; width: 100%; }
+.st-key-pose_mode [role="radiogroup"] > label {
+  width: 100%; margin: 0; padding: 12px 16px; background: #fff;
+  border: 1.5px solid #e0ddd5; border-radius: 8px; align-items: flex-start;
+}
+.st-key-pose_mode [role="radiogroup"] > label:has(input:checked) { border-color: #4f46c8; }
+.st-key-pose_mode [role="radiogroup"] > label [data-testid="stMarkdownContainer"] p {
+  font-weight: 600; font-size: 14px; color: #1c1b19;
+}
+.st-key-pose_mode [role="radiogroup"] > label [data-testid="stCaptionContainer"] p {
+  font-weight: 400; font-size: 13px !important; color: #6b6862; margin-top: 2px;
+}
+/* Puces de sessions : la sélection est noire, texte blanc. */
+[data-testid="stButtonGroup"] button[kind="pillsActive"] {
+  background: #1c1b19 !important; color: #fff !important; border-color: #1c1b19 !important;
+}
+[data-testid="stButtonGroup"] button { font-size: 13px; }
+/* Expanders repliés (« Réglages avancés », « Détails techniques ») : discrets. */
+[data-testid="stExpander"] details { background: transparent; border-color: #e0ddd5; }
+[data-testid="stExpander"] summary p { font-size: 14px; color: #56534d; }
+/* Code en ligne : encre neutre plutôt que le vert par défaut de Streamlit. */
+[data-testid="stMarkdownContainer"] code { color: #56534d; background: #efede7; }
+/* Séparateurs de sections : rythme plus serré que le défaut de Streamlit. */
+[data-testid="stMarkdownContainer"] hr, hr { margin: 12px 0 !important; border-color: #e0ddd5; }
+
+/* ---------- VAME : phases et sous-étapes ---------- */
+.ef-phases { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 4px 0 8px; }
+.ef-phase-carte { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.ef-phase-etat { display: flex; align-items: center; gap: 8px; }
+.ef-phase-carte b { font: 600 15px 'IBM Plex Sans', sans-serif; }
+.ef-phase-carte > span { font: 400 13px/1.45 'IBM Plex Sans', sans-serif; color: #6b6862; }
+[data-testid="stMarkdownContainer"] p.ef-phase-titre {
+  font: 600 20px 'IBM Plex Sans', sans-serif !important; letter-spacing: -0.01em; margin: 8px 0 0 !important;
+}
+[data-testid="stMarkdownContainer"] p.ef-sous-etape {
+  font: 600 15px 'IBM Plex Sans', sans-serif !important; margin: 14px 0 0 !important;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.ef-sous-etape .ef-muted { font-weight: 400; font-size: 13px; }
+.ef-puce {
+  font: 500 11px 'IBM Plex Mono', monospace; text-transform: uppercase; letter-spacing: .04em;
+  border: 1px solid; border-radius: 999px; padding: 1px 8px;
+}

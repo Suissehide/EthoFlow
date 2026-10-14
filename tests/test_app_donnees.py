@@ -93,7 +93,7 @@ def test_sans_excel_la_page_le_dit_sans_planter(tmp_path, monkeypatch):
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     assert not at.exception, at.exception
-    assert any("Aucun Excel trouvé" in w.value for w in at.warning), [w.value for w in at.warning]
+    assert any("Aucun fichier Excel" in w.value for w in at.warning), [w.value for w in at.warning]
 
 
 def test_boutons_sync_desactives_sans_dossier_videos(tmp_path, monkeypatch):

@@ -113,7 +113,7 @@ def _compter_elements(at: AppTest, type_recherche: str) -> int:
 def _tableau_comparaison(at: AppTest) -> pd.DataFrame:
     for d in at.dataframe:
         cols = list(d.value.columns)
-        if cols == ["Caractéristique", "Déclaré (metadata)", "Réel (fichier)"]:
+        if cols == ["Caractéristique", "Déclaré (Excel)", "Réel (fichier)"]:
             return d.value
     raise AssertionError("tableau de comparaison introuvable")
 
@@ -134,7 +134,7 @@ def test_caracteristiques_reelles_affichees(tmp_path, monkeypatch, video_reelle)
     lignes = table.set_index("Caractéristique")
     assert lignes.loc["Largeur (px)", "Réel (fichier)"] == "64"
     assert lignes.loc["Hauteur (px)", "Réel (fichier)"] == "48"
-    assert lignes.loc["Frames", "Réel (fichier)"] == "20"
+    assert lignes.loc["Images", "Réel (fichier)"] == "20"
     assert abs(float(lignes.loc["fps", "Réel (fichier)"]) - 10.0) < 0.5
 
     # Vignette + lecteur présents, aucune alerte de décalage fps (déclaré == réel).
@@ -152,10 +152,10 @@ def test_ecart_fps_signale(tmp_path, monkeypatch, video_reelle):
 
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
-    assert any("Écart de fps" in e.value for e in at.error), [e.value for e in at.error]
+    assert any("Images par seconde incohérentes" in e.value for e in at.error), [e.value for e in at.error]
     table = _tableau_comparaison(at)
     lignes = table.set_index("Caractéristique")
-    assert lignes.loc["fps", "Déclaré (metadata)"] == "25"
+    assert lignes.loc["fps", "Déclaré (Excel)"] == "25"
     assert abs(float(lignes.loc["fps", "Réel (fichier)"]) - 10.0) < 0.5
 
 
@@ -189,8 +189,8 @@ def test_onglet_crop_multi_explique_les_deux_voies(tmp_path, monkeypatch):
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     textes = [m.value for m in at.markdown] + [c.value for c in at.caption]
-    assert any("Voie A" in t for t in textes)
-    assert any("Voie B" in t for t in textes)
+    assert any("Sans découpage" in t for t in textes)
+    assert any("Avec découpage" in t for t in textes)
     boutons = {b.key: b for b in at.button}
     assert "btn_videos_crop" in boutons
 
@@ -202,7 +202,7 @@ def test_onglet_crop_single_explique_pourquoi_absent(tmp_path, monkeypatch):
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     textes = [c.value for c in at.caption]
-    assert any("n'a de sens que pour isoler" in t for t in textes), textes
+    assert any("Un seul animal par vidéo" in t for t in textes), textes
     boutons = {b.key: b for b in at.button}
     assert "btn_videos_crop" not in boutons
 
@@ -503,7 +503,7 @@ def test_echelle_deux_clics_calcule_et_enregistre_px_per_cm(
 
     radios = {r.key: r for r in at.radio}
     assert "echelle_source_mode" in radios
-    radios["echelle_source_mode"].set_value("Frame d'une vidéo de session").run()
+    radios["echelle_source_mode"].set_value("Image d'une vidéo de session").run()
     assert not at.exception, at.exception
 
     cle_clic = _cle_clic_echelle_video(video, 10)
@@ -546,7 +546,7 @@ def test_echelle_clics_identiques_narrete_pas_le_bouton_enregistrer(
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
     radios = {r.key: r for r in at.radio}
-    radios["echelle_source_mode"].set_value("Frame d'une vidéo de session").run()
+    radios["echelle_source_mode"].set_value("Image d'une vidéo de session").run()
     assert not at.exception, at.exception
 
     cle_clic = _cle_clic_echelle_video(video, 10)

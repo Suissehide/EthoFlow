@@ -42,7 +42,6 @@ import streamlit as st
 import lib.pipeline as PL
 import lib.vame as V
 from lib.config import require_project
-from lib.icons import lucide_title
 from views import _graphiques as G
 from views import _job
 from views import _widgets
@@ -55,12 +54,12 @@ from views._widgets import champ_chemin
 _ORDRE = ["setup", "align", "trainset", "train", "evaluate", "segment"]
 
 _TITRES = {
-    "setup": "1. Setup",
-    "align": "2. Align",
-    "trainset": "3. Trainset",
-    "train": "4. Train",
-    "evaluate": "5. Evaluate",
-    "segment": "6. Segment",
+    "setup": "Créer le projet VAME",
+    "align": "Aligner les poses",
+    "trainset": "Préparer le jeu d'entraînement",
+    "train": "Entraîner le modèle",
+    "evaluate": "Évaluer le modèle",
+    "segment": "Découper en motifs",
 }
 
 _DUREES = {
@@ -72,30 +71,82 @@ _DUREES = {
     "segment": "quelques minutes",
 }
 
-_ICONES = {
-    "setup": "settings",
-    "align": "scan-line",
-    "trainset": "database",
-    "train": "brain",
-    "evaluate": "chart-column",
-    "segment": "tags",
-}
-
-
-def _puce(fait: bool | None) -> str:
-    if fait is True:
-        return "✅"
-    if fait is False:
-        return "⬜"
-    return "❔"  # état non détectable (evaluate)
+# Les trois phases de la maquette, et les sous-étapes de chacune.
+_PHASES = [
+    ("Préparer", ("setup", "align", "trainset")),
+    ("Entraîner", ("train", "evaluate")),
+    ("Segmenter", ("segment",)),
+]
+_COULEURS = {"done": "#2f9567", "run": "#c27a12", "fail": "#c9473f",
+             "todo": "#1c1b19", "wait": "#e4e2db"}
 
 
 def _entete_etape(cle: str, fait: bool | None) -> None:
+    """Titre d'une sous-étape + pastille d'état (fait / à faire / non vérifiable)."""
+    etat = {True: ("fait", "#2f9567"), False: ("à faire", "#8a867e"),
+            None: ("non vérifiable", "#8a867e")}[fait]
     st.markdown(
-        lucide_title(_ICONES[cle], f"{_puce(fait)} {_TITRES[cle]}"),
+        f'<p class="ef-sous-etape">{_TITRES[cle]}'
+        f'<span class="ef-puce" style="color:{etat[1]};border-color:{etat[1]}">{etat[0]}</span>'
+        f'<span class="ef-muted">{_DUREES[cle]}</span></p>',
         unsafe_allow_html=True,
     )
-    st.caption(f"Durée annoncée : {_DUREES[cle]}.")
+
+
+def _etape_du_job(job) -> str | None:
+    """Sous-étape VAME d'un job `run_vame.py` (lue dans sa ligne de commande)."""
+    if job is None or job.script != "run_vame.py":
+        return None
+    return next((e for e in _ORDRE if e in job.argv), None)
+
+
+def _etat_phases(projet: Path, etat: dict) -> list[tuple[str, str, str]]:
+    """(nom, état, libellé) par phase. État : done/run/fail/todo/wait."""
+    from lib import runner
+
+    job = runner.current(projet)
+    etape_job = _etape_du_job(job)
+    faite = [etat["trainset"], etat["train"], etat["segment"]]
+    sorties = []
+    for k, (nom, etapes) in enumerate(_PHASES):
+        if etape_job in etapes and job.state == "running":
+            sorties.append((nom, "run", "En cours"))
+        elif etape_job in etapes and job.state == "failed":
+            sorties.append((nom, "fail", "Échec"))
+        elif faite[k]:
+            # Honnêteté : un .pkl prouve qu'un modèle existe, pas que
+            # l'entraînement est terminé (voir le docstring du module).
+            sorties.append((nom, "done", "Modèle disponible" if k == 1 else "Terminé"))
+        elif k == 0 or faite[k - 1]:
+            sorties.append((nom, "todo", "À faire"))
+        else:
+            sorties.append((nom, "wait", "En attente"))
+    return sorties
+
+
+def _cartes_phases(projet: Path, etat: dict) -> None:
+    from html import escape
+
+    from lib.sessions import list_sessions
+
+    n = len(list_sessions(projet))
+    descriptions = [
+        "Crée le projet VAME, aligne les poses et prépare le jeu d'entraînement. "
+        "Quelques minutes.",
+        f"Apprend le modèle sur les {n} sessions. 3 à 8 h sur GPU.",
+        "Attribue un motif à chaque image. Quelques minutes.",
+    ]
+    cartes = "".join(
+        f'<div class="ef-card ef-phase-carte"><div class="ef-phase-etat">'
+        f'<span class="ef-dot" style="background:{_COULEURS[e]}"></span>'
+        f'<span class="ef-label">{escape(libelle)}</span></div>'
+        f"<b>{escape(nom)}</b><span>{escape(d)}</span></div>"
+        for (nom, e, libelle), d in zip(_etat_phases(projet, etat), descriptions))
+    st.markdown(f'<div class="ef-phases">{cartes}</div>', unsafe_allow_html=True)
+
+
+def _titre_phase(n: int, nom: str) -> None:
+    st.markdown(f'<p class="ef-phase-titre">{n} · {nom}</p>', unsafe_allow_html=True)
 
 
 # ============================================================
@@ -106,14 +157,11 @@ def _section_setup(projet: Path, etat: dict) -> None:
     _entete_etape("setup", etat["setup"])
     if etat["setup"]:
         st.caption(
-            "Un projet VAME existe déjà (`data/vame/config.yaml` présent). "
-            "Relancer sans `--force` échoue plutôt que d'écraser."
+            "Le projet VAME existe déjà. Le recréer n'est possible qu'en "
+            "cochant « Recréer le projet VAME »."
         )
     else:
-        st.caption(
-            "Crée `data/vame/` à partir des paires (vidéo croppée, `.h5`) "
-            "trouvées dans le projet."
-        )
+        st.caption("Rassemble les poses nettoyées et leurs vidéos dans un projet VAME.")
 
     # Les quatre hyperparamètres que `run_vame.py setup` demande à l'invite.
     # Un job de l'app tourne sans terminal : ils sont réglés ici et la
@@ -122,7 +170,7 @@ def _section_setup(projet: Path, etat: dict) -> None:
     col_n, col_w = st.columns(2)
     with col_n:
         n_clusters = st.number_input(
-            "`--n-clusters`", min_value=2, max_value=200, value=15, step=1,
+            "Nombre de motifs", min_value=2, max_value=200, value=15, step=1,
             key="vame_setup_n_clusters",
             help="Nombre de motifs à produire. C'est autant de clips à "
                  "nommer à l'étape Motifs — 15 se labellisent en ~1 h, 30 "
@@ -131,53 +179,49 @@ def _section_setup(projet: Path, etat: dict) -> None:
         )
     with col_w:
         time_window = st.number_input(
-            "`--time-window`", min_value=5, max_value=300, value=30, step=5,
+            "Fenêtre d'analyse (images)", min_value=5, max_value=300, value=30, step=5,
             key="vame_setup_time_window",
-            help="Durée que le VAE regarde d'un coup, en frames. "
-                 "30 frames = 1 s à 30 fps. Plus court = motifs brefs, "
-                 "plus long = les gestes courts se noient.",
+            help="Durée que le modèle regarde d'un coup. 30 images = 1 s à "
+                 "30 images par seconde. Plus court : motifs brefs ; plus "
+                 "long : les gestes courts se noient.",
         )
     col_e, col_c = st.columns(2)
     with col_e:
         max_epochs = st.number_input(
-            "`--max-epochs`", min_value=10, max_value=5000, value=500, step=50,
+            "Durée maximale d'entraînement (cycles)", min_value=10, max_value=5000, value=500, step=50,
             key="vame_setup_max_epochs",
-            help="Durée max de l'entraînement (l'étape 4). 500 = défaut "
-                 "VAME, 3-8 h sur GPU ; 100 pour un premier essai de bout "
-                 "en bout. L'entraînement s'arrête aussi s'il converge avant.",
+            help="500 (défaut) : 3 à 8 h sur GPU ; 100 pour un premier essai "
+                 "de bout en bout. L'entraînement s'arrête aussi plus tôt "
+                 "s'il ne progresse plus.",
         )
     with col_c:
         pose_confidence = st.number_input(
-            "`--pose-confidence`", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
+            "Confiance minimale des points", min_value=0.0, max_value=1.0, value=0.6, step=0.05,
             key="vame_setup_pose_confidence",
-            help="Seuil de confiance VAME — 0.6 aligné sur le pré-filtrage "
-                 "EthoFlow (le défaut VAME, 0.99, masque la majorité des "
-                 "points SuperAnimal).",
+            help="0,6 comme au nettoyage. La valeur par défaut de VAME (0,99) "
+                 "écarterait la plupart des points.",
         )
     copie = st.radio(
         "Vidéos dans le projet VAME",
-        ["Auto", "Copier (--copy-videos)", "Symlink (--no-copy-videos)"],
+        ["Auto", "Copier", "Lien, sans copie"],
         index=0, horizontal=True, key="vame_setup_copie",
-        help="Auto : copie sur Windows, symlink ailleurs (les symlinks "
-             "demandent le mode développeur sur Windows).",
+        help="Auto : copie sous Windows, lien ailleurs (les liens demandent "
+             "le mode développeur sous Windows).",
     )
     force = st.checkbox(
-        "Écraser un projet VAME existant (`--force`)",
+        "Recréer le projet VAME s'il existe déjà",
         value=False, key="vame_setup_force",
     )
 
-    with st.expander("Chemins avancés (rarement utiles)", expanded=False):
-        st.caption(
-            "Par défaut dérivés du projet (`data/dlc-output/` et "
-            "`data/cropped/`) — à ne changer que pour pointer vers une "
-            "autre sortie DLC."
-        )
+    with st.expander("Réglages avancés", expanded=False):
+        st.caption("Par défaut, les dossiers du projet. À changer seulement "
+                   "pour utiliser d'autres poses.")
         input_dir = champ_chemin(
-            "`--input-dir`", cle="vame_setup_input_dir",
+            "Dossier des poses", cle="vame_setup_input_dir",
             titre_dialogue="Dossier des .h5 pour VAME",
         )
         cropped_dir = champ_chemin(
-            "`--cropped-dir`", cle="vame_setup_cropped_dir",
+            "Dossier des vidéos découpées", cle="vame_setup_cropped_dir",
             titre_dialogue="Dossier des vidéos croppées",
         )
 
@@ -190,7 +234,7 @@ def _section_setup(projet: Path, etat: dict) -> None:
     ]
     if copie.startswith("Copier"):
         extra.append("--copy-videos")
-    elif copie.startswith("Symlink"):
+    elif copie.startswith("Lien"):
         extra.append("--no-copy-videos")
     if force:
         extra.append("--force")
@@ -201,9 +245,10 @@ def _section_setup(projet: Path, etat: dict) -> None:
 
     cmd = PL.vame_stage(projet, "setup", extra=extra)
     _job.bouton_lancer(
-        projet, "Lancer setup", cmd, cle="btn_vame_setup",
+        projet, "Créer le projet VAME", cmd, cle="btn_vame_setup",
         type="secondary" if etat["setup"] else "primary",
     )
+    _widgets.details_techniques(cmd)
 
 
 # ============================================================
@@ -214,19 +259,19 @@ def _section_align(projet: Path, etat: dict) -> None:
     _entete_etape("align", etat["align"])
     if etat["align"]:
         st.caption(
-            "Au moins une session alignée (`data/processed/*_processed.nc` "
-            "trouvé) — pas nécessairement toutes. Si des sessions ont été "
-            "ajoutées au projet VAME depuis, relance `align` pour les couvrir."
+            "Au moins une session alignée, pas forcément toutes. Si des "
+            "sessions ont été ajoutées depuis, relance l'alignement."
         )
     else:
-        st.caption("Alignement égocentrique des poses (+ nettoyage optionnel).")
+        st.caption("Ramène chaque pose dans le repère de l'animal (même "
+                   "orientation, même centre).")
 
     manque = not etat["setup"]
     cmd = PL.vame_stage(projet, "align")
     _job.bouton_lancer(
-        projet, "Lancer align", cmd, cle="btn_vame_align",
+        projet, "Aligner les poses", cmd, cle="btn_vame_align",
         disabled=manque,
-        help="Lance d'abord `setup` — aucun projet VAME détecté." if manque else None,
+        help="Crée d'abord le projet VAME." if manque else None,
     )
 
 
@@ -237,16 +282,16 @@ def _section_align(projet: Path, etat: dict) -> None:
 def _section_trainset(projet: Path, etat: dict) -> None:
     _entete_etape("trainset", etat["trainset"])
     if etat["trainset"]:
-        st.caption("Jeu d'entraînement déjà construit (`data/train/train_seq.npy` présent).")
+        st.caption("Jeu d'entraînement déjà préparé.")
     else:
-        st.caption("Assemble le jeu d'entraînement à partir des sessions alignées.")
+        st.caption("Assemble les sessions alignées en un jeu d'entraînement.")
 
     manque = not etat["align"]
     cmd = PL.vame_stage(projet, "trainset")
     _job.bouton_lancer(
-        projet, "Lancer trainset", cmd, cle="btn_vame_trainset",
+        projet, "Préparer le jeu", cmd, cle="btn_vame_trainset",
         disabled=manque,
-        help="Lance d'abord `align` — aucune session alignée détectée." if manque else None,
+        help="Aligne d'abord les poses." if manque else None,
     )
 
 
@@ -327,7 +372,7 @@ def _section_courbes(projet: Path) -> None:
     en_cours = (runner.is_running(projet) and job is not None
                 and job.script == "run_vame.py" and "train" in job.argv)
     if en_cours:
-        st.caption("Entraînement en cours — courbes rafraîchies toutes les 30 s.")
+        st.caption("Entraînement en cours : courbes rafraîchies toutes les 30 s.")
         _courbes_en_direct(projet)
     else:
         _courbes(projet)
@@ -337,12 +382,10 @@ def _section_train(projet: Path, etat: dict) -> None:
     _entete_etape("train", etat["train"])
     if etat["train"]:
         st.info(
-            "**Un modèle existe** (`model/best_model/*.pkl` présent) — cela "
-            "ne veut *pas* dire que l'entraînement est terminé. vame-py "
-            "écrit ce fichier dès la première amélioration de loss acceptée "
-            "après la fin de l'annealing KL, pas à la fin du run ni à "
-            "convergence. Si un job tourne encore, il continue d'affiner ce "
-            "modèle."
+            "**Un modèle existe**, ce qui ne veut *pas* dire que "
+            "l'entraînement est fini : VAME l'enregistre dès sa première "
+            "amélioration, pas à la fin du run ni à la convergence. Si "
+            "l'entraînement tourne encore, il continue de l'améliorer."
         )
     else:
         st.caption("Aucun modèle sauvegardé pour l'instant.")
@@ -350,31 +393,28 @@ def _section_train(projet: Path, etat: dict) -> None:
     _section_courbes(projet)
 
     st.warning(
-        "**Dure 3 à 8 h sur GPU.** Le job tourne en arrière-plan et son "
-        "état vit sur disque (`.ethoflow/jobs/`), pas dans l'onglet du "
-        "navigateur : tu peux fermer cet onglet, éteindre l'écran ou "
-        "naviguer ailleurs dans l'app, l'entraînement continue et tu "
-        "retrouveras son état en revenant sur cette page. Pas besoin de "
-        "garder le navigateur ouvert toute la nuit par précaution."
+        "**Dure 3 à 8 h sur GPU.** Tu peux fermer l'onglet ou changer de "
+        "page : l'entraînement continue, et tu retrouves son avancement en "
+        "revenant ici."
     )
 
-    with st.expander("Options avancées (dépannage)", expanded=False):
+    with st.expander("Réglages avancés", expanded=False):
         no_cluster_loss = st.checkbox(
-            "Désactiver `cluster_loss` (`--no-cluster-loss`)",
+            "Désactiver le regroupement pendant l'entraînement",
             value=False, key="vame_train_no_cluster_loss",
-            help="À cocher seulement si l'entraînement plante au tout "
-                 "premier epoch avec une erreur SVD (latents mal "
-                 "conditionnés) — contourne cluster_loss() par un no-op.",
+            help="Seulement si l'entraînement plante dès le premier cycle "
+                 "avec une erreur « SVD ».",
         )
 
     manque = not etat["trainset"]
     extra = ["--no-cluster-loss"] if no_cluster_loss else None
     cmd = PL.vame_stage(projet, "train", extra=extra)
     _job.bouton_lancer(
-        projet, "Lancer train", cmd, cle="btn_vame_train",
+        projet, "Lancer l'entraînement", cmd, cle="btn_vame_train",
         disabled=manque,
-        help="Lance d'abord `trainset` — aucun jeu d'entraînement détecté." if manque else None,
+        help="Prépare d'abord le jeu d'entraînement." if manque else None,
     )
+    _widgets.details_techniques(cmd)
 
 
 # ============================================================
@@ -384,19 +424,17 @@ def _section_train(projet: Path, etat: dict) -> None:
 def _section_evaluate(projet: Path, etat: dict) -> None:
     _entete_etape("evaluate", None)
     st.caption(
-        "EthoFlow ne peut pas détecter si `evaluate` a déjà tourné : "
-        "contrairement aux autres sous-étapes, elle ne laisse aucun "
-        "fichier stable et prévisible à vérifier (seulement des figures "
-        "de diagnostic, à des chemins qui varient). Relance-la quand tu "
-        "veux revoir l'état du modèle avant de segmenter."
+        "EthoFlow ne peut pas détecter si l'évaluation a déjà tourné : "
+        "elle ne produit que des figures, sans fichier repérable. Relance-la "
+        "quand tu veux revoir le modèle avant de découper en motifs."
     )
 
     manque = not etat["train"]
     cmd = PL.vame_stage(projet, "evaluate")
     _job.bouton_lancer(
-        projet, "Lancer evaluate", cmd, cle="btn_vame_evaluate",
+        projet, "Évaluer", cmd, cle="btn_vame_evaluate",
         disabled=manque,
-        help="Aucun modèle entraîné pour l'instant — lance `train` d'abord." if manque else None,
+        help="Aucun modèle entraîné pour l'instant : lance d'abord l'entraînement." if manque else None,
     )
 
 
@@ -408,26 +446,24 @@ def _section_segment(projet: Path, etat: dict) -> None:
     _entete_etape("segment", etat["segment"])
     if etat["segment"]:
         st.caption(
-            "Au moins une session segmentée (fichier de labels de motifs "
-            "trouvé) — pas nécessairement toutes."
+            "Au moins une session découpée en motifs, pas forcément toutes."
         )
     else:
-        st.caption("Segmente les poses alignées en motifs comportementaux.")
+        st.caption("Attribue un motif comportemental à chaque image.")
 
     n_actuel = V.n_clusters(projet)
     st.caption(
-        f"`n_clusters` actuel dans le config VAME : "
-        f"**{n_actuel if n_actuel else 'non défini (VAME utilisera son défaut, 15)'}**."
+        f"Nombre de motifs actuel : "
+        f"**{n_actuel if n_actuel else 'non défini (VAME prendra 15)'}**."
     )
 
     csv_path = V.vame_project(projet) / "motif_labels.csv"
     if csv_path.exists():
         st.warning(
-            "`motif_labels.csv` existe déjà pour ce projet — **il est "
-            "unique par projet**, pas par valeur de `n_clusters`. "
-            "Changer `n_clusters` puis régénérer ce CSV écrase le travail "
-            "d'annotation déjà saisi. Sauvegarde-le d'abord si tu changes "
-            "de granularité."
+            "Des noms de motifs sont déjà saisis. Ce fichier est **unique "
+            "par projet**, pas par nombre de motifs : changer ce nombre puis "
+            "régénérer les noms efface ce qui a été saisi. Sauvegarde-le "
+            "d'abord si tu changes le nombre de motifs."
         )
         try:
             contenu = csv_path.read_bytes()
@@ -435,67 +471,53 @@ def _section_segment(projet: Path, etat: dict) -> None:
             contenu = None
         if contenu is not None:
             st.download_button(
-                "Sauvegarder motif_labels.csv avant de continuer",
+                "Sauvegarder les noms de motifs",
                 data=contenu, file_name="motif_labels_backup.csv",
                 mime="text/csv", key="vame_segment_backup_csv",
             )
 
     nouveau_n = st.number_input(
-        "`--n-clusters` pour cette segmentation",
+        "Nombre de motifs pour ce découpage",
         min_value=2, value=int(n_actuel) if n_actuel else 15, step=1,
         key="vame_segment_n_clusters",
     )
     st.caption(
-        "Chaque valeur crée son propre dossier de résultats "
-        "(`hmm-15` à côté de `hmm-25`, par exemple) — rien n'est écrasé "
-        "pour la segmentation elle-même. Évaluer le modèle avant de "
-        "segmenter est recommandé mais pas imposé par cette page."
+        "Chaque nombre de motifs a ses propres résultats : rien n'est "
+        "écrasé. Évaluer le modèle avant est conseillé, pas imposé."
     )
 
     manque = not etat["train"]
     cmd = PL.vame_stage(projet, "segment", n_clusters=int(nouveau_n))
     _job.bouton_lancer(
-        projet, "Lancer segment", cmd, cle="btn_vame_segment",
+        projet, "Découper en motifs", cmd, cle="btn_vame_segment",
         disabled=manque,
-        help="Aucun modèle entraîné pour l'instant — lance `train` d'abord." if manque else None,
+        help="Aucun modèle entraîné pour l'instant : lance d'abord l'entraînement." if manque else None,
     )
+    _widgets.details_techniques(cmd)
 
 
 # ============================================================
-# Aperçu global (stepper)
+# Entrée : bannière d'échec, trois phases, puis leur détail
 # ============================================================
-
-def _section_apercu(etat: dict) -> None:
-    st.markdown(lucide_title("waypoints", "Avancement"), unsafe_allow_html=True)
-    cols = st.columns(len(_ORDRE))
-    for col, cle in zip(cols, _ORDRE):
-        with col:
-            fait = etat.get(cle)  # None pour "evaluate", absent de stage_status
-            st.markdown(f"**{_puce(fait)} {_TITRES[cle]}**")
-            st.caption(_DUREES[cle])
-
 
 def render() -> None:
     projet = require_project()
-
     _widgets.entete_etape(projet)
-
     etat = V.stage_status(projet)
 
-    _section_apercu(etat)
     _job.panneau(projet)
+    _cartes_phases(projet, etat)
 
-    st.divider()
+    _titre_phase(1, "Préparer")
     _section_setup(projet, etat)
-    st.divider()
     _section_align(projet, etat)
-    st.divider()
     _section_trainset(projet, etat)
     st.divider()
+    _titre_phase(2, "Entraîner")
     _section_train(projet, etat)
-    st.divider()
     _section_evaluate(projet, etat)
     st.divider()
+    _titre_phase(3, "Segmenter")
     _section_segment(projet, etat)
     st.divider()
     _job.historique(projet)

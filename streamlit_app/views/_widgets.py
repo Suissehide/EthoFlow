@@ -13,23 +13,50 @@ import streamlit as st
 from lib import reveal, sessions
 
 
-def selecteur_sessions(projet: Path, *, cle: str) -> tuple[list[str], bool]:
-    """Retourne (sessions choisies, drapeau --all).
+def selecteur_sessions(projet: Path, *, cle: str,
+                       colonne: str | None = None) -> tuple[list[str], bool]:
+    """Puces « Toutes · N », « Non traitées · k », « Choisir… » (maquette).
 
-    Utilisé par les pages Pose, Nettoyage et Vidéos & calibration : chacune
-    lance un script qui accepte soit `--all`, soit une liste de
-    `session_id` en positionnel — jamais les deux à la fois (voir
-    `lib.pipeline`, qui exclut les sessions dès que `all_sessions=True`).
+    Retourne (sessions choisies, drapeau « toutes »), comme avant : chaque
+    script accepte soit `--all`, soit une liste de `session_id` — jamais les
+    deux (voir `lib.pipeline`). `colonne` : colonne de `list_sessions` qui dit
+    si l'étape est faite pour une session ; sans elle, pas de puce « Non
+    traitées ».
     """
     df = sessions.list_sessions(projet)
-    tout = st.checkbox("Toutes les sessions (`--all`)", value=True, key=f"{cle}_all")
-    choisies = st.multiselect(
-        "Sessions", options=list(df["session_id"]), disabled=tout, key=f"{cle}_sel",
-    )
-    # Le multiselect désactivé garde son ancienne valeur : sans ce garde,
-    # un appelant qui ne transmet que `choisies` (prepare_vame_input n'a
-    # pas de --all) lancerait la sélection périmée au lieu de tout.
-    return ([] if tout else choisies), tout
+    ids = list(df["session_id"])
+    restantes = list(df.loc[df[colonne] != "OK", "session_id"]) if colonne else []
+    libelles = {"tout": f"Toutes · {len(ids)}", "reste": f"Non traitées · {len(restantes)}",
+                "choix": "Choisir…"}
+    options = ["tout", "reste", "choix"] if colonne else ["tout", "choix"]
+    st.markdown('<p class="ef-section">Sessions</p>', unsafe_allow_html=True)
+    mode = st.pills("Sessions", options, default="tout", required=True,
+                    format_func=libelles.get, key=f"{cle}_portee",
+                    label_visibility="collapsed")
+    if mode == "reste":
+        return restantes, False
+    if mode == "choix":
+        return st.multiselect("Sessions à traiter", options=ids, key=f"{cle}_sel",
+                              placeholder="Choisis une ou plusieurs sessions",
+                              label_visibility="collapsed"), False
+    return [], True
+
+
+def nb_sessions(projet: Path, choisies: list[str], tout: bool, *,
+                colonne: str | None = None, ignorer_faites: bool = False) -> int:
+    """Combien de sessions un job traitera réellement (libellé « Lancer sur N »).
+
+    `ignorer_faites` : le script saute celles où `colonne` est déjà « OK ».
+    """
+    df = sessions.list_sessions(projet)
+    cible = df if tout else df[df["session_id"].isin(choisies)]
+    if ignorer_faites and colonne:
+        cible = cible[cible[colonne] != "OK"]
+    return len(cible)
+
+
+def libelle_lancer(n: int) -> str:
+    return f"Lancer sur {n} session{'s' if n > 1 else ''}"
 
 
 def champ_chemin(
@@ -152,3 +179,18 @@ def verrou_etape(page: str | None = None) -> str | None:
             f"toutes les sessions ({cour['fait']}/{cour['total']} aujourd'hui)."
             if cour["total"] else
             f"Disponible quand l'étape « {cour['etape'].nom} » sera faite.")
+
+
+def details_techniques(cmd=None, *, notes: list[str] | None = None) -> None:
+    """Le jargon (script, env conda, ligne de commande) sort du premier
+    niveau et se range ici, replié (handoff : « Détails techniques »)."""
+    import shlex
+
+    import lib.pipeline as PL
+
+    with st.expander("Détails techniques"):
+        if cmd is not None:
+            st.markdown(f"Script `{cmd.script}` · environnement conda `{cmd.env}`")
+            st.code(shlex.join(PL.to_argv(cmd)), language="bash", wrap_lines=True)
+        for note in notes or []:
+            st.markdown(note)

@@ -70,7 +70,7 @@ def test_avertissement_px_per_cm_absent(tmp_path, monkeypatch):
     projet = _projet(tmp_path, kind="single", px_per_cm=None)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
-    assert any("Passe 3" in w.value and "désactivée" in w.value for w in at.warning), \
+    assert any("déplacements impossibles" in w.value and "désactivé" in w.value for w in at.warning), \
         [w.value for w in at.warning]
 
 
@@ -78,16 +78,16 @@ def test_pas_avertissement_si_px_per_cm_configure(tmp_path, monkeypatch):
     projet = _projet(tmp_path, kind="single", px_per_cm=12.5)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
-    assert not any("Passe 3" in w.value and "désactivée" in w.value for w in at.warning), \
+    assert not any("déplacements impossibles" in w.value for w in at.warning), \
         [w.value for w in at.warning]
-    assert any("12.5 px/cm" in c.value for c in at.caption), [c.value for c in at.caption]
+    assert any("12.5 pixels par cm" in c.value for c in at.caption), [c.value for c in at.caption]
 
 
 def test_section_arenes_visible_pour_projet_multi(tmp_path, monkeypatch):
     projet = _projet(tmp_path, kind="multi", px_per_cm=12.5)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
-    assert any("assign_arenas" in c.value for c in at.caption), [c.value for c in at.caption]
+    assert any("sépare d'abord" in c.value for c in at.caption), [c.value for c in at.caption]
     boutons = {b.key: b for b in at.button}
     assert "btn_nettoyage_arenes" in boutons
 
@@ -96,7 +96,7 @@ def test_section_arenes_remplacee_par_explication_pour_projet_single(tmp_path, m
     projet = _projet(tmp_path, kind="single", px_per_cm=12.5)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
-    assert any("ne s'applique donc pas" in c.value for c in at.caption), \
+    assert any("rien à séparer" in c.value for c in at.caption), \
         [c.value for c in at.caption]
     boutons = {b.key: b for b in at.button}
     assert "btn_nettoyage_arenes" not in boutons
@@ -162,12 +162,12 @@ def test_galerie_qc_sans_labeled_mp4_est_presente_comme_normale(tmp_path, monkey
 
     assert not at.exception, at.exception
     assert any(
-        "Aucun `_labeled.mp4`" in c.value and "custom" in c.value
+        "Pas de vidéo annotée" in c.value and "Mon modèle entraîné" in c.value
         for c in at.caption
     ), [c.value for c in at.caption]
-    assert not any("_labeled.mp4" in w.value for w in at.warning), \
+    assert not any("vidéo annotée" in w.value for w in at.warning), \
         [w.value for w in at.warning]
-    assert not any("_labeled.mp4" in e.value for e in at.error), \
+    assert not any("vidéo annotée" in e.value for e in at.error), \
         [e.value for e in at.error]
 
 
@@ -182,9 +182,9 @@ def test_toutes_les_sessions_ignore_la_selection_perimee(tmp_path, monkeypatch):
 
     projet = _projet(tmp_path)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
-    at.checkbox(key="nettoyage_clean_all").uncheck().run()
+    at.pills(key="nettoyage_clean_portee").set_value("choix").run()
     at.multiselect(key="nettoyage_clean_sel").select("S1").run()
-    at.checkbox(key="nettoyage_clean_all").check().run()
+    at.pills(key="nettoyage_clean_portee").set_value("tout").run()
     assert not at.exception, at.exception
     assert appels[-1]["sessions"] == []
 
@@ -220,7 +220,7 @@ def test_resume_survit_a_un_job_lance_apres_le_nettoyage(tmp_path, monkeypatch):
          "[1/1] S1\n  ✓ 1000 frames | 12 kpts | médian | réparées 50 | 95.0% utilisables\n")
     _job(projet, "20260101-000100-000000-vame", "run_vame.py", "ok\n")
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
-    resume = [d.value for d in at.dataframe if "Réparées" in d.value.columns]
+    resume = [d.value for d in at.dataframe if "Points reconstitués" in d.value.columns]
     assert resume and resume[0].loc[0, "Session"] == "S1"
 
 

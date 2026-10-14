@@ -79,15 +79,14 @@ def _section_decouverte(projet: Path, axes: list[dict]) -> None:
     _job.bouton_lancer(
         projet, "Découvrir les axes", cmd, cle="btn_analyses_list_columns",
         type="primary" if not axes else "secondary",
-        help="Relit les colonnes de ton Excel (via metadata.yaml) et "
-             "détecte celles qui ont entre 2 et 12 valeurs distinctes — "
-             "les seules exploitables comme axe de comparaison.",
+        help="Relit les colonnes de ton Excel et retient celles qui ont "
+             "entre 2 et 12 valeurs : les seules utilisables pour comparer.",
     )
-    if not axes:
+    # Pas d'invitation à cliquer un bouton verrouillé : sa raison est déjà dessous.
+    if not axes and _widgets.verrou_etape() is None:
         st.info(
-            "Aucun axe découvert pour l'instant. Clique sur **Découvrir "
-            "les axes** ci-dessus — le résultat survit à un "
-            "rafraîchissement de la page, il est relu depuis le log du job."
+            "Aucun critère de comparaison pour l'instant : clique sur "
+            "**Découvrir les axes** ci-dessus."
         )
 
 
@@ -97,54 +96,47 @@ def _case_group_by(axe: dict) -> bool:
     valeur = st.checkbox(libelle, key=f"analyses_gb_{axe['nom']}")
     if effectifs and min(effectifs) < 3:
         st.warning(
-            f"« {axe['nom']} » : au moins un groupe a moins de 3 sessions "
-            "— en dessous de ce seuil, un motif y est ignoré faute de "
-            "données suffisantes pour le test statistique."
+            f"« {axe['nom']} » : au moins un groupe a moins de 3 sessions. "
+            "En dessous, les tests statistiques ignorent ce groupe."
         )
     return valeur
 
 
 def _section_group_by(axes: list[dict]) -> list[str]:
-    st.markdown("**`--group-by`** — axes simples à comparer")
+    st.markdown('<p class="ef-section">Comparer selon</p>', unsafe_allow_html=True)
     st.caption(
         "Le test s'adapte au nombre de groupes (Mann-Whitney à 2, "
-        "Kruskal-Wallis à 3+), mais pas au nombre de sessions : un axe à "
-        "6 groupes sur 16 sessions donne des p-values inexploitables. "
-        "Vérifie les effectifs ci-dessous avant de conclure quoi que ce "
-        "soit."
+        "Kruskal-Wallis à 3 ou plus), pas au nombre de sessions : 6 groupes "
+        "sur 16 sessions ne donnent pas de résultats fiables. Vérifie les "
+        "effectifs avant de conclure."
     )
     return [axe["nom"] for axe in axes if _case_group_by(axe)]
 
 
 def _section_cross(noms_axes: list[str]) -> list[tuple[str, str]]:
-    st.markdown("**`--cross`** — croiser deux axes (design factoriel)")
+    st.markdown('<p class="ef-section">Croiser deux critères</p>', unsafe_allow_html=True)
     if _CLE_CROSS not in st.session_state:
         st.session_state[_CLE_CROSS] = []
     paires: list[tuple[str, str]] = st.session_state[_CLE_CROSS]
 
     if len(noms_axes) < 2:
-        st.caption(
-            "Il faut au moins 2 axes découverts pour construire un "
-            "croisement."
-        )
+        st.caption("Il faut au moins deux critères pour les croiser.")
     else:
-        col_a, col_b, col_btn = st.columns([2, 2, 1])
+        col_a, col_b, col_btn = st.columns([2, 2, 1], vertical_alignment="bottom")
         with col_a:
-            a = st.selectbox("Axe A", options=noms_axes, key="analyses_cross_a")
+            a = st.selectbox("Critère A", options=noms_axes, key="analyses_cross_a")
         with col_b:
             options_b = [n for n in noms_axes if n != a]
-            b = st.selectbox("Axe B", options=options_b, key="analyses_cross_b")
+            b = st.selectbox("Critère B", options=options_b, key="analyses_cross_b")
         with col_btn:
-            st.write("")
-            st.write("")
-            if st.button("Ajouter", key="analyses_cross_add"):
+            if st.button("Ajouter", key="analyses_cross_add", width="stretch"):
                 if (a, b) not in paires and (b, a) not in paires:
                     paires.append((a, b))
                     st.rerun()
 
     for i, (a, b) in enumerate(list(paires)):
-        col_txt, col_rm = st.columns([5, 1])
-        col_txt.caption(f"`{a}_x_{b}` — {a} × {b}")
+        col_txt, col_rm = st.columns([5, 1], vertical_alignment="center")
+        col_txt.markdown(f"{a} × {b}")
         if col_rm.button("Retirer", key=f"analyses_cross_rm_{i}"):
             paires.pop(i)
             st.rerun()
@@ -154,76 +146,78 @@ def _section_cross(noms_axes: list[str]) -> list[tuple[str, str]]:
 
 def _section_extended(noms_axes: list[str],
                       cross_pairs: list[tuple[str, str]]) -> tuple[bool, str | None]:
-    st.markdown("**`--extended`** — bouts, thigmotaxie, quarts temporels")
+    st.markdown('<p class="ef-section">Analyses étendues</p>', unsafe_allow_html=True)
     composites = [f"{a}_x_{b}" for a, b in cross_pairs]
     options = noms_axes + composites
     extended = st.checkbox(
-        "Lancer les analyses étendues", key="analyses_extended",
-        help="Nécessite les labels par frame — plus long que l'analyse de base.",
+        "Ajouter les épisodes, le temps près des bords et l'évolution par quart de session",
+        key="analyses_extended",
+        help="Plus long que l'analyse de base.",
     )
     extended_by = None
     if extended:
         if not options:
             st.warning(
-                "Aucun axe disponible pour `--extended-by` — découvre les "
-                "axes ou ajoute un croisement d'abord."
+                "Aucun critère disponible : découvre les axes ou ajoute un "
+                "croisement d'abord."
             )
         else:
             extended_by = st.selectbox(
-                "`--extended-by`", options=options, key="analyses_extended_by",
+                "Critère des analyses étendues", options=options, key="analyses_extended_by",
+                width=320,
             )
     return extended, extended_by
 
 
 def _section_labels(projet: Path) -> str | None:
-    st.markdown("**`--labels`**")
+    st.markdown('<p class="ef-section">Noms des motifs</p>', unsafe_allow_html=True)
     defaut = str(ML.path(projet)) if ML.exists(projet) else ""
     valeur = st.text_input(
-        "Fichier de labels de motifs", value=defaut, key="analyses_labels",
-        help="Sans lui, les figures affichent `motif_0`, `motif_1`, … au "
-             "lieu d'un vrai nom de comportement.",
+        "Fiche des motifs", value=defaut, key="analyses_labels",
+        help="Sans elle, les figures affichent « motif_0, motif_1… » au "
+             "lieu des noms de comportements.",
     )
     if not valeur:
         st.caption(
-            "Pas de `motif_labels.csv` pour ce projet — remplis-le dans la "
-            "page **Motifs** pour des figures lisibles."
+            "Pas encore de noms de motifs : remplis-les dans la page "
+            "**Motifs** pour des figures lisibles."
         )
     return valeur or None
 
 
 def _section_options_avancees(projet: Path) -> dict:
-    with st.expander("Options avancées", expanded=False):
+    with st.expander("Réglages avancés", expanded=False):
         algos_presents = sorted({VA.parse_algo_n(a)[0] for a in VA.list_algos(projet)})
         options_algo = algos_presents or ["hmm", "kmeans"]
-        algo = st.selectbox("`--algo`", options=options_algo, key="analyses_algo")
+        algo = st.selectbox("Méthode de découpage", options=options_algo,
+                            key="analyses_algo", width=320)
 
         preciser_n = st.checkbox(
-            "Préciser `--n-clusters`", key="analyses_preciser_n",
-            help="Laissé décoché : le script prend l'unique segmentation "
-                 "trouvée pour cet algo. À cocher seulement si plusieurs "
-                 "granularités coexistent.",
+            "Préciser le nombre de motifs", key="analyses_preciser_n",
+            help="Seulement si plusieurs découpages (nombres de motifs "
+                 "différents) existent ; sinon, l'unique découpage est pris.",
         )
         n_clusters = None
         if preciser_n:
             n_actuel = VA.n_clusters(projet) or 15
             n_clusters = int(st.number_input(
-                "`--n-clusters`", min_value=2, value=int(n_actuel), step=1,
+                "Nombre de motifs", min_value=2, value=int(n_actuel), step=1, width=220,
                 key="analyses_n_clusters",
             ))
 
         mask_empty = st.checkbox(
-            "`--mask-empty` (exclure les frames « arène vide » en bord "
-            "d'enregistrement)", key="analyses_mask_empty",
+            "Exclure les images où l'arène est vide, en début et fin "
+            "d'enregistrement", key="analyses_mask_empty",
         )
         col1, col2 = st.columns(2)
         with col1:
             min_edge_frames = int(st.number_input(
-                "`--min-edge-frames`", min_value=1, value=25, step=1,
+                "Arène vide pendant au moins (images)", min_value=1, value=25, step=1,
                 key="analyses_min_edge_frames",
             ))
         with col2:
             fps = float(st.number_input(
-                "`--fps`", min_value=1.0, value=30.0, step=1.0,
+                "Images par seconde", min_value=1.0, value=30.0, step=1.0,
                 key="analyses_fps",
             ))
     return {
@@ -267,8 +261,9 @@ def _tab_lancer(projet: Path, axes: list[dict]) -> None:
     )
     _job.bouton_lancer(
         projet, "Lancer l'analyse", cmd, cle="btn_analyses_lancer",
-        help="Sortie dans `data/vame/analysis/` — onglet **Résultats**.",
+        help="Les résultats s'affichent dans l'onglet **Résultats**.",
     )
+    _widgets.details_techniques(cmd, notes=["Sorties : `data/vame/analysis/`."])
 
 
 # ============================================================
@@ -308,8 +303,8 @@ def _affiche_autres(fichiers: list[Path]) -> None:
     R17.1).
     """
     for p in fichiers:
-        col_nom, col_dl = st.columns([4, 1])
-        col_nom.caption(f"`{p.name}`")
+        col_nom, col_dl = st.columns([4, 1], vertical_alignment="center")
+        col_nom.caption(p.name)
         try:
             contenu = p.read_bytes()
         except OSError:
@@ -324,14 +319,14 @@ def _tab_resultats(projet: Path, axes: list[dict]) -> None:
     analysis_dir = VA.analysis_dir(projet)
     if not analysis_dir.is_dir():
         st.info(
-            "Pas de dossier `analysis/` pour ce projet — lance une analyse "
-            "depuis l'onglet **Lancer une analyse**."
+            "Pas encore de résultats : lance une analyse depuis l'onglet "
+            "**Lancer une analyse**."
         )
         return
 
     fichiers = sorted(p for p in analysis_dir.iterdir() if p.is_file())
     if not fichiers:
-        st.info("`analysis/` existe mais est vide.")
+        st.info("Pas encore de résultats : le dossier d'analyse est vide.")
         return
 
     # Axes réellement découverts (--list-columns) : plus fiables que toute

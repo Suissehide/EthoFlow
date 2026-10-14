@@ -126,7 +126,7 @@ def test_custom_sans_modele_avertit_et_desactive_le_bouton(tmp_path, monkeypatch
     assert not at.exception, at.exception
 
     assert any("Aucun modèle DLC" in w.value for w in at.warning), [w.value for w in at.warning]
-    assert any("Modèle DLC" in w.value and "Projet" in w.value for w in at.warning)
+    assert any("Modèle DLC" in w.value and "menu du projet" in w.value for w in at.warning)
 
     boutons = {b.key: b for b in at.button}
     assert boutons["btn_pose_lancer"].disabled
@@ -172,8 +172,8 @@ def test_toutes_sessions_coche_par_defaut_active_le_bouton(tmp_path, monkeypatch
     boutons = {b.key: b for b in at.button}
     assert not boutons["btn_pose_lancer"].disabled
 
-    case_tout = [c for c in at.checkbox if c.key == "pose_all"][0]
-    case_tout.set_value(False).run()
+    # « Choisir… » sans rien choisir : rien à lancer, bouton grisé.
+    at.pills(key="pose_portee").set_value("choix").run()
     assert not at.exception, at.exception
 
     boutons = {b.key: b for b in at.button}
