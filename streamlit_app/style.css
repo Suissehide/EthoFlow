@@ -81,6 +81,23 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button {
 /* Le contenu texte du bouton (vide) occupe une place à côté de l'icône. */
 section[data-testid="stSidebar"] [class*="st-key-nav_"] button > div { display: none; }
 section[data-testid="stSidebar"] [class*="st-key-nav_"] button:hover { background: #2a2825; }
+/* Infobulle à droite du rail, en face de l'icône survolée (le texte est
+   passé par bouton dans --ef-infobulle, cf. app.py). `position: fixed`
+   pour échapper au défilement du rail, qui rognerait tout ce qui dépasse
+   ses 72 px ; sans `top`, elle garde la hauteur de son bouton. */
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button::after {
+  content: var(--ef-infobulle); position: fixed; left: 66px;
+  padding: 5px 9px; border-radius: 6px; white-space: nowrap; z-index: 1000;
+  background: #1c1b19; color: #f6f5f1; border: 1px solid #34322e;
+  font: 500 12.5px/1.3 'IBM Plex Sans', sans-serif; letter-spacing: 0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .12s ease .25s, visibility 0s linear .37s;
+}
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button:hover::after,
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button:focus-visible::after {
+  opacity: 1; visibility: visible; transition: opacity .12s ease .25s, visibility 0s linear .25s;
+}
 section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
   content: ""; width: 19px; height: 19px; flex-shrink: 0;
   background: var(--ef-icone) no-repeat center / contain;
@@ -422,7 +439,10 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 .ef-vide b { font: 600 16px 'IBM Plex Sans', sans-serif; }
 .ef-vide span { font-size: 14px; color: #6b6862; max-width: 420px; }
 /* Rail : pages d'étape grisées tant qu'aucun projet n'est ouvert. */
-section[data-testid="stSidebar"] [class*="st-key-nav_"] button:disabled { opacity: .35; background: transparent !important; cursor: default; }
+/* Page inactive : on estompe l'icône seule. L'opacité sur le bouton entier
+   estomperait aussi son infobulle, qui en est un pseudo-élément. */
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button:disabled { background: transparent !important; cursor: default; }
+section[data-testid="stSidebar"] [class*="st-key-nav_"] button:disabled::before { opacity: .35; }
 
 @media (max-width: 1180px) {
   .st-key-ef_nouveau { position: static; width: auto; padding: 24px 0 0; border-left: none; border-top: 1px solid #e0ddd5; background: transparent; }

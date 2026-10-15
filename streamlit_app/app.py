@@ -120,16 +120,29 @@ st.markdown(f"<style>{(_HERE / 'style.css').read_text(encoding='utf-8')}</style>
 # ============================================================
 # Rail d'icônes (sidebar Streamlit, 72 px)
 #
-# Une icône par page ; le nom est l'infobulle (`help`) et le libellé du
-# bouton, masqué en CSS — il reste lu par les lecteurs d'écran et par les
-# tests. L'icône est passée en variable CSS par bouton (blanche sur fond
-# #34322e pour la page active).
+# Une icône par page ; le nom est le libellé du bouton, masqué en CSS — il
+# reste lu par les lecteurs d'écran et par les tests. L'icône et le texte
+# de l'infobulle sont passés en variables CSS par bouton (icône blanche sur
+# fond #34322e pour la page active).
+#
+# L'infobulle est faite en CSS plutôt qu'avec le `help=` de Streamlit :
+# celui-ci s'affiche toujours AU-DESSUS du bouton, par-dessus l'icône
+# voisine ; ici elle sort à droite du rail, en face de l'icône survolée.
 # ============================================================
+def _infobulle(page: dict) -> str:
+    libelle = page.get("libelle", page["name"])
+    if page["name"] not in _ALL_PAGES:
+        return f"{libelle} : ouvre d'abord un projet"
+    return libelle
+
+
 _rail_css = ""
 for _p in _visible_main + OUTILS_PAGES + BOTTOM_PAGES:
     _actif = st.session_state.current_page == _p["name"]
     _icone = lucide_data_uri(_p["icon"], "ffffff" if _actif else "8a867e")
+    _texte = _infobulle(_p).replace("\\", "\\\\").replace('"', '\\"')
     _rail_css += (f'.st-key-nav_{_p["key"]} button {{ --ef-icone: url("{_icone}");'
+                  f' --ef-infobulle: "{_texte}";'
                   + (" background: #34322e !important;" if _actif else "") + " }\n")
 st.sidebar.markdown(f"<style>{_rail_css}</style>", unsafe_allow_html=True)
 
@@ -137,8 +150,7 @@ st.sidebar.markdown(f"<style>{_rail_css}</style>", unsafe_allow_html=True)
 def _bouton_rail(page: dict) -> None:
     inactif = page["name"] not in _ALL_PAGES
     libelle = page.get("libelle", page["name"])
-    if st.button(libelle, key=f"nav_{page['key']}", disabled=inactif,
-                 help=f"{libelle} : ouvre d'abord un projet" if inactif else libelle):
+    if st.button(libelle, key=f"nav_{page['key']}", disabled=inactif):
         st.session_state.current_page = page["name"]
         st.rerun()
 
