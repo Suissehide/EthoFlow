@@ -7,7 +7,8 @@
 # À chaque lancement :
 #   1. trouve conda — et propose d'installer Miniforge s'il n'y en a pas ;
 #   2. crée les environnements absents (ethoflow, dlc, vame), met à jour
-#      ceux dont le fichier environment-*.yml a changé (git pull) ;
+#      ceux dont le fichier environment-*.yml a changé (git pull), et
+#      complète l'env ethoflow s'il lui manque une dépendance ;
 #   3. vérifie que torch voit la GPU NVIDIA dans dlc et vame, lance
 #      `diagnose_gpu.py --fix` sinon (une fois par environnement) ;
 #   4. lance l'app (./ethoflow) : elle s'ouvre dans le navigateur.
@@ -16,9 +17,21 @@ set -uo pipefail
 ICI="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ICI"
 
-titre() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
+# Modules indispensables à l'app : s'il en manque un, l'env ethoflow est
+# complété depuis environment-pipeline.yml avant le lancement.
+IMPORTS_APP="streamlit, streamlit_image_coordinates, cv2, pandas, numpy, yaml, tqdm, openpyxl, tables"
+
+# Présentation : une étape numérotée, puis une ligne par action avec un
+# statut aligné en colonne (OK, INFO, ATTENTION, …).
+ETAPE=0
+etape() { ETAPE=$((ETAPE + 1)); printf '\n \033[1m[%d/4] %s\033[0m\n' "$ETAPE" "$1"; }
+ligne() {
+    local couleur=''
+    case "$1" in OK) couleur='\033[32m' ;; ATTENTION) couleur='\033[33m' ;; esac
+    printf "       ${couleur}%-10s\033[0m%s\n" "$1" "$2"
+}
 fin_erreur() {
-    printf '\n\033[31mErreur : %s\033[0m\n' "$1" >&2
+    printf '\n \033[31mERREUR\033[0m  %s\n\n' "$1" >&2
     read -r -p "Appuie sur Entrée pour fermer." _
     exit 1
 }
@@ -36,10 +49,13 @@ trouver_conda() {
     return 1
 }
 
-titre "Conda"
+printf '\n \033[1mEthoFlow\033[0m%42s%s\n' "" "$(date '+%d/%m/%Y %H:%M')"
+printf ' %s\n' "=================================================================="
+
+etape "Conda"
 if ! CONDA="$(trouver_conda)"; then
-    echo "Conda est introuvable. EthoFlow en a besoin pour ses environnements Python."
-    read -r -p "Installer Miniforge dans $HOME/miniforge3 (~100 Mo, sans droits admin) ? [O/n] " rep
+    ligne INFO "conda introuvable - EthoFlow en a besoin pour ses environnements Python"
+    read -r -p "       Installer Miniforge dans $HOME/miniforge3 (~100 Mo, sans droits admin) ? [O/n] " rep
     case "$rep" in [nN]*) fin_erreur "installation annulée." ;; esac
     installeur="$(mktemp -t miniforge.XXXXXX).sh"
     url="https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
@@ -50,7 +66,7 @@ if ! CONDA="$(trouver_conda)"; then
 fi
 export CONDA_EXE="$CONDA"   # le lanceur ./ethoflow s'en sert pour trouver l'env
 BASE="$(dirname "$(dirname "$CONDA")")"
-echo "conda : $CONDA"
+ligne OK "$CONDA"
 
 # ------------------------------------------------------- environnements
 # Une copie du .yml est gardée dans l'env : s'il diffère (après un git
@@ -60,53 +76,72 @@ preparer_env() {   # nom fichier.yml obligatoire(0/1)
     local nom="$1" yml="$2" obligatoire="$3" prefixe="$BASE/envs/$1"
     local copie="$prefixe/.ethoflow-env.yml"
     if [ ! -d "$prefixe" ]; then
-        echo "Création de l'environnement « $nom » (10 à 20 min, une seule fois)…"
-        if ! "$CONDA" env create -f "$yml"; then
+        ligne ... "$nom : création (10 à 20 min, une seule fois)"
+        if ! "$CONDA" env create -f "$yml" -q; then
             # Un env à moitié créé passerait pour installé au prochain lancement.
             "$CONDA" env remove -n "$nom" -y >/dev/null 2>&1
             [ "$obligatoire" = 1 ] && fin_erreur "impossible de créer l'environnement « $nom »."
-            echo "⚠ « $nom » n'a pas pu être créé : les étapes qui en dépendent seront indisponibles."
+            ligne ATTENTION "$nom : création impossible - les étapes qui en dépendent seront indisponibles"
             return
         fi
         cp "$yml" "$copie"
+        ligne OK "$nom (créé)"
     elif [ ! -f "$copie" ]; then
         cp "$yml" "$copie"
-        echo "✓ $nom (déjà là)"
+        ligne OK "$nom"
     elif ! cmp -s "$yml" "$copie"; then
-        echo "Mise à jour de l'environnement « $nom » ($yml a changé)…"
-        if "$CONDA" env update -n "$nom" -f "$yml" --prune; then
+        ligne ... "$nom : mise à jour ($yml a changé)"
+        if "$CONDA" env update -n "$nom" -f "$yml" --prune -q; then
             cp "$yml" "$copie"
             rm -f "$prefixe/.ethoflow-gpu-ok"   # torch a pu changer : revérifier
+            ligne OK "$nom (mis à jour)"
         else
-            echo "⚠ mise à jour de « $nom » échouée : l'ancienne version est gardée."
+            ligne ATTENTION "$nom : mise à jour échouée - l'ancienne version est gardée"
         fi
     else
-        echo "✓ $nom"
+        ligne OK "$nom"
     fi
 }
 
-titre "Environnements"
+# L'env ethoflow peut dater d'avant l'ajout d'une dépendance au .yml : s'il
+# lui manque un module, on le complète (sans --prune : on ne retire rien de
+# ce que l'utilisateur aurait installé). Pas de risque torch ici.
+completer_ethoflow() {
+    local py="$BASE/envs/ethoflow/bin/python"
+    [ -x "$py" ] || return 0
+    "$py" -c "import $IMPORTS_APP" >/dev/null 2>&1 && return 0
+    ligne ... "ethoflow : dépendances manquantes, installation"
+    "$CONDA" env update -n ethoflow -f environment-pipeline.yml -q
+    "$py" -c "import $IMPORTS_APP" >/dev/null 2>&1 \
+        || fin_erreur "l'env ethoflow reste incomplet - détail : $py -c 'import $IMPORTS_APP'"
+    ligne OK "ethoflow (complété)"
+}
+
+etape "Environnements"
 preparer_env ethoflow environment-pipeline.yml 1
+completer_ethoflow
 preparer_env dlc      environment-dlc.yml      0
 preparer_env vame     environment-vame.yml     0
 
 # ------------------------------------------------------------------ GPU
-titre "GPU"
+etape "GPU"
 if ! command -v nvidia-smi >/dev/null 2>&1; then
-    echo "Pas de GPU NVIDIA sur cette machine : DLC et VAME tourneront sur CPU (10 à 50× plus lent)."
+    ligne INFO "pas de GPU NVIDIA : DLC et VAME tourneront sur CPU (10 à 50× plus lent)"
 else
+    while IFS= read -r g; do ligne INFO "$g"; done \
+        < <(nvidia-smi --query-gpu=name,driver_version --format=csv,noheader 2>/dev/null)
     for nom in dlc vame; do
         prefixe="$BASE/envs/$nom"
         [ -x "$prefixe/bin/python" ] || continue
-        [ -f "$prefixe/.ethoflow-gpu-ok" ] && { echo "✓ $nom voit la GPU"; continue; }
+        [ -f "$prefixe/.ethoflow-gpu-ok" ] && { ligne OK "$nom : torch utilise la GPU"; continue; }
         if "$prefixe/bin/python" scripts/diagnose_gpu.py >/dev/null 2>&1 \
-           || { echo "« $nom » ne voit pas la GPU : réparation de torch…"
+           || { ligne ... "$nom : torch ne voit pas la GPU, réparation"
                 "$prefixe/bin/python" scripts/diagnose_gpu.py --fix \
                 && "$prefixe/bin/python" scripts/diagnose_gpu.py >/dev/null 2>&1; }; then
             touch "$prefixe/.ethoflow-gpu-ok"
-            echo "✓ $nom voit la GPU"
+            ligne OK "$nom : torch utilise la GPU"
         else
-            echo "⚠ « $nom » ne voit toujours pas la GPU. Détail : $prefixe/bin/python scripts/diagnose_gpu.py"
+            ligne ATTENTION "$nom : torch ne voit toujours pas la GPU - détail : $prefixe/bin/python scripts/diagnose_gpu.py"
         fi
     done
 fi
@@ -128,11 +163,13 @@ Path=$ICI
 Terminal=true
 Categories=Science;
 EOF
-        echo "✓ EthoFlow ajouté au menu des applications."
+        ligne OK "EthoFlow ajouté au menu des applications"
     fi
 fi
 
 # ----------------------------------------------------------- lancement
-titre "Lancement"
-echo "L'app s'ouvre dans le navigateur. Garde cette fenêtre ouverte ; ferme-la pour arrêter EthoFlow."
+etape "Application"
+ligne INFO "http://localhost:8501  (s'ouvre dans le navigateur)"
+ligne INFO "garde cette fenêtre ouverte ; ferme-la pour arrêter EthoFlow"
+echo
 exec "$ICI/ethoflow"

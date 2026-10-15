@@ -177,6 +177,10 @@ supplémentaire est transmis à `streamlit run` :
 ./ethoflow --server.address=0.0.0.0   # accessible depuis le LAN
 ```
 
+Par défaut l'app n'écoute que sur le poste qui la lance (`localhost`) : les
+projets ne sont pas visibles depuis le réseau du labo. L'option ci-dessus
+l'ouvre volontairement, le temps d'une session.
+
 Sous Linux et macOS, le script peut être lié dans un dossier du `PATH` pour
 être appelé de n'importe où — les liens symboliques sont résolus :
 

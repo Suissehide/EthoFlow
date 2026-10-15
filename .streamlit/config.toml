@@ -1,5 +1,16 @@
 [server]
 runOnSave = true
+# L'app n'écoute que sur ce poste. Par défaut Streamlit écoute sur toutes
+# les interfaces (0.0.0.0) : n'importe qui sur le réseau du labo pouvait
+# ouvrir l'app et parcourir les projets. Pour l'ouvrir volontairement au
+# réseau local : ethoflow --server.address=0.0.0.0
+address = "localhost"
+
+[logger]
+# Masque les messages internes (« Uvicorn server started… ») ; les
+# erreurs et avertissements restent affichés.
+level = "warning"
+
 
 [browser]
 gatherUsageStats = false
