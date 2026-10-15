@@ -66,15 +66,15 @@ Cette distinction est indépendante de l'angle de la caméra : tu peux avoir du 
 ### En un double-clic (recommandé)
 
 1. Récupère le dossier EthoFlow : `git clone <URL_ETHOFLOW>`, ou télécharge le ZIP du dépôt et décompresse-le.
-2. Double-clique sur le lanceur de ton système :
-   - **Windows** : `EthoFlow.bat`
-   - **macOS** : `EthoFlow.command` (la première fois, si macOS bloque le fichier : clic droit → Ouvrir)
-   - **Linux** : `./EthoFlow.command` dans un terminal la première fois ; EthoFlow apparaît ensuite dans le menu des applications.
+2. Double-clique sur le lanceur de ton système — ce sont les deux seuls fichiers `EthoFlow` à la racine :
+   - **Windows** : `EthoFlow-Windows.bat`
+   - **macOS** : `EthoFlow-Mac-Linux.command` (la première fois, si macOS bloque le fichier : clic droit → Ouvrir)
+   - **Linux** : `./EthoFlow-Mac-Linux.command` dans un terminal la première fois ; EthoFlow apparaît ensuite dans le menu des applications.
 
 Le lanceur fait tout ce qui manque, puis ouvre l'app dans le navigateur :
 
 - installe conda (Miniforge, dans ton dossier personnel, sans droits admin) s'il est absent — il te le demande d'abord ;
-- crée les environnements `ethoflow`, `dlc` et `vame` (10 à 20 min chacun, **une seule fois**), et les met à jour si un `environment-*.yml` a changé après un `git pull` ;
+- crée les environnements `ethoflow`, `dlc` et `vame` (10 à 20 min chacun, **une seule fois**), les met à jour si un `environment-*.yml` a changé après un `git pull`, et complète `ethoflow` s'il lui manque une dépendance ;
 - vérifie que torch voit la GPU NVIDIA dans `dlc` et `vame`, et lance `diagnose_gpu.py --fix` sinon.
 
 Ensuite, le même double-clic lance simplement l'app (quelques secondes). Garde la fenêtre du terminal ouverte : la fermer arrête EthoFlow.
@@ -153,28 +153,28 @@ python -c "import torch; print('CUDA:', torch.cuda.is_available())"
 
 ## Lancer l'interface
 
-**Le plus simple** : double-clic sur `EthoFlow.bat` (Windows) ou `EthoFlow.command` (macOS, Linux) — voir [En un double-clic](#en-un-double-clic-recommandé). Il vérifie l'installation puis lance l'app, qui s'ouvre dans le navigateur.
+**Le plus simple** : double-clic sur `EthoFlow-Windows.bat` ou `EthoFlow-Mac-Linux.command` — voir [En un double-clic](#en-un-double-clic-recommandé). Il vérifie l'installation puis lance l'app, qui s'ouvre dans le navigateur.
 
 L'app s'ouvre sur la page **Projets** : la liste des projets de l'emplacement (avec leur étape en cours) et, à droite, la création d'un nouveau projet. Une fois un projet ouvert, le **tableau de bord** montre les neuf étapes ; le rail de gauche mène à chacune, et la colonne **Activité** à droite suit les jobs en cours. Les étapes se débloquent dans l'ordre : une étape s'ouvre quand la précédente est faite pour toutes les sessions.
 
-**Une fois l'installation faite**, le lanceur seul démarre l'app plus vite, depuis la racine du dépôt, **sans activer d'environnement au préalable** :
+Le lanceur à double-cliquer appelle ensuite `scripts/lancer_app.cmd` (Windows) ou `scripts/lancer_app.sh` (Linux, macOS), qui démarre l'app seule, sans revérifier les environnements ni la GPU. Tu peux l'appeler directement depuis la racine du dépôt, **sans activer d'environnement** :
 
 ```cmd
 :: Windows
-ethoflow
+scripts\lancer_app.cmd
 ```
 
 ```bash
 # Linux / macOS
-./ethoflow
+scripts/lancer_app.sh
 ```
 
-Le lanceur trouve lui-même le `streamlit` de l'env `ethoflow` ; si l'env
+Il trouve lui-même le `streamlit` de l'env `ethoflow` ; si l'env
 n'existe pas, il affiche la commande pour le créer. Tout argument
 supplémentaire est transmis à `streamlit run` :
 
 ```bash
-./ethoflow --server.address=0.0.0.0   # accessible depuis le LAN
+scripts/lancer_app.sh --server.address=0.0.0.0   # accessible depuis le LAN
 ```
 
 Par défaut l'app n'écoute que sur le poste qui la lance (`localhost`) : les
@@ -185,7 +185,7 @@ Sous Linux et macOS, le script peut être lié dans un dossier du `PATH` pour
 être appelé de n'importe où — les liens symboliques sont résolus :
 
 ```bash
-ln -s "$PWD/ethoflow" ~/.local/bin/ethoflow
+ln -s "$PWD/scripts/lancer_app.sh" ~/.local/bin/ethoflow
 ```
 
 L'interface couvre les étapes 1 à 9 ci-dessous. Le [Parcours B](#parcours-b--entraîner-un-nouveau-modèle-dlc)

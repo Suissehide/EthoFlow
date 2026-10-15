@@ -1,6 +1,6 @@
 @echo off
 rem EthoFlow - double-clic pour installer (la premiere fois) et lancer l'app.
-rem Windows. (macOS / Linux : EthoFlow.command.)
+rem Windows. (macOS / Linux : EthoFlow-Mac-Linux.command.)
 rem
 rem A chaque lancement :
 rem   1. trouve conda - et propose d'installer Miniforge s'il n'y en a pas ;
@@ -9,7 +9,7 @@ rem      ceux dont le fichier environment-*.yml a change (git pull), et
 rem      complete l'env ethoflow s'il lui manque une dependance ;
 rem   3. verifie que torch voit la GPU NVIDIA dans dlc et vame, lance
 rem      `diagnose_gpu.py --fix` sinon (une fois par environnement) ;
-rem   4. lance l'app (ethoflow.cmd) : elle s'ouvre dans le navigateur.
+rem   4. lance l'app (scripts\lancer_app.cmd) : elle s'ouvre dans le navigateur.
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
 rem Python ecrit en UTF-8 meme quand sa sortie est redirigee (>nul) : sans
@@ -56,7 +56,7 @@ if not defined CONDA (
     set "CONDA=%USERPROFILE%\miniforge3\Scripts\conda.exe"
     if not exist "!CONDA!" (set "MSG=l'installation de Miniforge a echoue" & goto :erreur)
 )
-rem Le lanceur ethoflow.cmd s'en sert pour trouver l'env.
+rem scripts\lancer_app.cmd s'en sert pour trouver l'env.
 set "CONDA_EXE=%CONDA%"
 for %%A in ("%CONDA%") do set "SCRIPTS=%%~dpA"
 for %%B in ("%SCRIPTS%..") do set "BASE=%%~fB"
@@ -91,7 +91,7 @@ call :etape 4 "Application"
 call :ligne INFO "http://localhost:8501  (s'ouvre dans le navigateur)"
 call :ligne INFO "garde cette fenetre ouverte ; ferme-la pour arreter EthoFlow"
 echo.
-call "%ICI%ethoflow.cmd"
+call "%ICI%scripts\lancer_app.cmd"
 if errorlevel 1 (set "MSG=l'app s'est arretee sur une erreur (voir ci-dessus)" & goto :erreur)
 exit /b 0
 

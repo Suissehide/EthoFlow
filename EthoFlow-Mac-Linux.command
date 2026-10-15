@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # EthoFlow — double-clic pour installer (la première fois) et lancer l'app.
-# macOS : double-clic dans le Finder. Linux : `./EthoFlow.command` une
+# macOS : double-clic dans le Finder. Linux : `./EthoFlow-Mac-Linux.command` une
 # première fois dans un terminal ; EthoFlow apparaît ensuite dans le menu
-# des applications. (Windows : EthoFlow.bat.)
+# des applications. (Windows : EthoFlow-Windows.bat.)
 #
 # À chaque lancement :
 #   1. trouve conda — et propose d'installer Miniforge s'il n'y en a pas ;
@@ -11,7 +11,7 @@
 #      complète l'env ethoflow s'il lui manque une dépendance ;
 #   3. vérifie que torch voit la GPU NVIDIA dans dlc et vame, lance
 #      `diagnose_gpu.py --fix` sinon (une fois par environnement) ;
-#   4. lance l'app (./ethoflow) : elle s'ouvre dans le navigateur.
+#   4. lance l'app (scripts/lancer_app.sh) : elle s'ouvre dans le navigateur.
 set -uo pipefail
 
 ICI="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,7 +64,7 @@ if ! CONDA="$(trouver_conda)"; then
     rm -f "$installeur"
     CONDA="$HOME/miniforge3/bin/conda"
 fi
-export CONDA_EXE="$CONDA"   # le lanceur ./ethoflow s'en sert pour trouver l'env
+export CONDA_EXE="$CONDA"   # scripts/lancer_app.sh s'en sert pour trouver l'env
 BASE="$(dirname "$(dirname "$CONDA")")"
 ligne OK "$CONDA"
 
@@ -151,14 +151,15 @@ fi
 # des applications, pour ne plus passer par le terminal.
 if [ "$(uname)" = Linux ]; then
     raccourci="$HOME/.local/share/applications/ethoflow.desktop"
-    if [ ! -f "$raccourci" ]; then
+    # Recréé aussi s'il pointe vers l'ancien nom du lanceur (EthoFlow.command).
+    if [ ! -f "$raccourci" ] || ! grep -qF "$ICI/EthoFlow-Mac-Linux.command" "$raccourci"; then
         mkdir -p "$(dirname "$raccourci")"
         cat > "$raccourci" <<EOF
 [Desktop Entry]
 Type=Application
 Name=EthoFlow
 Comment=Analyse comportementale (DeepLabCut + VAME)
-Exec="$ICI/EthoFlow.command"
+Exec="$ICI/EthoFlow-Mac-Linux.command"
 Path=$ICI
 Terminal=true
 Categories=Science;
@@ -172,4 +173,4 @@ etape "Application"
 ligne INFO "http://localhost:8501  (s'ouvre dans le navigateur)"
 ligne INFO "garde cette fenêtre ouverte ; ferme-la pour arrêter EthoFlow"
 echo
-exec "$ICI/ethoflow"
+exec "$ICI/scripts/lancer_app.sh"

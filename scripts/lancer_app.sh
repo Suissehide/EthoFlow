@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
 # EthoFlow — lance l'interface Streamlit. Linux et macOS.
-# (Sous Windows, utilise ethoflow.cmd à la place.)
+# (Sous Windows : scripts\lancer_app.cmd.)
 #
-# Usage :
-#     ./ethoflow                            ouvre l'app dans le navigateur
-#     ./ethoflow --server.address=0.0.0.0   accessible depuis le LAN
+# Appelé par EthoFlow-Mac-Linux.command, le lanceur à double-cliquer de la
+# racine — c'est lui qu'il faut utiliser. Ce script-ci démarre l'app seule,
+# sans vérifier les environnements ni la GPU :
+#     scripts/lancer_app.sh                            ouvre l'app
+#     scripts/lancer_app.sh --server.address=0.0.0.0   ouverte au réseau local
 #
 # Tout argument supplémentaire est transmis tel quel à `streamlit run`.
 # Pas besoin d'activer l'env conda au préalable : le script trouve le
 # binaire de l'env `ethoflow` lui-même.
 #
 # Le script peut être lié dans un dossier du PATH — les liens symboliques
-# sont résolus, donc `ln -s /chemin/vers/ethoflow ~/.local/bin/ethoflow`
+# sont résolus, donc `ln -s /chemin/vers/scripts/lancer_app.sh ~/.local/bin/ethoflow`
 # fonctionne et l'app est trouvée à sa vraie place.
 set -euo pipefail
 
@@ -33,12 +35,13 @@ resoudre_dossier() {
     cd -P "$(dirname "$src")" && pwd
 }
 
-ICI="$(resoudre_dossier "${BASH_SOURCE[0]}")"
+# Ce script vit dans scripts/ : la racine du dépôt est le dossier parent.
+ICI="$(cd -P "$(resoudre_dossier "${BASH_SOURCE[0]}")/.." && pwd)"
 APP="$ICI/streamlit_app/app.py"
 
 if [ ! -f "$APP" ]; then
     echo "Erreur : $APP introuvable." >&2
-    echo "Ce script doit rester à la racine du dépôt EthoFlow" >&2
+    echo "Ce script doit rester dans scripts/ du dépôt EthoFlow" >&2
     echo "(un lien symbolique depuis le PATH est possible)." >&2
     exit 1
 fi

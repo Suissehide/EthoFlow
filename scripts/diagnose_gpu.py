@@ -211,7 +211,7 @@ def _sortie_utf8() -> None:
     Redirigée (`> nul`, pipe), la sortie Python prend sous Windows
     l'encodage local (cp1252), qui ne connaît pas ✓ ni ✅ : le script
     plantait alors au premier symbole, avec un code de sortie d'échec, et
-    le lanceur EthoFlow.bat concluait à tort que la GPU était invisible.
+    le lanceur EthoFlow-Windows.bat concluait à tort que la GPU était invisible.
     """
     for flux in (sys.stdout, sys.stderr):
         try:
