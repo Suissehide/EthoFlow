@@ -89,6 +89,14 @@ def etat_pipeline(project: Path, script_en_cours: str | None = None) -> list[dic
     total = len(df)
     en_cours = etape_du_script(script_en_cours) if script_en_cours else None
 
+    # Une session qui a passé une étape plus loin a passé celle-ci aussi :
+    # un projet mené au terminal sans nettoyage (facultatif), ou dont les
+    # vidéos ne sont plus à leur place sur cette machine, ne doit pas
+    # bloquer la suite alors que VAME est déjà fait.
+    colonnes = [e.colonne for e in ETAPES if e.colonne]
+    faites = {c: (df[colonnes[i:]] == "OK").any(axis=1) for i, c in enumerate(colonnes)} \
+        if total else {}
+
     lignes = []
     for e in ETAPES:
         if e.n == 1:
@@ -96,7 +104,7 @@ def etat_pipeline(project: Path, script_en_cours: str | None = None) -> list[dic
         elif e.n == 2:
             fait = tot = total
         elif e.colonne:
-            fait, tot = int((df[e.colonne] == "OK").sum()) if total else 0, total
+            fait, tot = int(faites[e.colonne].sum()) if total else 0, total
         else:
             fait = tot = 0
         lignes.append({"etape": e, "fait": fait, "total": tot,

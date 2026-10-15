@@ -65,3 +65,32 @@ def test_tout_fait_ouvre_l_exploitation(project, session_factory, monkeypatch):
     assert etats["Motifs"] == ("dispo", "disponible")
     assert E.courante(lignes) is None
     assert E.ensuite(lignes)["etape"].nom == "Motifs"
+
+
+def test_projet_mene_au_terminal_sans_nettoyage_ni_videos(project, monkeypatch):
+    """VAME fait, mais nettoyage sauté (facultatif) et vidéos introuvables
+    sur cette machine : les étapes d'avant comptent comme faites, la suite
+    (Motifs, Analyses) s'ouvre."""
+    import pandas as pd
+    df = pd.DataFrame([{"session_id": s, "vidéo": "manque", "DLC": "OK", "split": "—",
+                        "nettoyage": "—", "VAME": "OK"} for s in ("S1", "S2")])
+    monkeypatch.setattr(E, "list_sessions", lambda p: df)
+    lignes = E.etat_pipeline(project)
+    etats = _etats(lignes)
+    assert etats["Vidéos & calibration"] == ("done", "2/2")
+    assert etats["Nettoyage"] == ("done", "2/2")
+    assert etats["Motifs"] == ("dispo", "disponible")
+    assert E.courante(lignes) is None
+
+
+def test_une_session_en_retard_garde_l_etape_ouverte(project, monkeypatch):
+    """La cascade est par session : S2 sans pose reste à faire."""
+    import pandas as pd
+    df = pd.DataFrame([
+        {"session_id": "S1", "vidéo": "manque", "DLC": "OK", "split": "—", "nettoyage": "—", "VAME": "OK"},
+        {"session_id": "S2", "vidéo": "OK", "DLC": "—", "split": "—", "nettoyage": "—", "VAME": "—"},
+    ])
+    monkeypatch.setattr(E, "list_sessions", lambda p: df)
+    etats = _etats(E.etat_pipeline(project))
+    assert etats["Vidéos & calibration"] == ("done", "2/2")
+    assert etats["Pose (DLC)"] == ("todo", "1/2")
