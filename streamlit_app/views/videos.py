@@ -68,6 +68,10 @@ _TOLERANCE_FPS = 0.5
 # lui, ne lit qu'une frame à la fois via OpenCV, quelle que soit la taille.
 _LECTEUR_MAX_OCTETS = 500 * 1024 ** 2
 
+# Largeur d'affichage (px) des images, vidéos et aperçus cliquables : en
+# layout "wide", "stretch" les étirait sur tout l'écran.
+_LARGEUR_AFFICHAGE = 800
+
 
 # ============================================================
 # Sonde vidéo — mise en cache
@@ -127,7 +131,7 @@ def _visualiseur(chemin: Path, session_id: str) -> None:
     png = _frame_cache(str(chemin), index)
     legende = f"Image {index} / {n - 1}" + (f" — {t:.2f} s" if t is not None else "")
     if png:
-        st.image(png, caption=legende, width="stretch")
+        st.image(png, caption=legende, width=_LARGEUR_AFFICHAGE)
     else:
         st.caption(f"{legende} : image illisible.")
 
@@ -136,10 +140,20 @@ def _visualiseur(chemin: Path, session_id: str) -> None:
         f"Lecteur vidéo ({taille / 1024 ** 3:.1f} Go, chargés en mémoire)",
         key=f"{cle}_lecteur",
     ):
-        st.video(str(chemin), start_time=int(t or 0))
+        st.video(str(chemin), start_time=int(t or 0), width=_LARGEUR_AFFICHAGE)
         st.caption("Le lecteur démarre à l'image choisie. Une vidéo annotée "
                    "écrite par OpenCV (codec mp4v) peut ne pas se lire dans le "
                    "navigateur : le visualiseur ci-dessus, lui, la lit toujours.")
+
+
+def _clic_image(apercu, key: str) -> dict | None:
+    """Aperçu cliquable réduit à `_LARGEUR_AFFICHAGE`, clic ramené en pixels de la frame."""
+    largeur = apercu.shape[1]
+    valeur = streamlit_image_coordinates(apercu, width=min(largeur, _LARGEUR_AFFICHAGE), key=key)
+    if valeur and valeur.get("width"):
+        ratio = largeur / valeur["width"]
+        valeur = {**valeur, "x": round(valeur["x"] * ratio), "y": round(valeur["y"] * ratio)}
+    return valeur
 
 
 def _fps_declare(meta: dict) -> float | None:
@@ -577,7 +591,7 @@ def _onglet_calibration_arenes(projet: Path) -> None:
         etape = "premier coin" if st.session_state.get("calib_arenes_premier_clic") is None else "coin opposé"
         st.caption(f"Clique le **{etape}** de l'arène **{label}** ({len(rects)}/{len(_LABELS_ARENES)}).")
 
-    valeur = streamlit_image_coordinates(apercu, key=f"calib_arenes_clic__{source_actuelle}")
+    valeur = _clic_image(apercu, key=f"calib_arenes_clic__{source_actuelle}")
 
     if (valeur is not None and len(rects) < len(_LABELS_ARENES)
             and valeur.get("unix_time") != st.session_state.get("calib_arenes_dernier_clic")):
@@ -705,7 +719,7 @@ def _onglet_echelle(projet: Path) -> None:
             etape = "première" if not points else "seconde"
             st.caption(f"Clique la **{etape}** extrémité de la distance connue ({len(points)}/2).")
 
-        valeur = streamlit_image_coordinates(apercu, key=f"echelle_clic__{source_actuelle}")
+        valeur = _clic_image(apercu, key=f"echelle_clic__{source_actuelle}")
 
         if (valeur is not None and len(points) < 2
                 and valeur.get("unix_time") != st.session_state.get("echelle_dernier_clic")):
