@@ -78,6 +78,58 @@ def to_argv(cmd: Command) -> list[str]:
     ]
 
 
+def _prefixe_env(env: str) -> Path | None:
+    """Dossier de l'env conda `env`, ou None si introuvable."""
+    candidats = []
+    if os.environ.get("CONDA_EXE"):
+        # <base>/Scripts/conda.exe (Windows) ou <base>/bin/conda : deux crans.
+        candidats.append(Path(os.environ["CONDA_EXE"]).resolve().parent.parent)
+    for var in ("CONDA_PREFIX_1", "CONDA_PREFIX"):
+        if os.environ.get(var):
+            pre = Path(os.environ[var])
+            candidats.append(pre.parent.parent if pre.parent.name == "envs" else pre)
+    for base in candidats:
+        dossier = base / "envs" / env
+        if dossier.is_dir():
+            return dossier
+    return None
+
+
+def lancement_direct(cmd: Command) -> tuple[list[str], dict[str, str]] | None:
+    """(argv, variables d'environnement) pour lancer le Python de l'env
+    directement, sans `conda run` ; None si l'env est introuvable.
+
+    `conda run` retient TOUTE la sortie du script et ne la rend qu'à la
+    fin : sur une inférence de plusieurs heures, l'app n'affichait rien,
+    ni log ni progression, jusqu'au bout. Lancer `python` de l'env écrit
+    au contraire directement dans le fichier de log, ligne à ligne.
+
+    Ce que `conda activate` apporte et qu'il faut reproduire : les
+    dossiers de l'env en tête du PATH (DLL de HDF5, ffmpeg, CUDA… sous
+    Windows) et CONDA_PREFIX.
+    """
+    prefixe = _prefixe_env(cmd.env)
+    if prefixe is None:
+        return None
+    if os.name == "nt":
+        python = prefixe / "python.exe"
+        dossiers = [prefixe, prefixe / "Library" / "mingw-w64" / "bin",
+                    prefixe / "Library" / "usr" / "bin", prefixe / "Library" / "bin",
+                    prefixe / "Scripts", prefixe / "bin"]
+    else:
+        python = prefixe / "bin" / "python"
+        dossiers = [prefixe / "bin"]
+    if not python.exists():
+        return None
+    chemin = os.pathsep.join(str(d) for d in dossiers if d.exists())
+    variables = {
+        "PATH": chemin + os.pathsep + os.environ.get("PATH", ""),
+        "CONDA_PREFIX": str(prefixe),
+        "CONDA_DEFAULT_ENV": cmd.env,
+    }
+    return [str(python), str(SCRIPTS_DIR / cmd.script), *cmd.args], variables
+
+
 def _base(project: Path) -> list[str]:
     return ["--project-dir", str(Path(project).resolve()), "--no-prompt"]
 

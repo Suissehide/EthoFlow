@@ -356,7 +356,21 @@ def test_parse_progress_sessions_et_tqdm():
            + "".join(_BARRE.format(p=p, a=300 * p, eta="02:40") for p in (10, 30, 50)))
     prog = R.parse_progress(log)
     assert prog["valeur"] == pytest.approx((1 + 0.5) / 4)
-    assert prog["texte"] == "Session 2/4 · BV-971 — 50 % (15000/30000), reste 02:40"
+    # 2 min 40 restantes sur la session ; 2 sessions encore après celle-ci,
+    # à 02:13 + 02:40 = 293 s chacune -> 160 + 2 x 293 = 746 s = 12 min.
+    assert prog["texte"] == ("Session 2/4 · BV-971 — 50 % (15000/30000) · 101.2it/s"
+                             " · reste 2 min — tout : reste ~12 min")
+    assert (prog["reste_s"], prog["reste_total_s"], prog["vitesse"]) == (160, 746, "101.2it/s")
+
+
+def test_parse_progress_derniere_session_pas_de_total():
+    """Sur la dernière session, « tout » ferait doublon avec « reste »."""
+    prog = R.parse_progress("[4/4] BV-999\n" + _BARRE.format(p=50, a=15000, eta="02:40"))
+    assert "tout" not in prog["texte"] and prog["reste_total_s"] == 160
+
+
+def test_duree_lisible():
+    assert [R.duree_lisible(x) for x in (45, 746, 80000)] == ["45 s", "12 min", "22 h 13"]
 
 
 def test_parse_progress_barre_de_la_session_precedente_ignoree():
@@ -410,7 +424,8 @@ def test_progress_lue_pendant_un_vrai_job(project):
             break
         time.sleep(0.05)
     assert R.current(project).state == "running"
-    assert vu["texte"] == "Session 2/2 · B — 75 % (75/100), reste 00:03"
+    # Dernière session : pas de total, il ferait doublon avec « reste ».
+    assert vu["texte"] == "Session 2/2 · B — 75 % (75/100) · 9it/s · reste 3 s"
     R.cancel(project, job.job_id)
     _attendre_fin(project)
 

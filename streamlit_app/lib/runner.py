@@ -23,7 +23,7 @@ from dataclasses import asdict, dataclass, replace as _dc_replace
 from datetime import datetime
 from pathlib import Path
 
-from lib.pipeline import Command, to_argv
+from lib.pipeline import Command, lancement_direct, to_argv
 
 replace = _dc_replace
 
@@ -101,8 +101,18 @@ def _read_job(project: Path, job_id: str) -> Job | None:
 
 
 def _argv(cmd: Command) -> list[str]:
-    """Indirection pour que les tests puissent court-circuiter conda."""
-    return to_argv(cmd)
+    """Indirection pour que les tests puissent court-circuiter conda.
+
+    Python de l'env lancé directement quand il est trouvé (logs en
+    direct) ; `conda run` en dernier recours seulement."""
+    direct = lancement_direct(cmd)
+    return direct[0] if direct else to_argv(cmd)
+
+
+def _env_supplementaire(cmd: Command) -> dict[str, str]:
+    """Variables à ajouter pour un lancement direct (PATH de l'env…)."""
+    direct = lancement_direct(cmd)
+    return direct[1] if direct else {}
 
 
 def _apres_reclamation_hook() -> None:
@@ -259,7 +269,34 @@ def read_log(project: Path, job_id: str, tail: int | None = None) -> str:
 # prepare_vame_input_custom, crop_arenes, assign_arenas...).
 _SESSION = re.compile(r"^\[(\d+)/(\d+)\]\s*(.*)$")
 # ` 45%|████▌     | 13500/30000 [02:13<02:40, 101.2it/s]` : barre tqdm.
-_TQDM = re.compile(r"(\d{1,3})%\|[^|]*\|\s*([\d.]+[kMG]?)/([\d.]+[kMG]?)\s*\[[^<\]]*<([^,\]]*)")
+# Groupes : %, fait, total, écoulé, restant, vitesse.
+_TQDM = re.compile(r"(\d{1,3})%\|[^|]*\|\s*([\d.]+[kMG]?)/([\d.]+[kMG]?)"
+                   r"\s*\[([^<\]]*)<([^,\]]*)(?:,\s*([^\]]*))?")
+
+
+def _secondes(horloge: str) -> int | None:
+    """`02:40` / `1:05:12` (format tqdm) -> secondes ; None si illisible."""
+    try:
+        parts = [int(x) for x in horloge.strip().split(":")]
+    except ValueError:
+        return None
+    if not 1 <= len(parts) <= 3:
+        return None
+    total = 0
+    for x in parts:
+        total = total * 60 + x
+    return total
+
+
+def duree_lisible(secondes: float) -> str:
+    """`746` -> `12 min` ; `80000` -> `22 h 13`. Arrondi : c'est une estimation."""
+    secondes = int(round(secondes))
+    if secondes < 60:
+        return f"{secondes} s"
+    minutes = secondes // 60
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d}"
 
 
 def parse_progress(texte: str) -> dict | None:
@@ -292,15 +329,34 @@ def parse_progress(texte: str) -> dict | None:
                                                if session.group(3).strip() else ""))
     else:
         valeur = fraction
+    reste_s = reste_total_s = None
+    vitesse = None
     if tqdm:
-        reste = tqdm.group(4).strip()
-        morceaux.append(f"{tqdm.group(1)} % ({tqdm.group(2)}/{tqdm.group(3)})"
-                        + (f", reste {reste}" if reste and "?" not in reste else ""))
+        ecoule_s = _secondes(tqdm.group(4))
+        reste_s = None if "?" in tqdm.group(5) else _secondes(tqdm.group(5))
+        vitesse = (tqdm.group(6) or "").strip() or None
+        if vitesse and "?" in vitesse:
+            vitesse = None
+        detail = [f"{tqdm.group(1)} % ({tqdm.group(2)}/{tqdm.group(3)})"]
+        if vitesse:
+            detail.append(vitesse)
+        if reste_s is not None:
+            detail.append(f"reste {duree_lisible(reste_s)}")
+        morceaux.append(" · ".join(detail))
+        # Temps restant sur l'ensemble : la session en cours, plus les
+        # suivantes au rythme de celle-ci (écoulé + restant = durée d'une
+        # session). Juste tant que les vidéos ont des durées comparables.
+        if session and reste_s is not None and ecoule_s is not None:
+            restantes = int(session.group(2)) - int(session.group(1))
+            reste_total_s = reste_s + restantes * (ecoule_s + reste_s)
+            if restantes > 0:
+                morceaux.append(f"tout : reste ~{duree_lisible(reste_total_s)}")
     return {"valeur": min(max(valeur, 0.0), 1.0), "texte": " — ".join(morceaux),
             "i": int(session.group(1)) if session else None,
             "n": int(session.group(2)) if session else None,
             "session": session.group(3).strip() or None if session else None,
-            "pct": int(tqdm.group(1)) if tqdm else None}
+            "pct": int(tqdm.group(1)) if tqdm else None,
+            "reste_s": reste_s, "reste_total_s": reste_total_s, "vitesse": vitesse}
 
 
 def progress(project: Path, job_id: str) -> dict | None:
@@ -375,6 +431,9 @@ def start(project: Path, cmd: Command, *, argv: list[str] | None = None) -> Job:
     # Sans ça Python tamponne sa sortie quand elle n'est pas un terminal,
     # et les logs arrivent par blocs au lieu d'arriver ligne à ligne.
     env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    if argv and Path(argv[0]).name.lower().startswith("python"):
+        env.update(_env_supplementaire(cmd))
 
     log_file = open(log_path, "w", encoding="utf-8", buffering=1)
     try:
