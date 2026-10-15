@@ -527,7 +527,8 @@ def check_model_is_trained(dlc_config_path: str) -> None:
 def run_custom(project: Path, session_id: str,
                 no_prompt: bool = False,
                 batch_size: int | None = None,
-                fp16: bool = False) -> None:
+                fp16: bool = False) -> int | None:
+    """Retourne la taille de lot finalement utilisée (réduite en cas de saturation GPU)."""
     try:
         import deeplabcut
     except ImportError:
@@ -563,15 +564,31 @@ def run_custom(project: Path, session_id: str,
     inference_cfg = {"autocast": {"enabled": True}} if fp16 else None
     if fp16:
         print("Inférence en demi-précision (autocast float16)")
-    deeplabcut.analyze_videos(
-        config=dlc_project_config,
-        videos=[str(source)],
-        save_as_csv=True,
-        destfolder=str(output_dir),
-        batch_size=batch_size,
-        inference_cfg=inference_cfg,
-    )
+    # La mémoire d'un lot croît avec la résolution des vidéos : 16 tient sur
+    # 16 Go en 1280 px, pas en pleine résolution. Plutôt qu'un échec à
+    # relancer à la main, on divise le lot par deux jusqu'à ce que ça passe.
+    while True:
+        try:
+            deeplabcut.analyze_videos(
+                config=dlc_project_config,
+                videos=[str(source)],
+                save_as_csv=True,
+                destfolder=str(output_dir),
+                batch_size=batch_size,
+                inference_cfg=inference_cfg,
+            )
+            break
+        except RuntimeError as e:
+            # DLC ré-emballe l'OutOfMemoryError de torch dans un RuntimeError.
+            if "out of memory" not in str(e) or not batch_size or batch_size <= 1:
+                raise
+            import torch
+            torch.cuda.empty_cache()
+            batch_size //= 2
+            print(f"⚠️  Mémoire de la carte graphique saturée : nouvel essai avec "
+                  f"un lot de {batch_size} images.", flush=True)
     print(f"\n✅ Inférence custom terminée : {output_dir}")
+    return batch_size
 
 
 if __name__ == "__main__":
@@ -670,10 +687,12 @@ if __name__ == "__main__":
                     output_dir=args.output_dir,
                 )
             else:
-                run_custom(project, session_id,
-                            no_prompt=getattr(args, "no_prompt", False),
-                            batch_size=args.batch_size,
-                            fp16=args.fp16)
+                # Lot réduit gardé pour les sessions suivantes : même
+                # résolution, même saturation.
+                args.batch_size = run_custom(project, session_id,
+                                             no_prompt=getattr(args, "no_prompt", False),
+                                             batch_size=args.batch_size,
+                                             fp16=args.fp16)
             n_ok += 1
         except (FileNotFoundError, ValueError) as e:
             print(f"❌ {session_id} : {e}", file=sys.stderr)

@@ -15,7 +15,8 @@ import re
 _TABLE: tuple[tuple[str, str, str], ...] = (
     (r"CUDA out of memory|OutOfMemoryError|CUBLAS_STATUS_ALLOC_FAILED",
      "La carte graphique n'a plus assez de mémoire.",
-     "Réduis la taille de lot (option « taille de lot » de l'étape), ou ferme "
+     "Réduis la taille de lot (« Images par lot » ou « Lot d'adaptation » dans "
+     "les Réglages avancés de Pose DLC), ou ferme "
      "les autres programmes qui utilisent le GPU, puis relance."),
     (r"No space left on device",
      "Le disque est plein.",
