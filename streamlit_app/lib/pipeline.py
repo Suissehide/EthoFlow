@@ -13,10 +13,17 @@ Trois règles valent pour toute commande (voir la spec §5.1) :
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from lib.project import SCRIPTS_DIR
+
+# Sous Windows, `conda` dans le PATH est `condabin\conda.bat`, que
+# `CreateProcess` ne lance pas sans shell (FileNotFoundError) — et le
+# lanceur installe Miniforge sans l'ajouter au PATH. Il exporte en revanche
+# `CONDA_EXE` (chemin de `Scripts\conda.exe`), comme `conda activate`.
+CONDA = (os.name == "nt" and os.environ.get("CONDA_EXE")) or "conda"
 
 # Mapping script -> env conda. Voir spec §5.2. Se tromper d'env produit un
 # ImportError après plusieurs minutes d'attente.
@@ -65,7 +72,7 @@ def to_argv(cmd: Command) -> list[str]:
     """
     env = SCRIPT_ENVS[cmd.script]   # KeyError volontaire si script inconnu
     return [
-        "conda", "run", "-n", env,
+        CONDA, "run", "-n", env,
         "python", str(SCRIPTS_DIR / cmd.script),
         *cmd.args,
     ]

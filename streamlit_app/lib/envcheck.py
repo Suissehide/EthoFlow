@@ -16,6 +16,8 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 
+from lib.pipeline import CONDA
+
 # Une sonde par env : le code Python exact exécuté via
 # `conda run -n <env> python -c "<code>"`. Pour `dlc`, une ligne de sortie
 # supplémentaire signale explicitement la disponibilité de CUDA — sans
@@ -59,7 +61,7 @@ def probe_env(env: str, *, timeout: int = TIMEOUT_DEFAUT) -> ProbeResult:
     pas silencieusement).
     """
     code = PROBES[env]
-    argv = ["conda", "run", "-n", env, "python", "-c", code]
+    argv = [CONDA, "run", "-n", env, "python", "-c", code]
     try:
         result = subprocess.run(
             argv, capture_output=True, text=True, timeout=timeout,
