@@ -11,6 +11,11 @@ rem      `diagnose_gpu.py --fix` sinon (une fois par environnement) ;
 rem   4. lance l'app (ethoflow.cmd) : elle s'ouvre dans le navigateur.
 setlocal EnableDelayedExpansion
 chcp 65001 >nul
+rem Python ecrit en UTF-8 meme quand sa sortie est redirigee (>nul) : sans
+rem ca il prend l'encodage Windows (cp1252), plante sur le premier symbole
+rem (✓, ✅) et la verification GPU croit a une panne qui n'existe pas.
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 set "ICI=%~dp0"
 cd /d "%ICI%"
 

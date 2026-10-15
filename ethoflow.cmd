@@ -62,6 +62,17 @@ if not defined STREAMLIT (
     exit /b 1
 )
 
+rem Premier lancement : Streamlit demande une adresse e-mail et attend une
+rem reponse au clavier, serveur bloque, navigateur jamais ouvert. Un fichier
+rem d'identifiants vide supprime la question.
+if not exist "%USERPROFILE%\.streamlit\credentials.toml" (
+    if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit"
+    > "%USERPROFILE%\.streamlit\credentials.toml" (
+        echo [general]
+        echo email = ""
+    )
+)
+
 rem Depuis la racine du depot : Streamlit y lit .streamlit\config.toml (theme).
 cd /d "%ICI%"
 "%STREAMLIT%" run "%APP%" %*

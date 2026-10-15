@@ -205,7 +205,23 @@ def apply_fix(tag: str, nightly: bool) -> int:
     return 0
 
 
+def _sortie_utf8() -> None:
+    """Évite le plantage quand la sortie n'est pas une console.
+
+    Redirigée (`> nul`, pipe), la sortie Python prend sous Windows
+    l'encodage local (cp1252), qui ne connaît pas ✓ ni ✅ : le script
+    plantait alors au premier symbole, avec un code de sortie d'échec, et
+    le lanceur EthoFlow.bat concluait à tort que la GPU était invisible.
+    """
+    for flux in (sys.stdout, sys.stderr):
+        try:
+            flux.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main() -> None:
+    _sortie_utf8()
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--fix", action="store_true",
                         help="Réinstalle torch depuis l'index CUDA adapté "

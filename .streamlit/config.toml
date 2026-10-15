@@ -1,6 +1,9 @@
 [server]
 runOnSave = true
 
+[browser]
+gatherUsageStats = false
+
 [client]
 # Pas de bouton « Deploy » : il chevauchait la colonne Activité.
 toolbarMode = "minimal"

@@ -86,6 +86,14 @@ EOF
     exit 1
 fi
 
+# Premier lancement : Streamlit demande une adresse e-mail et attend une
+# réponse au clavier — serveur bloqué, navigateur jamais ouvert. Un fichier
+# d'identifiants vide supprime la question.
+if [ ! -f "$HOME/.streamlit/credentials.toml" ]; then
+    mkdir -p "$HOME/.streamlit"
+    printf '[general]\nemail = ""\n' > "$HOME/.streamlit/credentials.toml"
+fi
+
 # Depuis la racine du dépôt : Streamlit y lit .streamlit/config.toml (thème),
 # que le lanceur soit appelé d'ici ou via un lien dans le PATH.
 cd "$ICI"
