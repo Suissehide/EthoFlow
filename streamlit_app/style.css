@@ -50,6 +50,16 @@ section[data-testid="stSidebar"] {
 /* Streamlit garde 20 px de marge latérale : sans la retirer, les boutons
    de 44 px n'ont que 32 px et débordent à gauche (icônes décentrées). */
 section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding: 0 !important; }
+/* Streamlit réserve une gouttière de barre de défilement des DEUX côtés du
+   rail (`scrollbar-gutter: stable both-edges`). Sur macOS les barres se
+   superposent au contenu et ne prennent aucune place ; sous Windows (et
+   Linux) elles occupent ~10 px de chaque côté, et toutes les icônes du rail
+   glissent vers la droite. On garde le défilement (petits écrans) mais sans
+   barre visible ni place réservée. */
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+  scrollbar-gutter: auto !important; scrollbar-width: none;
+}
+section[data-testid="stSidebar"] [data-testid="stSidebarContent"]::-webkit-scrollbar { display: none; }
 section[data-testid="stSidebar"] [data-testid="stSidebarUserContent"] {
   padding: 20px 0 16px !important; height: 100vh; width: 72px;
 }
@@ -361,6 +371,15 @@ section[data-testid="stSidebar"] [class*="st-key-nav_"] button::before {
 }
 .st-key-barre_emplacement, [class*="st-key-actions_"] { flex-wrap: nowrap !important; }
 .st-key-barre_emplacement > div:first-child { flex: 1 1 0; min-width: 0; width: auto !important; }
+/* Streamlit donne à chaque bloc markdown une marge basse négative (-1rem)
+   pour resserrer les paragraphes. Dans une rangée centrée verticalement,
+   le bloc se déclare alors 14 px plus court qu'il n'est : il est centré
+   sur sa moitié haute et son texte déborde vers le bas — « Emplacement »
+   collé au bas de sa barre, colonnes des projets décalées par rapport à
+   leurs boutons. On rend la vraie hauteur aux blocs de ces rangées. */
+.st-key-barre_emplacement [data-testid="stMarkdownContainer"],
+.st-key-entete_liste [data-testid="stMarkdownContainer"],
+[class*="st-key-ligne_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
 .ef-emplacement { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 12px; align-items: center; }
 [data-testid="stMarkdownContainer"] .ef-emplacement p.ef-label { font-size: 11px !important; margin: 0; }
 [data-testid="stMarkdownContainer"] p.ef-chemin {
