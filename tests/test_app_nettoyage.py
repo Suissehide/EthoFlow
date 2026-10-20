@@ -115,7 +115,7 @@ def test_expander_outils_avances_replie_par_defaut(tmp_path, monkeypatch):
 # Task 21 — galerie QC des trajectoires
 # ============================================================
 
-def test_galerie_qc_avec_plots_offre_le_selecteur_de_keypoint_et_la_grille(tmp_path, monkeypatch):
+def test_galerie_qc_avec_plots_offre_le_selecteur_de_keypoint_sans_grille(tmp_path, monkeypatch):
     projet = _projet(tmp_path, kind="single", px_per_cm=12.5)
     qc_dir = projet / "data" / "dlc-output" / "_qc_trajectories"
     qc_dir.mkdir(parents=True)
@@ -129,13 +129,10 @@ def test_galerie_qc_avec_plots_offre_le_selecteur_de_keypoint_et_la_grille(tmp_p
     assert set(selectbox["nettoyage_qc_galerie_keypoint"].options) == {
         "tail_base", "paw_front_left",
     }
-    # La grille affiche bien l'image de la session pour le keypoint par défaut
+    # Pas de grille : le seul graphe affiché est celui d'« Avant / après »
     # (st.image n'est pas modélisé comme un type d'élément dédié par AppTest ;
     # il apparaît comme un UnknownElement de type "imgs", un par appel).
-    captions = [
-        img.caption for e in at.get("imgs") for img in e.proto.imgs
-    ]
-    assert any("S1" in c for c in captions), captions
+    assert len(at.get("imgs")) == 1, at.get("imgs")
 
 
 def test_galerie_qc_sans_dossier_dit_qu_il_n_y_a_rien_plutot_que_planter(tmp_path, monkeypatch):

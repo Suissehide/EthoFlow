@@ -533,14 +533,9 @@ def _section_galerie_qc(projet: Path) -> None:
         key="nettoyage_qc_galerie_keypoint",
     )
     st.caption(
-        "Les graphes de chaque point sont conservés séparément."
+        "Les graphes de chaque point sont conservés séparément ; ils "
+        "s'affichent session par session dans « Avant / après nettoyage »."
     )
-
-    sessions_du_keypoint = galerie[keypoint]
-    colonnes = st.columns(3)
-    for i, (session_id, chemin) in enumerate(sorted(sessions_du_keypoint.items())):
-        with colonnes[i % 3]:
-            st.image(str(chemin), caption=session_id, width="stretch")
 
     st.divider()
     _section_regenerer_keypoint(projet, keypoints)
