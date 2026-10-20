@@ -35,6 +35,18 @@ def _libelles_lisibles(dernier: pd.DataFrame, log: bool, bas: float, haut: float
     return all((b - a) / etendue > 0.06 for a, b in zip(pos, pos[1:]))
 
 
+def _axe_x(d: pd.DataFrame, x: str, titre: str, ticks: int, entier: bool) -> alt.X:
+    """Axe x. `entier` (epochs…) : démarre à la première valeur et non à 0,
+    graduations entières seulement (pas de 1.1, 1.2 quand il y a peu de
+    points)."""
+    if not entier:
+        return alt.X(f"{x}:Q", title=titre, axis=alt.Axis(grid=False, tickCount=ticks))
+    bas, haut = int(d[x].min()), int(d[x].max())
+    return alt.X(f"{x}:Q", title=titre,
+                 scale=alt.Scale(domain=[bas, max(haut, bas + 1)], nice=False),
+                 axis=alt.Axis(grid=False, tickCount=ticks, tickMinStep=1, format="d"))
+
+
 def mode() -> str:
     return "dark" if st.context.theme.type == "dark" else "light"
 
@@ -42,7 +54,7 @@ def mode() -> str:
 def lignes(df: pd.DataFrame, x: str, colonnes: dict[str, str], *,
            titre_x: str, titre_y: str, log: bool = False,
            couches_fond: list | None = None, couches_dessus: list | None = None,
-           hauteur: int = 300) -> alt.LayerChart:
+           hauteur: int = 300, x_entier: bool = False) -> alt.LayerChart:
     """Courbes de `colonnes` ({colonne: libellé}) en fonction de `x`.
 
     Survol : réticule vertical + points + infobulle de toutes les séries.
@@ -59,7 +71,7 @@ def lignes(df: pd.DataFrame, x: str, colonnes: dict[str, str], *,
     survol = alt.selection_point(fields=[x], nearest=True, on="pointerover",
                                  empty=False, clear="pointerout")
     base = alt.Chart(longue).encode(
-        x=alt.X(f"{x}:Q", title=titre_x, axis=alt.Axis(grid=False, tickCount=10)),
+        x=_axe_x(longue, x, titre_x, 10, x_entier),
         y=alt.Y("valeur:Q", title=f"{titre_y} (échelle log)" if log else titre_y,
                 scale=echelle, axis=alt.Axis(tickCount=4, gridOpacity=0.5)),
         color=alt.Color("serie:N", title=None, scale=alt.Scale(
@@ -73,7 +85,7 @@ def lignes(df: pd.DataFrame, x: str, colonnes: dict[str, str], *,
         alt.Chart(df).mark_rule(color=NEUTRE).encode(x=f"{x}:Q").transform_filter(survol),
         alt.Chart(df).mark_rule(opacity=0, strokeWidth=12).encode(
             x=f"{x}:Q",
-            tooltip=[alt.Tooltip(f"{x}:Q", title=titre_x)]
+            tooltip=[alt.Tooltip(f"{x}:Q", title=titre_x, format="d" if x_entier else "")]
             + [alt.Tooltip(f"{c}:Q", title=lib, format=".4g") for c, lib in colonnes.items()],
         ).add_params(survol),
     ] + list(couches_dessus or [])
@@ -85,15 +97,15 @@ def lignes(df: pd.DataFrame, x: str, colonnes: dict[str, str], *,
 
 
 def petit_multiple(df: pd.DataFrame, x: str, colonne: str, titre: str, *,
-                   titre_x: str, hauteur: int = 200) -> alt.Chart:
+                   titre_x: str, hauteur: int = 200, x_entier: bool = False) -> alt.Chart:
     """Une seule série, sans légende (le titre la nomme)."""
     df, noms = _champs(df)
     x, colonne = noms[x], noms[colonne]
     return (alt.Chart(df).mark_line(strokeWidth=2, color=SERIES[mode()][0])
-            .encode(x=alt.X(f"{x}:Q", title=titre_x, axis=alt.Axis(grid=False, tickCount=6)),
+            .encode(x=_axe_x(df, x, titre_x, 6, x_entier),
                     y=alt.Y(f"{colonne}:Q", title=None, scale=alt.Scale(zero=False),
                             axis=alt.Axis(tickCount=3, gridOpacity=0.5)),
-                    tooltip=[alt.Tooltip(f"{x}:Q", title=titre_x),
+                    tooltip=[alt.Tooltip(f"{x}:Q", title=titre_x, format="d" if x_entier else ""),
                              alt.Tooltip(f"{colonne}:Q", title=titre, format=".4g")])
             .properties(title=titre, height=hauteur))
 

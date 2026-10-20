@@ -60,12 +60,12 @@ def _entrainement(model_dir: Path) -> None:
 
     if principales:
         st.altair_chart(G.lignes(df, "step", principales, titre_x="Epoch",
-                                 titre_y="Perte totale", log=True), width="stretch")
+                                 titre_y="Perte totale", log=True, x_entier=True), width="stretch")
     if autres:
         grille = st.columns(2)
         for i, c in enumerate(autres):
             grille[i % 2].altair_chart(
-                G.petit_multiple(df, "step", c, _titre_court(c), titre_x="Epoch"),
+                G.petit_multiple(df, "step", c, _titre_court(c), titre_x="Epoch", x_entier=True),
                 width="stretch")
     with st.expander("Comment lire ces courbes", expanded=False):
         st.markdown(

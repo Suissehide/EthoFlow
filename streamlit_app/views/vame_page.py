@@ -360,6 +360,7 @@ def _courbes(projet: Path) -> None:
         G.lignes(df, "epoch", {c: lib for c, lib in (("train", "Train"), ("test", "Test"))
                                if c in df},
                  titre_x="Epoch", titre_y="Loss", log=True, couches_fond=couches_fond,
+                 x_entier=True,
                  couches_dessus=G.repere_vertical(meilleur, "meilleur modèle", "epoch")
                  if meilleur else None),
         width="stretch",
@@ -388,7 +389,8 @@ def _courbes(projet: Path) -> None:
             cols = st.columns(2)
             for i, c in enumerate(presentes):
                 cols[i % 2].altair_chart(
-                    G.petit_multiple(df, "epoch", c, composantes[c], titre_x="Epoch"),
+                    G.petit_multiple(df, "epoch", c, composantes[c], titre_x="Epoch",
+                                     x_entier=True),
                     width="stretch")
     with st.expander("Tableau des losses", expanded=False):
         st.dataframe(df, hide_index=True, width="stretch")
