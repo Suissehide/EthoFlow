@@ -256,6 +256,21 @@ def detect_pose_ref_index(h5_path: Path) -> list[int]:
 # Commandes
 # ============================================================
 
+def liens_possibles(dossier: Path) -> bool:
+    """Le système accepte-t-il un lien symbolique ici ? (Windows : seulement
+    en admin ou en Mode développeur.) On essaie plutôt que de deviner."""
+    import os
+    import tempfile
+    try:
+        with tempfile.TemporaryDirectory(dir=dossier) as tmp:
+            cible = Path(tmp) / "cible"
+            cible.write_bytes(b"")
+            os.symlink(cible, Path(tmp) / "lien")
+        return True
+    except (OSError, NotImplementedError):
+        return False
+
+
 def ensure_project_dir_libre(project_dir: Path, force: bool) -> None:
     """Laisse `project_dir` dans un état où VAME peut créer le projet.
 
@@ -356,17 +371,21 @@ def cmd_setup(args) -> None:
     poses = [str(p) for _, p in pairs]
 
     # Symlink vs copy : sur Windows, les symlinks demandent des privilèges
-    # admin ou le Developer Mode — sinon on prend une OSError 1314. Par défaut
-    # on copie sur Windows et on symlinke ailleurs ; --copy-videos / --no-copy-videos
-    # forcent un choix.
-    import platform
+    # admin ou le Mode développeur — sinon OSError 1314. Par défaut on teste :
+    # lien si le système l'accepte, copie sinon. --copy-videos /
+    # --no-copy-videos forcent un choix.
     if args.copy_videos is None:
-        copy_videos = (platform.system() == "Windows")
+        copy_videos = not liens_possibles(working_directory)
     else:
         copy_videos = args.copy_videos
     if copy_videos:
         print("ℹ️  Mode COPY (les vidéos sont copiées dans le projet, "
               "pas de symlinks).")
+        if args.copy_videos is None:
+            print("   Pour des liens sans copie sous Windows : Paramètres → "
+                  "Système → Espace développeurs → Mode développeur.")
+    else:
+        print("ℹ️  Mode LIEN (les vidéos ne sont pas dupliquées).")
 
     print(f"\nCréation du projet VAME dans {project_dir}...")
     # vame-py 0.13 : init_new_project retourne (config_path, config_dict)
@@ -1001,7 +1020,7 @@ def main() -> None:
     copy_grp.add_argument("--copy-videos", dest="copy_videos",
                           action="store_const", const=True, default=None,
                           help="Copier les vidéos dans le projet (au lieu de symlink). "
-                               "Défaut auto : copy sur Windows, symlink ailleurs.")
+                               "Défaut auto : symlink si le système l'accepte, copie sinon.")
     copy_grp.add_argument("--no-copy-videos", dest="copy_videos",
                           action="store_const", const=False,
                           help="Forcer le symlink (échouera sur Windows sans Developer Mode)")

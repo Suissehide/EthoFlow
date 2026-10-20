@@ -186,9 +186,10 @@ def _section_setup(projet: Path, etat: dict) -> None:
             key="vame_setup_time_window",
             help="Durée que le modèle regarde d'un coup pour décider d'un "
                  "motif, comptée en images de ta vidéo : 30 images = 1 s à "
-                 "30 images par seconde, 1,2 s à 25. Plus court (15) : motifs "
-                 "brefs, plus de transitions ; plus long (60) : motifs amples, "
-                 "les gestes courts se noient.",
+                 "30 images par seconde, 0,6 s à 50. Pour garder ~1 s, mets "
+                 "autant d'images que ta vidéo a d'images par seconde. Plus "
+                 "court : motifs brefs, plus de transitions ; plus long : "
+                 "motifs amples, les gestes courts se noient.",
         )
     col_e, col_c = st.columns(2)
     with col_e:
@@ -214,8 +215,9 @@ def _section_setup(projet: Path, etat: dict) -> None:
         index=0, horizontal=True, key="vame_setup_copie",
         help="Le projet VAME doit contenir les vidéos. Copier prend de la "
              "place disque ; un lien pointe vers l'original sans le dupliquer. "
-             "Auto : copie sous Windows, lien ailleurs (les liens demandent "
-             "le mode développeur sous Windows).",
+             "Auto : lien si le système l'accepte, copie sinon. Sous "
+             "Windows, les liens demandent le Mode développeur (Paramètres "
+             "→ Système → Espace développeurs).",
     )
     force = st.checkbox(
         "Recréer le projet VAME s'il existe déjà",
