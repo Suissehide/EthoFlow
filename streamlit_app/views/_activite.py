@@ -23,9 +23,9 @@ ETATS = {"succeeded": "Terminé", "running": "En cours", "failed": "Échec",
          "cancelled": "Annulé", "interrupted": "Interrompu"}
 
 
-def heure(iso: str | None) -> str:
+def heure(iso: str | None, fmt: str = "%H:%M") -> str:
     try:
-        return datetime.fromisoformat(iso).strftime("%H:%M")
+        return datetime.fromisoformat(iso).strftime(fmt)
     except (TypeError, ValueError):
         return "—"
 
@@ -79,7 +79,7 @@ def _historique(projet: Path, sauf: str | None) -> None:
         lignes.append(
             f'<div class="ef-historique-ligne"><span class="ef-dot" style="background:{couleur}"></span>'
             f"<div><b>{escape(job.label)}</b>"
-            f"<span>{ETATS.get(job.state, job.state)} · {heure(job.ended_at or job.started_at)}</span>"
+            f"<span>{ETATS.get(job.state, job.state)} · {heure(job.ended_at or job.started_at, '%d/%m/%Y %H:%M')}</span>"
             "</div></div>")
     if lignes:
         st.markdown(f'<div class="ef-historique">{"".join(lignes[:6])}</div>',
