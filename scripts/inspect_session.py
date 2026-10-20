@@ -54,10 +54,14 @@ def get_bodypart_columns(df: pd.DataFrame) -> dict[str, dict[str, tuple]]:
     }
 
 
-def analyze_h5(h5_path: Path) -> dict:
+def analyze_h5(h5_path: Path, ignorer: tuple[str, ...] = ()) -> dict:
+    """`ignorer` : points exclus du calcul des images complètes et des
+    trous — typiquement ceux qu'on ne donnera pas à VAME. Leur fiabilité
+    reste dans `per_kp_pct`, pour qu'on voie ce qu'on écarte."""
     df = pd.read_hdf(h5_path)
     n_frames = len(df)
-    by_bp = get_bodypart_columns(df)
+    tous_bp = get_bodypart_columns(df)
+    by_bp = {bp: c for bp, c in tous_bp.items() if bp not in set(ignorer)}
     n_kp = len(by_bp)
 
     # Compte par frame : nb de keypoints non-NaN
@@ -83,6 +87,10 @@ def analyze_h5(h5_path: Path) -> dict:
         gap_lengths = ends - starts
     else:
         gap_lengths = np.array([], dtype=int)
+
+    for bp, cols in tous_bp.items():
+        if bp not in per_kp_pct:
+            per_kp_pct[bp] = float(df[cols["x"]].notna().sum()) / max(n_frames, 1)
 
     return {
         "n_frames": n_frames,

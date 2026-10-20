@@ -108,3 +108,17 @@ def test_verdict_sur_les_images_completes_pas_sur_la_couverture():
     assert v.startswith("❌") and "limité par tail_mid (29 %)" in v
     assert IS.verdict(95.0, {"nose": 0.99}).startswith("✅")
     assert "limité" not in IS.verdict(95.0, {"nose": 0.95})
+
+
+def test_points_ignores_exclus_des_images_completes(tmp_path):
+    """Un point flou à 10 % ne doit plus faire tomber le total s'il est ignoré."""
+    import numpy as np
+    import pandas as pd
+    cols = pd.MultiIndex.from_product([["DLC"], ["nose", "tail_mid"], ["x", "y", "likelihood"]],
+                                      names=["scorer", "bodyparts", "coords"])
+    v = np.ones((20, 6)); v[2:, 3] = np.nan          # tail_mid présent sur 2 images / 20
+    h5 = tmp_path / "s.h5"; pd.DataFrame(v, columns=cols).to_hdf(h5, key="df")
+    assert IS.analyze_h5(h5)["frames_all_valid"] == 2
+    s = IS.analyze_h5(h5, ignorer=("tail_mid",))
+    assert s["frames_all_valid"] == 20 and s["n_kp"] == 1
+    assert s["per_kp_pct"]["tail_mid"] == 0.1        # toujours affiché

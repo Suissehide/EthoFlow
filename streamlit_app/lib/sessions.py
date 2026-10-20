@@ -180,7 +180,7 @@ def arenes_dataframe(meta: dict | None) -> pd.DataFrame:
     return pd.DataFrame(lignes, columns=colonnes)
 
 
-def inspection(project: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def inspection(project: Path, ignorer: tuple[str, ...] = ()) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Bilan de `inspect_session.py` en tableaux, sans passer par un job.
 
     Mêmes fichiers (le `.h5` le plus abouti, ou un par arène) et mêmes
@@ -195,7 +195,7 @@ def inspection(project: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     for session_id in IS.list_sessions(racine):
         fps = IS.get_session_fps(project, session_id)
         for libelle, h5 in IS.resolve_h5_files(racine / session_id, session_id):
-            stats = IS.analyze_h5(h5)
+            stats = IS.analyze_h5(h5, ignorer)
             n = max(stats["n_frames"], 1)
             couverture = 100 * stats["frames_some_valid"] / n
             tous = 100 * stats["frames_all_valid"] / n
@@ -209,7 +209,8 @@ def inspection(project: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
                 "Au moins un point (%)": round(couverture, 1),
                 "Trous": len(trous),
                 "Plus long trou (s)": round(trous.max() / fps, 1) if len(trous) else 0.0,
-                "Verdict": IS.verdict(tous, stats["per_kp_pct"]),
+                "Verdict": IS.verdict(tous, {bp: p for bp, p in stats["per_kp_pct"].items()
+                                             if bp not in set(ignorer)}),
             })
             validite[nom] = {bp: round(100 * p, 1) for bp, p in stats["per_kp_pct"].items()}
     return pd.DataFrame(lignes), pd.DataFrame(validite)

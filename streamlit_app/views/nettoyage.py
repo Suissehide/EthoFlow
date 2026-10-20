@@ -321,10 +321,10 @@ def _section_resume(projet: Path) -> None:
 
 
 @st.cache_data(show_spinner="Lecture des fichiers de poses…", max_entries=8)
-def _inspection_cache(projet: str, signature: tuple):
+def _inspection_cache(projet: str, signature: tuple, ignorer: tuple = ()):
     # `signature` (chemins + dates de modification des .h5) invalide le
     # cache dès qu'un nettoyage ou une inférence réécrit un fichier.
-    return S.inspection(Path(projet))
+    return S.inspection(Path(projet), ignorer)
 
 
 def _section_inspection(projet: Path) -> None:
@@ -338,7 +338,20 @@ def _section_inspection(projet: Path) -> None:
         return
     signature = tuple(sorted((str(h), h.stat().st_mtime)
                              for h in dlc_output_dir(projet).glob("*/*.h5")))
-    sessions, keypoints = _inspection_cache(str(projet), signature)
+    # Points écartés du verdict : ceux qu'on ne donnera pas à VAME. Sans ce
+    # choix, un seul point flou (tail_mid à 2 % sur certaines sessions) fait
+    # tomber la part d'images complètes à presque zéro et masque l'état
+    # réel des autres points.
+    _, tous_kp = _inspection_cache(str(projet), signature)
+    ignorer = tuple(st.multiselect(
+        "Points ignorés dans le calcul",
+        options=sorted(tous_kp.index) if not tous_kp.empty else [],
+        key="nettoyage_kp_ignores",
+        help="Ceux que tu ne donneras pas à VAME. « Tous les points » et le "
+             "verdict sont alors calculés sans eux ; leur fiabilité reste "
+             "affichée dans le second tableau.",
+    ))
+    sessions, keypoints = _inspection_cache(str(projet), signature, ignorer)
     if sessions.empty:
         st.info("Aucune pose estimée pour l'instant : lance d'abord l'étape Pose.")
         return
@@ -346,7 +359,7 @@ def _section_inspection(projet: Path) -> None:
         sessions, hide_index=True, width="stretch",
         column_config={"Tous les points (%)": st.column_config.ProgressColumn(
             "Tous les points (%)", min_value=0, max_value=100, format="%.1f %%",
-            help="Part des images où les 12 points ont une position. "
+            help="Part des images où tous les points (hors points ignorés) ont une position. "
                  "C'est elle qui compte pour VAME.")},
     )
     st.caption("Fiabilité de chaque point du corps (% des images), du moins au plus fiable :")
