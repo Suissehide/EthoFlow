@@ -76,6 +76,8 @@ from interactive import add_no_prompt_arg, prompt_float, prompt_int  # noqa: E40
 # `working_directory=<project>/data/` et `project_name="vame"` —
 # l'API crée alors `<project>/data/vame/`.
 VAME_PROJECT_NAME = "vame"
+# Écrit dans data/processed/ quand `align` a réussi (lu par l'app).
+ALIGN_FAIT = ".ethoflow_align_ok"
 
 
 def vame_config_yaml(project: Path) -> Path:
@@ -507,6 +509,10 @@ def cmd_align(args) -> None:
         orientation_reference_keypoint=nose_kp,
         **steps,
     )
+    # Témoin pour l'app : `init_new_project` écrit déjà les
+    # data/processed/*_processed.nc, donc leur présence ne prouve pas que
+    # l'alignement a tourné.
+    (vame_dir(project) / "data" / "processed" / ALIGN_FAIT).touch()
     print("\n✅ Preprocessing terminé. "
           "Étape suivante : python scripts/run_vame.py trainset")
 

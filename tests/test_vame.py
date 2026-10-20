@@ -70,10 +70,18 @@ def test_stage_status_align_no_project(project):
 
 
 def test_stage_status_align_complete(project, vame_project):
-    """Fichier processed marque align comme fait."""
+    """Le témoin de `run_vame.py align` marque align comme fait."""
+    (vame_project / "data" / "processed").mkdir(parents=True)
+    (vame_project / "data" / "processed" / ".ethoflow_align_ok").touch()
+    assert V.stage_status(project)["align"] is True
+
+
+def test_stage_status_align_pas_fait_juste_apres_setup(project, vame_project):
+    """`init_new_project` écrit déjà les *_processed.nc : ça ne prouve pas
+    l'alignement (l'app disait « Aligner les poses » fait avant tout clic)."""
     (vame_project / "data" / "processed").mkdir(parents=True)
     (vame_project / "data" / "processed" / "S1_processed.nc").write_text("mock")
-    assert V.stage_status(project)["align"] is True
+    assert V.stage_status(project)["align"] is False
 
 
 def test_training_losses_et_meilleur_epoch(project, vame_project):

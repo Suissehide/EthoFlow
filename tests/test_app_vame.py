@@ -157,6 +157,7 @@ def test_align_ne_pretend_pas_que_toutes_les_sessions_sont_faites(tmp_path, monk
     vame = _init_vame(projet)
     (vame / "data" / "processed").mkdir(parents=True)
     (vame / "data" / "processed" / "S1_processed.nc").write_text("mock")
+    (vame / "data" / "processed" / ".ethoflow_align_ok").touch()
 
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 

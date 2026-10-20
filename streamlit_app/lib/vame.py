@@ -117,10 +117,15 @@ def session_has_labels(project: Path, session: str) -> bool:
 def stage_status(project: Path) -> dict[str, bool]:
     """Ce qui est déjà fait, pour le stepper de la page VAME."""
     vp = vame_project(project)
+    trainset = (vp / "data" / "train" / "train_seq.npy").exists()
     return {
         "setup": is_initialised(project),
-        "align": any(vp.glob("data/processed/*_processed.nc")),
-        "trainset": (vp / "data" / "train" / "train_seq.npy").exists(),
+        # `init_new_project` écrit déjà data/processed/*_processed.nc : leur
+        # présence ne prouve pas l'alignement. `run_vame.py align` laisse un
+        # témoin ; un jeu d'entraînement existant (projets alignés avant le
+        # témoin) le prouve aussi.
+        "align": (vp / "data" / "processed" / ".ethoflow_align_ok").exists() or trainset,
+        "trainset": trainset,
         "train": any((vp / "model" / "best_model").glob("*.pkl")),
         "segment": any(vp.glob("results/*/*/*/*_label_*.npy")),
     }
