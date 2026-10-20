@@ -14,6 +14,7 @@ import yaml
 from streamlit.testing.v1 import AppTest
 
 from lib import project as P
+from lib.icons import lucide_data_uri
 
 REPO = Path(__file__).resolve().parent.parent
 APP_PY = str(REPO / "streamlit_app" / "app.py")
@@ -241,6 +242,8 @@ def test_bilan_qualite_en_tableau(tmp_path, monkeypatch):
     # nose absent sur 5 images sur 20 : 75 % d'images complètes. Le verdict
     # suit cette part-là, pas la couverture à 100 %, et nomme le point en cause.
     assert bilan.loc[0, "Tous les points (%)"] == 75.0
-    assert bilan.loc[0, "Verdict"].startswith("✓  bon") and "limité par nose" in bilan.loc[0, "Verdict"]
+    assert bilan.loc[0, "Verdict"].startswith("bon") and "limité par nose" in bilan.loc[0, "Verdict"]
+    # L'emoji ✓ du script devient l'icône Lucide « check », en vert.
+    assert bilan.loc[0, " "] == lucide_data_uri("check", "2f9567")
     par_kp = next(d.value for d in at.dataframe if "S1" in d.value.columns)
     assert par_kp.loc["nose", "S1"] == 75.0

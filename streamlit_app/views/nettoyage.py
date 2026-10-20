@@ -27,7 +27,7 @@ from lib.config import (
     px_per_cm,
     require_project,
 )
-from lib.icons import lucide_title
+from lib.icons import lucide_data_uri, lucide_title
 from lib.project import dlc_bodyparts
 from lib import sessions as S
 from views import _job
@@ -327,6 +327,26 @@ def _inspection_cache(projet: str, signature: tuple, ignorer: tuple = ()):
     return S.inspection(Path(projet), ignorer)
 
 
+# Emoji en tête du verdict du script (lisible en terminal) → icône Lucide
+# dans l'app. Mêmes couleurs que la colonne Activité.
+_ICONES_VERDICT = {
+    "✅": ("circle-check", "2f9567"), "✓": ("check", "2f9567"),
+    "⚠️": ("triangle-alert", "c27a12"), "❌": ("circle-x", "c9473f"),
+}
+
+
+def _verdict_lucide(sessions):
+    """Remplace l'emoji du verdict par une colonne d'icônes, juste avant lui."""
+    icones, textes = [], []
+    for v in sessions["Verdict"]:
+        emoji = next((e for e in _ICONES_VERDICT if v.startswith(e)), None)
+        icones.append(lucide_data_uri(*_ICONES_VERDICT[emoji]) if emoji else None)
+        textes.append(v[len(emoji):].strip() if emoji else v)
+    sessions = sessions.assign(Verdict=textes)
+    sessions.insert(sessions.columns.get_loc("Verdict"), " ", icones)
+    return sessions
+
+
 def _section_inspection(projet: Path) -> None:
     st.markdown(lucide_title("search", "Bilan qualité par session"), unsafe_allow_html=True)
     st.caption(
@@ -356,8 +376,9 @@ def _section_inspection(projet: Path) -> None:
         st.info("Aucune pose estimée pour l'instant : lance d'abord l'étape Pose.")
         return
     st.dataframe(
-        sessions, hide_index=True, width="stretch",
-        column_config={"Tous les points (%)": st.column_config.ProgressColumn(
+        _verdict_lucide(sessions), hide_index=True, width="stretch",
+        column_config={" ": st.column_config.ImageColumn(" ", width=28),
+                       "Tous les points (%)": st.column_config.ProgressColumn(
             "Tous les points (%)", min_value=0, max_value=100, format="%.1f %%",
             help="Part des images où tous les points (hors points ignorés) ont une position. "
                  "C'est elle qui compte pour VAME.")},
