@@ -81,53 +81,60 @@ def mask_low_likelihood(x: np.ndarray, y: np.ndarray, likelihood: np.ndarray,
     return likelihood < threshold
 
 
+def _sauts(x: np.ndarray, y: np.ndarray, seuil_px_par_image: float
+           ) -> tuple[np.ndarray, np.ndarray]:
+    """Indices des images valides, et pour chacune si on y arrive par un
+    saut (déplacement depuis l'image valide précédente > seuil × écart)."""
+    valides = np.where(~(np.isnan(x) | np.isnan(y)))[0]
+    saut = np.zeros(len(valides), dtype=bool)
+    if len(valides) >= 2:
+        d = np.hypot(np.diff(x[valides]), np.diff(y[valides]))
+        saut[1:] = d > seuil_px_par_image * np.diff(valides)
+    return valides, saut
+
+
 def detect_velocity_outliers(x: np.ndarray, y: np.ndarray, fps: float,
                               px_per_cm: float,
-                              max_speed_ms: float = DEFAULT_MAX_SPEED_MS
+                              max_speed_ms: float = DEFAULT_MAX_SPEED_MS,
+                              max_excursion_s: float = 1.0,
                               ) -> np.ndarray:
-    """Marque les frames où le keypoint se déplace trop vite pour être vrai.
+    """Marque les excursions : le point saute ailleurs, y reste, puis revient.
 
-    Convertit le déplacement inter-frame en m/s :
+    Un saut se mesure entre deux images valides consécutives :
 
-        vitesse = (distance_px / px_per_cm / 100) * fps
+        vitesse = (distance_px / px_per_cm / 100) * fps / écart_en_images
 
-    Args:
-        x, y: coordonnées du keypoint (NaN autorisés)
-        fps: framerate de la vidéo
-        px_per_cm: échelle de la caméra (voir calibrate_scale.py)
-        max_speed_ms: vitesse au-delà de laquelle on considère le
-            tracking cassé
+    Première version : seule l'image d'ARRIVÉE de chaque saut était
+    marquée. Quand le label restait plusieurs images sur le point faux,
+    les images du milieu passaient (vitesse nulle) et c'était l'image du
+    retour — la vraie position — qui était marquée. D'où les traits droits
+    vers un point fixe qui restaient sur le graphe de contrôle.
 
-    Returns:
-        Masque booléen : True = frame suspecte à corriger.
-
-    Note : quand une frame saute, c'est la frame d'ARRIVÉE qui est
-    marquée (le saut se mesure entre i-1 et i). Si le label revient
-    ensuite à sa vraie position, on marque aussi la frame suivante —
-    l'aller-retour est symétrique et les deux sont fausses.
+    Maintenant : entre deux sauts séparés de moins de `max_excursion_s`,
+    tout le segment est faux (l'aller et le séjour) ; l'image du retour,
+    elle, est gardée. Un saut sans retour dans ce délai n'est pas une
+    excursion (reprise de suivi, vrai déplacement) : on ne marque rien.
     """
     n = len(x)
     flagged = np.zeros(n, dtype=bool)
-    if n < 2 or px_per_cm <= 0:
+    if n < 2 or px_per_cm <= 0 or fps <= 0:
         return flagged
 
-    dx = np.diff(x)
-    dy = np.diff(y)
-    dist_px = np.sqrt(dx ** 2 + dy ** 2)
-    # px → cm → m, puis × fps pour des m/s
-    speed_ms = (dist_px / px_per_cm / 100.0) * fps
-
-    # NaN → pas de jugement (la frame est déjà traitée par le cutoff)
-    too_fast = np.nan_to_num(speed_ms, nan=0.0) > max_speed_ms
-    # Le saut i→i+1 incrimine la frame d'arrivée
-    flagged[1:] |= too_fast
+    seuil = max_speed_ms * 100.0 * px_per_cm / fps   # px par image
+    valides, saut = _sauts(x, y, seuil)
+    max_exc = max(1, int(round(max_excursion_s * fps)))
+    pos_sauts = np.where(saut)[0]                      # positions dans `valides`
+    for a, b in zip(pos_sauts[:-1], pos_sauts[1:]):
+        if valides[b] - valides[a] <= max_exc:
+            flagged[valides[a:b]] = True
     return flagged
 
 
 def detect_sticky_points(x: np.ndarray, y: np.ndarray,
                           tol_px: float = 3.0,
                           min_occurrences: int = 20,
-                          max_fraction: float = 0.25
+                          max_fraction: float = 0.25,
+                          jump_px: float = 50.0,
                           ) -> tuple[np.ndarray, list[tuple[float, float]]]:
     """Détecte les coordonnées où le keypoint atterrit anormalement souvent.
 
@@ -147,6 +154,18 @@ def detect_sticky_points(x: np.ndarray, y: np.ndarray,
             plus que cette fraction de la session, c'est probablement
             un vrai comportement stationnaire (souris immobile dans un
             coin), pas un artefact. On l'ignore.
+        jump_px: distance minimale (px, en une image) pour qu'une arrivée
+            sur la case compte comme un saut.
+
+    Critère : une case est un point collant si on y ARRIVE surtout par des
+    sauts (au moins 3, et au moins la moitié des arrivées). Première
+    version : « visites dispersées dans le temps » (écart médian > 2
+    images). Une souris immobile fait trembler son label entre cases
+    voisines de 3 px, donc ses visites d'une case sont entrecoupées : elle
+    était prise pour un artefact (713 images retirées sur une session où
+    la souris reste dans un coin). À l'inverse, un label qui saute vers un
+    point fixe et y reste 10 images faisait des visites contiguës, prises
+    pour de l'immobilité. Le tremblement arrive de 3 px, l'artefact de loin.
 
     Returns:
         (masque booléen des frames concernées, liste des points détectés)
@@ -164,10 +183,20 @@ def detect_sticky_points(x: np.ndarray, y: np.ndarray,
     gx[valid] = np.round(x[valid] / tol_px)
     gy[valid] = np.round(y[valid] / tol_px)
 
-    keys = {}
-    for i in np.where(valid)[0]:
+    valides = np.where(valid)[0]
+    # Distance depuis l'image valide précédente (inf pour la première).
+    d_prec = np.full(len(valides), np.inf)
+    d_prec[1:] = np.hypot(np.diff(x[valides]), np.diff(y[valides]))
+
+    keys: dict[tuple, list[int]] = {}
+    arrivees: dict[tuple, list[int]] = {}   # 1 = arrivée par saut, 0 = de près
+    prec = None
+    for j, i in enumerate(valides):
         k = (gx[i], gy[i])
         keys.setdefault(k, []).append(i)
+        if k != prec:   # nouvelle visite de cette case
+            arrivees.setdefault(k, []).append(int(d_prec[j] > jump_px))
+        prec = k
 
     sticky_points: list[tuple[float, float]] = []
     n_valid = int(valid.sum())
@@ -177,14 +206,11 @@ def detect_sticky_points(x: np.ndarray, y: np.ndarray,
         if len(idx) / n_valid > max_fraction:
             # Trop fréquent pour être un artefact — comportement réel
             continue
-        # Un vrai point collant est visité de manière DISPERSÉE dans le
-        # temps (le label y saute puis revient). Un comportement
-        # stationnaire réel occupe des frames contiguës.
-        idx_arr = np.array(idx)
-        gaps = np.diff(idx_arr)
-        if len(gaps) and np.median(gaps) <= 2:
-            # Frames quasi contiguës → immobilité réelle, on laisse
+        sauts = sum(arrivees.get(k, []))
+        if sauts < 3 or sauts < 0.5 * len(arrivees.get(k, [])):
+            # On y arrive de près : immobilité ou passage réel
             continue
+        idx_arr = np.array(idx)
         flagged[idx_arr] = True
         sticky_points.append((float(np.nanmedian(x[idx_arr])),
                                float(np.nanmedian(y[idx_arr]))))
