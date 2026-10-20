@@ -100,3 +100,11 @@ def test_inspection_en_tableaux(dlc_out, tmp_path):
     assert list(sessions["Session"]) == ["BV-961"]
     assert sessions.loc[0, "Fichier"] == f"BV-961{DLC_SUFFIX}.h5"
     assert "Verdict" in sessions and list(keypoints.columns) == ["BV-961"]
+
+
+def test_verdict_sur_les_images_completes_pas_sur_la_couverture():
+    """Couverture à 100 % mais un tiers d'images complètes : pas « excellent »."""
+    v = IS.verdict(33.0, {"nose": 0.99, "tail_mid": 0.29, "tail_base": 1.0})
+    assert v.startswith("❌") and "limité par tail_mid (29 %)" in v
+    assert IS.verdict(95.0, {"nose": 0.99}).startswith("✅")
+    assert "limité" not in IS.verdict(95.0, {"nose": 0.95})

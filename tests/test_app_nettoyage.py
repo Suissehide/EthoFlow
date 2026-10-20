@@ -240,6 +240,10 @@ def test_bilan_qualite_en_tableau(tmp_path, monkeypatch):
     at.toggle(key="nettoyage_inspection").set_value(True).run()
     assert not at.exception, at.exception
     bilan = next(d.value for d in at.dataframe if "Verdict" in d.value.columns)
-    assert bilan.loc[0, "Session"] == "S1" and bilan.loc[0, "Couverture (%)"] == 100.0
+    assert bilan.loc[0, "Session"] == "S1" and bilan.loc[0, "Au moins un point (%)"] == 100.0
+    # nose absent sur 5 images sur 20 : 75 % d'images complètes. Le verdict
+    # suit cette part-là, pas la couverture à 100 %, et nomme le point en cause.
+    assert bilan.loc[0, "Tous les points (%)"] == 75.0
+    assert bilan.loc[0, "Verdict"].startswith("✓  bon") and "limité par nose" in bilan.loc[0, "Verdict"]
     par_kp = next(d.value for d in at.dataframe if "S1" in d.value.columns)
     assert par_kp.loc["nose", "S1"] == 75.0

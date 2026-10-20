@@ -344,16 +344,23 @@ def _section_inspection(projet: Path) -> None:
         return
     st.dataframe(
         sessions, hide_index=True, width="stretch",
-        column_config={"Couverture (%)": st.column_config.ProgressColumn(
-            "Couverture (%)", min_value=0, max_value=100, format="%.1f %%")},
+        column_config={"Tous les points (%)": st.column_config.ProgressColumn(
+            "Tous les points (%)", min_value=0, max_value=100, format="%.1f %%",
+            help="Part des images où les 12 points ont une position. "
+                 "C'est elle qui compte pour VAME.")},
     )
     st.caption("Fiabilité de chaque point du corps (% des images), du moins au plus fiable :")
     st.dataframe(keypoints.loc[keypoints.mean(axis=1).sort_values().index],
                  width="stretch")
     with st.expander("Comment lire ce bilan"):
         st.markdown(
-            "- **Verdict** : d'après la couverture. 90 % ou plus excellent, 80 % bon, "
-            "70 % limite, en dessous insuffisant.\n"
+            "- **Tous les points** : part des images où chaque point du corps a une "
+            "position. VAME a besoin de tous ses points sur chaque image : c'est "
+            "l'indicateur qui compte. **Au moins un point** sert seulement à repérer "
+            "les images où l'animal est perdu entièrement.\n"
+            "- **Verdict** : d'après *tous les points*. 90 % ou plus excellent, 75 % "
+            "bon, 50 % moyen, en dessous insuffisant. Il nomme le point qui limite : "
+            "c'est presque toujours lui seul qui fait chuter le total.\n"
             "- **Plus long trou** : un trou de plusieurs secondes est une occlusion "
             "ou une perte de suivi. VAME risque d'en faire un motif à lui tout seul.\n"
             "- **Points les moins fiables** (en haut du second tableau) : souvent une "

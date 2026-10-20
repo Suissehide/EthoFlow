@@ -95,14 +95,31 @@ def analyze_h5(h5_path: Path) -> dict:
     }
 
 
-def verdict(coverage_pct: float) -> str:
-    if coverage_pct >= 90:
-        return "✅ excellent — VAME va tourner sans souci"
-    if coverage_pct >= 80:
-        return "✓  bon — VAME OK"
-    if coverage_pct >= 70:
-        return "⚠️  marginal — VAME peut donner des résultats bruyants"
-    return "❌ insuffisant — envisage de baisser --likelihood-threshold ou fine-tune DLC"
+def verdict(tous_kp_pct: float, per_kp_pct: dict[str, float] | None = None) -> str:
+    """Verdict pour VAME, sur la part d'images où TOUS les points sont là.
+
+    Première version : verdict sur la « couverture » — images avec AU MOINS
+    un point. Sur des poses nettoyées elle vaut toujours ~100 % (tail_base
+    est trouvé partout), et chaque session sortait « excellent » même avec
+    un tiers seulement d'images complètes. Or VAME a besoin de tous ses
+    points sur chaque image : c'est cette part-là qui compte.
+
+    `per_kp_pct` (fractions 0-1) permet de nommer le point qui limite —
+    l'information utile, puisqu'en général un seul point fait chuter le
+    total et qu'on peut le retirer des features VAME.
+    """
+    if tous_kp_pct >= 90:
+        texte = "✅ excellent — VAME va tourner sans souci"
+    elif tous_kp_pct >= 75:
+        texte = "✓  bon — VAME OK"
+    elif tous_kp_pct >= 50:
+        texte = "⚠️  moyen — trous comblés par interpolation, motifs plus bruités"
+    else:
+        texte = "❌ insuffisant — moins d'une image sur deux complète"
+    if per_kp_pct and tous_kp_pct < 90:
+        bp, p = min(per_kp_pct.items(), key=lambda kv: kv[1])
+        texte += f" · limité par {bp} ({100 * p:.0f} %)"
+    return texte
 
 
 def print_report(arena_label: str, stats: dict, fps: float) -> None:
@@ -135,7 +152,8 @@ def print_report(arena_label: str, stats: dict, fps: float) -> None:
                                             for bp, p in sorted_kp[:3]))
     print(f"      bottom 3 : " + ", ".join(f"{bp}={100*p:.0f}%"
                                             for bp, p in sorted_kp[-3:]))
-    print(f"    Verdict : {verdict(coverage)}")
+    tous = 100 * stats["frames_all_valid"] / n if n else 0
+    print(f"    Verdict : {verdict(tous, stats['per_kp_pct'])}")
 
 
 def get_session_fps(project: Path, session_id: str, default: float = 25.0) -> float:
