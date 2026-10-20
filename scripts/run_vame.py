@@ -382,8 +382,8 @@ def cmd_setup(args) -> None:
         print("ℹ️  Mode COPY (les vidéos sont copiées dans le projet, "
               "pas de symlinks).")
         if args.copy_videos is None:
-            print("   Pour des liens sans copie sous Windows : Paramètres → "
-                  "Système → Espace développeurs → Mode développeur.")
+            print("   Pour des liens sans copie sous Windows : Win+R → "
+                  "ms-settings:developers → activer « Mode développeur ».")
     else:
         print("ℹ️  Mode LIEN (les vidéos ne sont pas dupliquées).")
 

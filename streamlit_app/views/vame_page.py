@@ -216,8 +216,8 @@ def _section_setup(projet: Path, etat: dict) -> None:
         help="Le projet VAME doit contenir les vidéos. Copier prend de la "
              "place disque ; un lien pointe vers l'original sans le dupliquer. "
              "Auto : lien si le système l'accepte, copie sinon. Sous "
-             "Windows, les liens demandent le Mode développeur (Paramètres "
-             "→ Système → Espace développeurs).",
+             "Windows, les liens demandent le Mode développeur (Win+R → "
+             "ms-settings:developers).",
     )
     force = st.checkbox(
         "Recréer le projet VAME s'il existe déjà",
