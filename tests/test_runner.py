@@ -467,3 +467,16 @@ def test_restart_reprend_la_meme_ligne_de_commande(project):
     relance = _attendre_fin(project)
     assert relance.job_id != rate.job_id
     assert (relance.argv, relance.label, relance.script) == (rate.argv, rate.label, rate.script)
+
+
+def test_progression_hmm_apres_barre_a_100():
+    """Segment VAME : après la barre des vecteurs latents (100 %), hmmlearn
+    affiche ses itérations. La page restait figée à 100 %."""
+    from lib.runner import parse_progress
+    log = ("100%|██████████| 938/938 [00:03<00:00, 313.51it/s]\n"
+           "INFO --- Using a HMM as segmentation algorithm!\n"
+           "         1 -134838363.83656350             +nan\n"
+           "        26 -93965186.17543153  +60013.88134134\n")
+    p = parse_progress(log)
+    assert p["valeur"] == 0.26
+    assert "itération 26" in p["texte"] and "100 %" not in p["texte"]

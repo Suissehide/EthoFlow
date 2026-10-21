@@ -274,6 +274,14 @@ _TQDM = re.compile(r"(\d{1,3})%\|[^|]*\|\s*([\d.]+[kMG]?)/([\d.]+[kMG]?)"
                    r"\s*\[([^<\]]*)<([^,\]]*)(?:,\s*([^\]]*))?")
 
 
+# `   26 -93965186.17543153  +60013.88134134` : itération de hmmlearn
+# (segment VAME, `verbose=True`). Groupes : itération, log-vraisemblance, gain.
+_HMM = re.compile(r"^\s*(\d+)\s+(-?\d+\.\d+)\s+([+-](?:\d+\.\d+|nan))\s*$")
+# VAME crée son GaussianHMM avec n_iter=100 ; il s'arrête avant si le gain
+# passe sous la tolérance.
+HMM_ITER_MAX = 100
+
+
 def _secondes(horloge: str) -> int | None:
     """`02:40` / `1:05:12` (format tqdm) -> secondes ; None si illisible."""
     try:
@@ -309,15 +317,30 @@ def parse_progress(texte: str) -> dict | None:
     session en cours) / N. Une barre tqdm d'une session précédente ne
     compte jamais pour la suivante.
     """
-    session = tqdm = None
+    session = tqdm = hmm = None
     for segment in re.split(r"[\r\n]", texte):
         m = _SESSION.match(segment.strip())
         if m:
-            session, tqdm = m, None
+            session, tqdm, hmm = m, None, None
             continue
         t = _TQDM.search(segment)
         if t:
-            tqdm = t
+            tqdm, hmm = t, None
+            continue
+        h = _HMM.match(segment)
+        if h:
+            hmm = h
+    if hmm is not None and session is None:
+        # Après la barre des vecteurs latents (restée à 100 %), VAME ajuste
+        # le HMM : sans ce cas, la page affichait 100 % pendant des minutes.
+        it = int(hmm.group(1))
+        gain = hmm.group(3)
+        texte_hmm = f"Ajustement du HMM — itération {it} ({HMM_ITER_MAX} max)"
+        if "nan" not in gain:
+            texte_hmm += f" · gain {float(gain):,.0f}".replace(",", " ")
+        return {"valeur": min(it / HMM_ITER_MAX, 1.0), "texte": texte_hmm,
+                "i": None, "n": None, "session": None, "pct": None,
+                "reste_s": None, "reste_total_s": None, "vitesse": None}
     if session is None and tqdm is None:
         return None
     fraction = int(tqdm.group(1)) / 100 if tqdm else 0.0
