@@ -97,7 +97,7 @@ def motif_usage_df(project: Path, algo: str) -> pd.DataFrame:
         return pd.DataFrame(columns=colonnes)
     lignes: list[dict] = []
     for npy in sorted(results.glob(f"*/*/{algo}/motif_usage_*.npy")):
-        session = npy.parents[2].name
+        session = session_projet(npy.parents[2].name)
         try:
             arr = np.asarray(np.load(npy), dtype=float).ravel()
         except Exception:
@@ -109,9 +109,27 @@ def motif_usage_df(project: Path, algo: str) -> pd.DataFrame:
     return pd.DataFrame(lignes, columns=colonnes)
 
 
+_SUFFIXES_POSES = ("_clean", "_filtered")
+
+
+def session_projet(nom_vame: str) -> str:
+    """Nom VAME → session du projet. En bottomview, VAME nomme la session
+    d'après le .h5 donné au setup : `BV-OF-M1-M01_clean` pour la session
+    `BV-OF-M1-M01`. Sans ce retrait, aucune session n'était reconnue
+    comme découpée (0/48) et l'étape Motifs restait fermée."""
+    for suffixe in _SUFFIXES_POSES:
+        if nom_vame.endswith(suffixe):
+            return nom_vame[: -len(suffixe)]
+    return nom_vame
+
+
 def session_has_labels(project: Path, session: str) -> bool:
-    results = vame_project(project) / "results" / session
-    return results.is_dir() and any(results.glob("*/*/*_label_*.npy"))
+    results = vame_project(project) / "results"
+    for nom in (session, *(session + s for s in _SUFFIXES_POSES)):
+        d = results / nom
+        if d.is_dir() and any(d.glob("*/*/*_label_*.npy")):
+            return True
+    return False
 
 
 def stage_status(project: Path) -> dict[str, bool]:

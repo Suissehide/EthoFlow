@@ -621,7 +621,12 @@ def find_segmentations(project_path: Path, algo: str, n_clusters: int | None) ->
 
 
 def parse_session_name(name: str) -> tuple[str, str]:
-    """'OF-M1-20251010-V01_A1' → ('OF-M1-20251010-V01', 'A1')."""
+    """'OF-M1-20251010-V01_A1' → ('OF-M1-20251010-V01', 'A1').
+
+    Bottomview : VAME nomme la session d'après le .h5 donné au setup,
+    soit 'BV-OF-M1-M01_clean' → ('BV-OF-M1-M01', '').
+    """
+    name = re.sub(r"_(clean|filtered)$", "", name)
     m = re.match(r"^(.*)_([Aa]\d)$", name)
     if not m:
         return name, ""

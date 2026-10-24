@@ -104,3 +104,24 @@ def test_training_losses_et_meilleur_epoch(project, vame_project):
 def test_training_losses_absent(project, vame_project):
     from lib import vame as VA
     assert VA.training_losses(project) is None
+
+
+def test_session_bottomview_nommee_d_apres_le_clean_h5(project, vame_project):
+    """VAME nomme la session `BV-X_clean` (nom du .h5) : elle doit compter
+    pour la session `BV-X` du projet, sinon l'étape Motifs reste fermée."""
+    import numpy as np
+    d = vame_project / "results" / "BV-X_clean" / "VAME" / "hmm-15"
+    d.mkdir(parents=True)
+    np.save(d / "15_hmm_label_BV-X_clean.npy", np.zeros(10, dtype=int))
+    np.save(d / "motif_usage_BV-X_clean.npy", np.ones(15))
+    assert V.session_has_labels(project, "BV-X")
+    assert "BV-X" in set(V.motif_usage_df(project, "hmm-15")["session"])
+
+
+def test_parse_session_name_retire_clean():
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+    from analyze_vame import parse_session_name
+    assert parse_session_name("BV-OF-M1-M01_clean") == ("BV-OF-M1-M01", "")
+    assert parse_session_name("OF-M1-V01_A1") == ("OF-M1-V01", "A1")
