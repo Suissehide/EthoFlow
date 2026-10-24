@@ -75,6 +75,16 @@ def set_fields(project: Path, motif_id: int, **champs: str) -> None:
     save(project, df)
 
 
+def clips_existent(project: Path) -> bool:
+    """Au moins un clip de motif généré (mêmes motifs que
+    `run_vame.find_motif_video`)."""
+    results = vame_project(project) / "results"
+    if not results.is_dir():
+        return False
+    return any(next(results.glob(motif), None) is not None
+               for motif in ("**/*motif_*.mp4", "**/*motif_*.avi"))
+
+
 def video_path(project: Path, row) -> Path | None:
     """Chemin absolu du clip, ou None s'il n'existe pas.
 

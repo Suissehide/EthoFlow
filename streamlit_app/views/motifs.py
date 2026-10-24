@@ -61,9 +61,15 @@ def _section_generation(projet: Path) -> None:
             projet, "Générer les clips et la fiche", cmd, cle="btn_motifs_videos",
             help="Long : un clip vidéo par motif, et la fiche à remplir.",
         )
+        # Sans clips, ce bouton n'a pas de sens (la fiche pointe vers les
+        # clips) et son job échouait : on le bloque en le disant.
+        sans_clips = not ML.clips_existent(projet)
         _job.bouton_lancer(
             projet, "Refaire la fiche seule", cmd_fiche, cle="btn_motifs_labels",
-            type="secondary", help="Rapide : seulement si les clips existent déjà.",
+            type="secondary", disabled=sans_clips,
+            help=("Génère d'abord les clips avec le bouton à gauche : il crée "
+                  "aussi la fiche." if sans_clips
+                  else "Rapide : refait la fiche sans regénérer les clips."),
         )
     _widgets.details_techniques(cmd, notes=[
         "Fiche : `data/vame/motif_labels.csv` ; clips : "
