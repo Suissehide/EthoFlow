@@ -348,8 +348,11 @@ def parse_progress(texte: str) -> dict | None:
     if session:
         i, n = int(session.group(1)), int(session.group(2))
         valeur = (i - 1 + fraction) / max(n, 1)
-        morceaux.append(f"Session {i}/{n}" + (f" · {session.group(3).strip()}"
-                                               if session.group(3).strip() else ""))
+        nom = session.group(3).strip()
+        if nom == "clips de motifs":   # run_vame.py motif-videos
+            morceaux.append(f"Clip {i}/{n}")
+        else:
+            morceaux.append(f"Session {i}/{n}" + (f" · {nom}" if nom else ""))
     else:
         valeur = fraction
     reste_s = reste_total_s = None

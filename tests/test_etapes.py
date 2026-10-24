@@ -94,3 +94,9 @@ def test_une_session_en_retard_garde_l_etape_ouverte(project, monkeypatch):
     etats = _etats(E.etat_pipeline(project))
     assert etats["Vidéos & calibration"] == ("done", "2/2")
     assert etats["Pose (DLC)"] == ("todo", "1/2")
+
+
+def test_motif_videos_releve_de_l_etape_motifs():
+    from lib.etapes import etape_du_script
+    assert etape_du_script("run_vame.py", ["--project-dir", "p", "motif-videos"]).n == 7
+    assert etape_du_script("run_vame.py", ["--project-dir", "p", "train"]).n == 6

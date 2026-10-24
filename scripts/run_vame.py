@@ -911,12 +911,61 @@ def write_motif_labels_csv(project: Path, vame_project: Path,
     return out_path
 
 
+def _suivre_clips(project: Path, config: dict, periode_s: float = 3.0):
+    """Affiche `[k/N] clips de motifs` à chaque nouveau clip.
+
+    VAME n'affiche qu'une barre par clip : l'app ne voyait que l'avancement
+    du clip en cours, jamais celui de l'ensemble (sessions × motifs). Le
+    repère `[k/N]` est celui que l'app sait lire, la barre de VAME donnant
+    la fraction du clip en cours. On compte les clips écrits depuis le
+    lancement (une relance réécrit les anciens).
+    """
+    import threading
+    import time
+
+    n, algos = read_vame_clusters(project)
+    sessions = config.get("session_names") or []
+    arret = threading.Event()
+    if not n or not sessions:
+        return arret
+    total = len(sessions) * n
+    results = vame_dir(project) / "results"
+    debut = time.time()
+
+    def compter() -> int:
+        return sum(1 for p in results.glob(f"*/*/{algos[0]}-{n}/**/*motif_*")
+                   if p.suffix.lower() in (".mp4", ".avi")
+                   and p.stat().st_mtime >= debut)
+
+    def boucle() -> None:
+        dernier = -1
+        while not arret.is_set():
+            try:
+                k = compter()
+            except OSError:
+                k = dernier
+            # Le fichier d'un clip apparaît dès que VAME commence à l'écrire :
+            # le compte inclut le clip en cours.
+            if k != dernier:
+                print(f"\n[{min(max(k, 1), total)}/{total}] clips de motifs", flush=True)
+                dernier = k
+            arret.wait(periode_s)
+
+    threading.Thread(target=boucle, daemon=True).start()
+    return arret
+
+
 def cmd_motif_videos(args) -> None:
     """Génère une courte vidéo d'exemple pour chaque motif comportemental."""
     import vame
     project = resolve_project(args)
     print("Génération des vidéos par motif (peut être long)...")
-    vame.motif_videos(load_vame_config(project))
+    config = load_vame_config(project)
+    arret = _suivre_clips(project, config)
+    try:
+        vame.motif_videos(config)
+    finally:
+        arret.set()
     print("\n✅ Vidéos générées.")
     vame_project = Path(load_config_pointer(project)).parent
     sample_path = vame_project / "results" / "<session>" / "<model>" / "<algo>-<n>" / "motif_videos"

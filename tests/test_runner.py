@@ -480,3 +480,11 @@ def test_progression_hmm_apres_barre_a_100():
     p = parse_progress(log)
     assert p["valeur"] == 0.26
     assert "itération 26" in p["texte"] and "100 %" not in p["texte"]
+
+
+def test_progression_clips_de_motifs():
+    """motif-videos : avancement sur l'ensemble des clips, pas le seul clip en cours."""
+    from lib.runner import parse_progress
+    p = parse_progress("[3/30] clips de motifs\n 40%|████ | 400/1000 [00:10<00:15, 40it/s]")
+    assert abs(p["valeur"] - 2.4 / 30) < 1e-9
+    assert p["texte"].startswith("Clip 3/30 — 40 %")

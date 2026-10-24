@@ -123,7 +123,7 @@ def _banniere_echec(projet: Path, job) -> None:
             unsafe_allow_html=True)
         # Relancer suit la même règle que Lancer : l'étape du job doit être ouverte.
         from lib.etapes import etape_du_script
-        etape = etape_du_script(job.script)
+        etape = etape_du_script(job.script, getattr(job, "argv", None))
         verrou = verrou_etape(etape.nom) if etape else None
         # Bouton calé sur le bord droit de la carte, comme sur le tableau de bord.
         with action, st.container(horizontal_alignment="right"):
@@ -156,7 +156,7 @@ def panneau(projet: Path, *, lignes: int = 30) -> None:
     # étape ; ailleurs, la colonne Activité le signale déjà. Un job sans
     # étape (diagnostic du modèle DLC…) reste affiché là où on l'a lancé.
     from lib.etapes import PAR_PAGE, etape_du_script
-    etape_job = etape_du_script(job.script)
+    etape_job = etape_du_script(job.script, getattr(job, "argv", None))
     page = PAR_PAGE.get(st.session_state.get("current_page", ""))
     if etape_job is not None and page is not None and etape_job.n != page.n:
         return

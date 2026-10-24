@@ -75,7 +75,15 @@ PAR_PAGE = {e.nom: e for e in ETAPES}
 _EXPLOITATION = (7, 8, 9)
 
 
-def etape_du_script(script: str) -> Etape | None:
+# Sous-commandes de run_vame.py qui relèvent de l'étape Motifs (7), pas VAME.
+_SOUS_COMMANDES_MOTIFS = ("motif-videos", "motif-labels")
+
+
+def etape_du_script(script: str, argv=None) -> Etape | None:
+    """`argv` départage les sous-commandes : `run_vame.py motif-videos` se
+    lance depuis la page Motifs, et son journal doit s'y afficher."""
+    if script == "run_vame.py" and argv and any(a in _SOUS_COMMANDES_MOTIFS for a in argv):
+        return next((e for e in ETAPES if e.n == 7), None)
     return next((e for e in ETAPES if script in e.scripts), None)
 
 
