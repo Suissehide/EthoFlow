@@ -103,3 +103,20 @@ def test_video_path_resolu_depuis_la_colonne(project, vame_project):
     df = ML.load(project)
     assert ML.video_path(project, df.loc[0]) == clip
     assert ML.video_path(project, df.loc[1]) is None    # fichier absent
+
+
+def test_clips_du_motif_dans_toutes_les_sessions(project, vame_project):
+    """La fiche cite le clip d'une session ; on retrouve celui des autres."""
+    import pandas as pd
+    for s in ("BV-A_clean", "BV-B_clean", "BV-C_clean"):
+        d = vame_project / "results" / s / "VAME" / "hmm-15" / "cluster_videos"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{s}-motif_3.mp4").write_bytes(b"\x00")
+        (d / f"{s}-motif_13.mp4").write_bytes(b"\x00")
+    (vame_project / "results" / "BV-C_clean" / "VAME" / "hmm-15" / "cluster_videos"
+     / "BV-C_clean-motif_3.mp4").unlink()   # motif absent de cette session
+    row = pd.Series({"video": "results/BV-A_clean/VAME/hmm-15/cluster_videos/BV-A_clean-motif_3.mp4"})
+    clips = ML.clips_toutes_sessions(project, row)
+    assert [s for s, _ in clips] == ["BV-A", "BV-B"]
+    assert all(p.name.endswith("-motif_3.mp4") for _, p in clips)
+    assert ML.clips_toutes_sessions(project, pd.Series({"video": ""})) == []

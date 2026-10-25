@@ -355,3 +355,22 @@ def test_vocabulaire_suggere_remplit_le_label(tmp_path, monkeypatch):
     assert not at.exception, at.exception
     champ_label = [t for t in at.text_input if t.label == "Label (texte libre)"][0]
     assert champ_label.value == bouton.label
+
+
+def test_plusieurs_sessions_du_meme_motif(tmp_path, monkeypatch):
+    """Le motif se compare sur plusieurs sessions, pas un seul clip."""
+    projet = _projet(tmp_path)
+    for i in range(7):
+        s = f"BV-S{i}_clean"
+        d = projet / "data" / "vame" / "results" / s / "VAME" / "hmm-3" / "cluster_videos"
+        d.mkdir(parents=True)
+        (d / f"{s}-motif_0.mp4").write_bytes(bytes([i]))   # contenus distincts
+    _ecrire_csv(projet, [
+        "0;;;;;;50.00;results/BV-S0_clean/VAME/hmm-3/cluster_videos/BV-S0_clean-motif_0.mp4",
+    ])
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert len(at.get("video")) == 4          # 4 par défaut
+    assert "7 sessions" in at.get("button_group")[0].label
+    at.button(key="motifs_autres_0").click().run()
+    assert not at.exception, at.exception
+    assert len(at.get("video")) == 4

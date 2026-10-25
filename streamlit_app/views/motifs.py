@@ -124,6 +124,46 @@ def _libelle_motif(row: pd.Series) -> str:
     return f"motif {row['motif_id']} — {usage} % — {label}"
 
 
+def _clips_du_motif(projet: Path, row: pd.Series, motif_id: int) -> None:
+    """Le même motif vu dans plusieurs sessions : un seul clip ne suffit
+    pas à le nommer (il peut tomber sur un exemple atypique)."""
+    import random
+
+    clips = ML.clips_toutes_sessions(projet, row)
+    if len(clips) <= 1:
+        clip = ML.video_path(projet, row)
+        if clip:
+            st.video(str(clip))
+        else:
+            st.warning("Pas de clip pour ce motif : le fichier vidéo est introuvable.")
+        return
+
+    options = [o for o in (1, 4, 6, 9) if o <= len(clips)]
+    # Choix gardé d'un motif à l'autre, sauf s'il n'existe plus ici
+    # (motif présent dans moins de sessions).
+    if st.session_state.get("motifs_nb_clips") not in (*options, None):
+        del st.session_state["motifs_nb_clips"]
+    reglage, autres = st.columns([3, 1], vertical_alignment="bottom")
+    n = reglage.segmented_control(
+        f"Clips affichés ({len(clips)} sessions ont ce motif)",
+        options=options, default=4 if 4 in options else 1,
+        key="motifs_nb_clips",
+    ) or 1
+    graine_cle = f"motifs_graine_{motif_id}"
+    if autres.button("Autres sessions", key=f"motifs_autres_{motif_id}",
+                     disabled=len(clips) <= n, width="stretch"):
+        st.session_state[graine_cle] = random.random()
+    choix = random.Random(st.session_state.get(graine_cle, motif_id)).sample(
+        clips, min(n, len(clips)))
+
+    par_ligne = 1 if n == 1 else 2 if n == 4 else 3
+    for debut in range(0, len(choix), par_ligne):
+        cols = st.columns(par_ligne)
+        for col, (session, chemin) in zip(cols, choix[debut:debut + par_ligne]):
+            col.video(str(chemin), loop=True, autoplay=n > 1, muted=True)
+            col.caption(session)
+
+
 def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
     cats = categories()
     n = len(df)
@@ -146,13 +186,7 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
 
     col_video, col_form = st.columns([2, 1])
     with col_video:
-        clip = ML.video_path(projet, row)
-        if clip:
-            st.video(str(clip))
-        else:
-            st.warning(
-                "Pas de clip pour ce motif : le fichier vidéo est introuvable."
-            )
+        _clips_du_motif(projet, row, motif_id)
         usage = row.get("usage_pct") or ""
         st.metric("Usage", f"{usage} %" if usage else "—",
                   help="Part des images attribuées à ce motif, toutes "

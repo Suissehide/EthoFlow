@@ -85,6 +85,33 @@ def clips_existent(project: Path) -> bool:
                for motif in ("**/*motif_*.mp4", "**/*motif_*.avi"))
 
 
+def clips_toutes_sessions(project: Path, row) -> list[tuple[str, Path]]:
+    """Le clip de ce motif dans chaque session : [(session, chemin)].
+
+    VAME écrit un clip par motif ET par session, mais la fiche n'en cite
+    qu'un. On ne devine rien par glob : on reprend le chemin cité
+    (`results/<session>/<modèle>/<algo-n>/…/<session>…motif_<i>.mp4`) en
+    remplaçant la session, dossier et nom de fichier, par chacune des
+    autres.
+    """
+    from lib.vame import session_projet
+
+    rel = Path(str(row.get("video") or "").strip())
+    if len(rel.parts) < 3 or rel.parts[0] != "results":
+        return []
+    session_ref = rel.parts[1]
+    results = vame_project(project) / "results"
+    if not results.is_dir():
+        return []
+    clips = []
+    for d in sorted(p for p in results.iterdir() if p.is_dir()):
+        reste = [part.replace(session_ref, d.name) for part in rel.parts[2:]]
+        candidat = d.joinpath(*reste)
+        if candidat.is_file():
+            clips.append((session_projet(d.name), candidat))
+    return clips
+
+
 def video_path(project: Path, row) -> Path | None:
     """Chemin absolu du clip, ou None s'il n'existe pas.
 
