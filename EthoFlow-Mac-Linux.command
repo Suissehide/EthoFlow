@@ -151,8 +151,10 @@ fi
 # des applications, pour ne plus passer par le terminal.
 if [ "$(uname)" = Linux ]; then
     raccourci="$HOME/.local/share/applications/ethoflow.desktop"
-    # Recréé aussi s'il pointe vers l'ancien nom du lanceur (EthoFlow.command).
-    if [ ! -f "$raccourci" ] || ! grep -qF "$ICI/EthoFlow-Mac-Linux.command" "$raccourci"; then
+    # Recréé aussi s'il pointe vers l'ancien nom du lanceur (EthoFlow.command)
+    # ou s'il date d'avant l'icône.
+    if [ ! -f "$raccourci" ] || ! grep -qF "$ICI/EthoFlow-Mac-Linux.command" "$raccourci" \
+       || ! grep -q '^Icon=' "$raccourci"; then
         mkdir -p "$(dirname "$raccourci")"
         cat > "$raccourci" <<EOF
 [Desktop Entry]
@@ -161,6 +163,7 @@ Name=EthoFlow
 Comment=Analyse comportementale (DeepLabCut + VAME)
 Exec="$ICI/EthoFlow-Mac-Linux.command"
 Path=$ICI
+Icon=$ICI/scripts/ethoflow.png
 Terminal=true
 Categories=Science;
 EOF
