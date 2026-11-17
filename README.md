@@ -79,6 +79,8 @@ Le lanceur fait tout ce qui manque, puis ouvre l'app dans le navigateur :
 
 Ensuite, le même double-clic lance simplement l'app (quelques secondes). Garde la fenêtre du terminal ouverte : la fermer arrête EthoFlow.
 
+Windows, facultatif : double-clique sur `scripts\raccourci_bureau.bat` pour poser un raccourci **EthoFlow** (avec icône) sur ton Bureau.
+
 Les étapes ci-dessous décrivent la même installation, à la main.
 
 ### 1. Cloner le repo
