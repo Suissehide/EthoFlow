@@ -69,6 +69,31 @@ from paths import (  # noqa: E402
     resolve_project,
 )
 
+def taille_image(project: Path, session_id: str) -> tuple[int, int] | None:
+    """(largeur, hauteur) de la vidéo : `camera.width/height` de la
+    metadata, sinon lus dans le fichier vidéo ; None si rien n'est lisible."""
+    import yaml
+    try:
+        meta = yaml.safe_load((raw_dir(project) / session_id / "metadata.yaml").read_text()) or {}
+    except (OSError, yaml.YAMLError):
+        return None
+    camera = meta.get("camera") or {}
+    try:
+        w, h = int(camera["width"]), int(camera["height"])
+        if w > 0 and h > 0:
+            return w, h
+    except (KeyError, TypeError, ValueError):
+        pass
+    try:
+        import cv2
+        cap = cv2.VideoCapture(str(meta.get("source_video", "")))
+        w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        return (w, h) if w > 0 and h > 0 else None
+    except Exception:  # noqa: BLE001 — cv2 absent ou vidéo illisible : axes libres
+        return None
+
+
 DEFAULT_LIKELIHOOD = 0.60
 DEFAULT_MAX_SPEED = 5.0
 
@@ -223,6 +248,7 @@ def process_session(
             ok = plot_trajectory_qc(
                 df, df_clean, qc_bodypart, qc_path,
                 session_id=session_id, stats=stats,
+                frame_size=taille_image(project, session_id),
             )
         except ValueError as e:
             # Nom de keypoint inconnu : le message porte déjà la liste des

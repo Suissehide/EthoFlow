@@ -138,16 +138,17 @@ def test_avertissement_pool_all_sessions_apparait_quand_coche(tmp_path, monkeypa
     projet = _projet(tmp_path)
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
+    # Coché par défaut : des rendus comparables entre eux, avec l'avertissement.
     case = _widget(at.checkbox, "visu_manifold_pool")
-    assert case.value is False
-    assert not at.warning   # pas encore coché : pas d'avertissement
-
-    case.set_value(True).run()
-    assert not at.exception, at.exception
-
+    assert case.value is True
     avertissements = " ".join(w.value for w in at.warning)
     assert "toutes les sessions" in avertissements.lower()
     assert "bloqu" in avertissements.lower() or "Troubleshooting" in avertissements
+
+    case.set_value(False).run()
+    assert not at.exception, at.exception
+    assert not at.warning   # décoché : plus d'avertissement
+    assert _widget(at.checkbox, "visu_motif_limiter").value is True
 
 
 # ============================================================

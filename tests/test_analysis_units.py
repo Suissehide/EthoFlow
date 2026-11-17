@@ -232,3 +232,25 @@ def test_usage_par_groupe_rattache_les_groupes_de_l_excel(project, session_facto
     assert s1.loc[1, "frequency"] == 0.75
     assert s1.loc[0, "motif_nom"] == "0: grooming"
     assert s1.loc[1, "motif_nom"] == "motif_1"
+
+
+def test_classeur_excel_une_feuille_par_csv_plus_motifs(tmp_path):
+    import io
+
+    import pandas as pd
+    from lib.analysis import classeur_excel
+
+    a = tmp_path / "analysis_global_long.csv"
+    a.write_text("session;motif;valeur\nS1;0;1.5\n", encoding="utf-8")
+    b = tmp_path / ("stats_by_motif_" + "x" * 40 + ".csv")   # nom trop long pour Excel
+    b.write_text("motif,p\n0,0.04\n", encoding="utf-8")
+    motifs = tmp_path / "motif_labels.csv"
+    motifs.write_text("motif_id;label\n0;walking\n", encoding="utf-8-sig")
+
+    feuilles = pd.read_excel(io.BytesIO(classeur_excel([a, b], motifs)), sheet_name=None)
+    assert list(feuilles)[0] == "motifs" and len(feuilles) == 3
+    assert all(len(nom) <= 31 for nom in feuilles)
+    assert feuilles["analysis_global_long"].loc[0, "valeur"] == 1.5
+    assert feuilles["motifs"].loc[0, "label"] == "walking"
+    # Sans fiche des motifs : seulement les CSV.
+    assert list(pd.read_excel(io.BytesIO(classeur_excel([a], tmp_path / "absent.csv")), sheet_name=None)) == ["analysis_global_long"]

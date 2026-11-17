@@ -152,7 +152,7 @@ def _tab_motif_gif(projet: Path, sessions: list[str]) -> None:
     algo = st.selectbox("Méthode de découpage", options=_algos_presents(projet),
                         key="visu_motif_algo")
 
-    limiter = st.checkbox("Limiter la durée", value=False, key="visu_motif_limiter")
+    limiter = st.checkbox("Limiter la durée", value=True, key="visu_motif_limiter")
     col_start, col_duration = st.columns(2)
     with col_start:
         start = st.number_input("Début (s)", min_value=0.0, value=0.0,
@@ -259,7 +259,7 @@ def _tab_manifold(projet: Path, sessions: list[str]) -> None:
         )
     pool_all_sessions = st.checkbox(
         "Fond commun à toutes les sessions (rendus comparables entre eux)",
-        value=False, key="visu_manifold_pool",
+        value=True, key="visu_manifold_pool",
         help="Sans cette case, le nuage de fond ne montre que la session "
              "animée. Avec, il montre tout le projet : un même endroit du "
              "nuage correspond au même comportement d'une figure à l'autre.",

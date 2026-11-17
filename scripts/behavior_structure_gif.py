@@ -983,10 +983,10 @@ def main() -> None:
     # Callback de progression : matplotlib appelle ce truc à chaque frame
     # sauvée par le writer → on affiche un pourcentage rassurant.
     def _progress(current: int, total: int) -> None:
-        pct = int(100 * (current + 1) / total)
-        # Écrit sur la même ligne (ne pas polluer le terminal)
-        print(f"\r  Encoding frame {current + 1}/{total}  ({pct}%)",
-              end="", flush=True)
+        # Repère `[i/N] images` : c'est lui que l'app lit pour sa barre de
+        # progression (lib/runner.parse_progress). Sur la même ligne au
+        # terminal, pour ne pas le polluer.
+        print(f"\r[{current + 1}/{total}] images", end="", flush=True)
 
     if args.output_format == "gif":
         out_path = out_dir / f"{stem}.gif"

@@ -235,8 +235,7 @@ def test_bilan_qualite_en_tableau(tmp_path, monkeypatch):
     pd.DataFrame(valeurs, columns=cols).to_hdf(sortie / "S1DLC_resnet.h5", key="df")
 
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
-    at.toggle(key="nettoyage_inspection").set_value(True).run()
-    assert not at.exception, at.exception
+    # Le bilan s'affiche toujours : pas d'interrupteur à activer.
     bilan = next(d.value for d in at.dataframe if "Verdict" in d.value.columns)
     assert bilan.loc[0, "Session"] == "S1" and bilan.loc[0, "Au moins un point (%)"] == 100.0
     # nose absent sur 5 images sur 20 : 75 % d'images complètes. Le verdict
@@ -246,4 +245,8 @@ def test_bilan_qualite_en_tableau(tmp_path, monkeypatch):
     # L'emoji ✓ du script devient l'icône Lucide « check », en vert.
     assert bilan.loc[0, " "] == lucide_data_uri("check", "2f9567")
     par_kp = next(d.value for d in at.dataframe if "S1" in d.value.columns)
-    assert par_kp.loc["nose", "S1"] == 75.0
+    assert par_kp.loc["nose", "S1"] == 75.0 and par_kp.loc["nose", "Moyenne"] == 75.0
+    # Schémas de souris : la moyenne et la vidéo S1, avec le % du nez.
+    schemas = [m.value for m in at.markdown if "<svg" in m.value]
+    assert any("Moyenne de toutes les vidéos" in s and "nez" in s and "75 %" in s for s in schemas)
+    assert any(">S1<" in s for s in schemas)

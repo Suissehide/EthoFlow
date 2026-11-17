@@ -118,10 +118,11 @@ def _tri_par_usage(df: pd.DataFrame) -> pd.DataFrame:
 # Onglet "Par motif"
 # ============================================================
 
-def _libelle_motif(row: pd.Series) -> str:
+def _puce_motif(row: pd.Series) -> str:
+    """Texte d'une puce : coche si nommé, rond vide sinon, puis id, usage, label."""
     usage = row.get("usage_pct") or "?"
-    label = row.get("label") or "(sans label)"
-    return f"motif {row['motif_id']} — {usage} % — {label}"
+    label = str(row.get("label") or "").strip()
+    return f"{'✓' if label else '○'} {row['motif_id']} · {usage} % · {label or 'sans label'}"
 
 
 def _clips_du_motif(projet: Path, row: pd.Series, motif_id: int) -> None:
@@ -171,15 +172,20 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
         st.info("Le CSV ne contient aucune ligne.")
         return
 
-    if "motifs_idx" not in st.session_state:
-        st.session_state["motifs_idx"] = 0
-    valeur_initiale = min(st.session_state["motifs_idx"], n - 1)
-    idx = st.select_slider(
-        "Motif (trié par usage décroissant — commence par le haut)",
-        options=list(range(n)), value=valeur_initiale,
-        format_func=lambda i: _libelle_motif(df.loc[i]),
-        key="motifs_slider",
+    # Une puce par motif, toutes visibles : on voit d'un coup d'œil combien
+    # il y en a et lesquels n'ont pas encore de label (rond vide).
+    n_nommes = int(df["label"].fillna("").astype(str).str.strip().ne("").sum())
+    st.caption(f"{n} motifs · {n_nommes} nommé{'s' if n_nommes > 1 else ''} · "
+               f"{n - n_nommes} sans label — triés par usage décroissant, commence par le haut.")
+    # Désélectionner la puce (ou un CSV plus court) ramène au dernier motif vu.
+    if st.session_state.get("motifs_puces") is None or st.session_state["motifs_puces"] >= n:
+        st.session_state["motifs_puces"] = min(st.session_state.get("motifs_idx", 0), n - 1)
+    idx = st.pills(
+        "Motif", options=list(range(n)), format_func=lambda i: _puce_motif(df.loc[i]),
+        key="motifs_puces", label_visibility="collapsed",
     )
+    if idx is None:
+        idx = min(st.session_state.get("motifs_idx", 0), n - 1)
     st.session_state["motifs_idx"] = idx
     row = df.loc[idx]
     motif_id = int(row["motif_id"])
@@ -217,6 +223,24 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
             st.session_state[seed_key] = valeurs_disque
 
         st.text_input("Label (texte libre)", key=label_key)
+        with st.expander("Vocabulaire suggéré", expanded=False):
+            st.caption(
+                "Des noms cohérents d'un motif à l'autre. Un clic remplit le "
+                "champ « Label » ci-dessus (pas la catégorie) ; enregistre ensuite."
+            )
+            for groupe, termes in VOCABULAIRE_SUGGERE.items():
+                st.caption(f"**{groupe}**")
+                cols = st.columns(3)
+                for i, terme in enumerate(termes):
+                    # Via on_click : modifier la clé d'un widget déjà
+                    # instancié dans ce run lève StreamlitAPIException ;
+                    # le callback, lui, tourne avant sa recréation.
+                    cols[i % 3].button(
+                        terme, key=f"motifs_voc_{motif_id}_{groupe}_{terme}",
+                        width="stretch",
+                        on_click=st.session_state.__setitem__,
+                        args=(label_key, terme),
+                    )
 
         # La valeur déjà dans le CSV peut être hors des 8 catégories
         # fermées (typo, vocabulaire de labo, ou `artifact` comme le
@@ -263,27 +287,6 @@ def _tab_individual(projet: Path, df: pd.DataFrame) -> None:
             st.toast(f"Motif {motif_id} enregistré")
             st.rerun()
 
-        with st.expander(
-            "Vocabulaire suggéré", expanded=False,
-        ):
-            st.caption(
-                "Des noms cohérents d'un motif à l'autre. Cliquer un terme "
-                "remplit le champ « Label » (pas la catégorie) ; clique "
-                "ensuite Enregistrer."
-            )
-            for groupe, termes in VOCABULAIRE_SUGGERE.items():
-                st.caption(f"**{groupe}**")
-                cols = st.columns(3)
-                for i, terme in enumerate(termes):
-                    # Via on_click : modifier la clé d'un widget déjà
-                    # instancié dans ce run lève StreamlitAPIException ;
-                    # le callback, lui, tourne avant sa recréation.
-                    cols[i % 3].button(
-                        terme, key=f"motifs_voc_{motif_id}_{groupe}_{terme}",
-                        width="stretch",
-                        on_click=st.session_state.__setitem__,
-                        args=(label_key, terme),
-                    )
 
 
 # ============================================================

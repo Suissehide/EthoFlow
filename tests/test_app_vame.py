@@ -178,36 +178,22 @@ def test_evaluate_etat_annonce_comme_non_detectable(tmp_path, monkeypatch):
     assert any("ne peut pas détecter" in c for c in captions), captions
 
 
-def test_segment_affiche_n_clusters_courant_et_avertit_sur_le_csv(tmp_path, monkeypatch):
+def test_segment_reprend_le_nombre_de_motifs_du_projet_vame(tmp_path, monkeypatch):
+    """Plus de champ « nombre de motifs » au découpage : il vient de la
+    création du projet VAME, en haut de page. Chaque sous-étape porte sa
+    description sous son titre."""
     projet = _projet(tmp_path)
     vame = _init_vame(projet, n_clusters=15)
     (vame / "model" / "best_model").mkdir(parents=True)
     (vame / "model" / "best_model" / "rnn_vae.pkl").write_text("mock")
-    (vame / "motif_labels.csv").write_text("motif_id;label\n0;\n", encoding="utf-8")
 
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
+    assert "vame_segment_n_clusters" not in {n.key for n in at.number_input}
     captions = [c.value for c in at.caption]
-    assert any("Nombre de motifs actuel" in c and "15" in c for c in captions), captions
-
-    warnings = [w.value for w in at.warning]
-    assert any("unique par projet" in w for w in warnings), warnings
-    assert any("Sauvegarde-le d'abord" in w for w in warnings), warnings
-
-
-def test_segment_champ_n_clusters_champ_libre(tmp_path, monkeypatch):
-    """Le champ `--n-clusters` reste modifiable même sans CSV existant, et
-    l'avertissement CSV n'apparaît pas quand il n'y a rien à perdre."""
-    projet = _projet(tmp_path)
-    vame = _init_vame(projet, n_clusters=15)
-    (vame / "model" / "best_model").mkdir(parents=True)
-    (vame / "model" / "best_model" / "rnn_vae.pkl").write_text("mock")
-
-    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
-
-    champ = [n for n in at.number_input if n.key == "vame_segment_n_clusters"][0]
-    assert champ.value == 15
-    assert not any("unique par projet" in w.value for w in at.warning)
+    assert any("Aligner" in c or "repère de l'animal" in c for c in captions)
+    assert any("figures de contrôle" in c for c in captions)
+    assert any("nombre de motifs choisi à la création" in c for c in captions)
 
 
 def test_setup_ne_demande_jamais_rien_depuis_l_app(tmp_path, monkeypatch):

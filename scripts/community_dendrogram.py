@@ -159,6 +159,32 @@ def motif_distance_from_transitions(T: np.ndarray) -> np.ndarray:
     return D
 
 
+def linkage_motifs(T: np.ndarray, method: str) -> np.ndarray:
+    """Matrice de linkage scipy pour la matrice de transitions `T`.
+
+    Ward n'est défini que sur des distances euclidiennes : appliqué à la
+    distance cosinus condensée, scipy produit des fusions non monotones
+    (branches qui redescendent) et des hauteurs de sommet démesurées, d'où
+    un arbre écrasé en bas avec des motifs qui semblent flotter hors de
+    l'arbre. On lui donne donc les profils de transition normalisés en L2 :
+    la distance euclidienne entre deux profils vaut √(2 × distance
+    cosinus), même géométrie, hiérarchie monotone. Les autres méthodes
+    gardent la distance cosinus condensée, qu'elles acceptent telle quelle.
+    """
+    from scipy.cluster import hierarchy
+    from scipy.spatial.distance import squareform
+
+    if method == "ward":
+        row_sums = T.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1
+        P = T / row_sums
+        normes = np.linalg.norm(P, axis=1, keepdims=True)
+        normes[normes == 0] = 1
+        return hierarchy.linkage(P / normes, method="ward")
+    D = motif_distance_from_transitions(T)
+    return hierarchy.linkage(squareform(D, checks=False), method=method)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     add_project_dir_arg(parser, required=True)
@@ -179,7 +205,6 @@ def main() -> None:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         from scipy.cluster import hierarchy
-        from scipy.spatial.distance import squareform
     except ImportError as e:
         print(f"❌ Dépendance manquante : {e}. pip install scipy matplotlib",
               file=sys.stderr)
@@ -217,18 +242,27 @@ def main() -> None:
     print("Agrégation des transitions...")
     T = aggregate_transitions(label_files, project, args.group, n_motifs)
 
+    # Motifs jamais observés dans ces sessions (aucune transition) : rien
+    # ne les relie aux autres, ils feraient des feuilles orphelines
+    # collées au sommet de l'arbre. On les écarte, en le disant.
+    presents = [i for i in range(n_motifs) if T[i].sum() > 0 or T[:, i].sum() > 0]
+    absents = sorted(set(range(n_motifs)) - set(presents))
+    if absents:
+        print(f"  ⚠ {len(absents)} motif(s) sans aucune transition, hors de "
+              f"l'arbre : {', '.join(str(i) for i in absents)}")
+    if len(presents) < 2:
+        print("❌ Moins de deux motifs observés : pas d'arbre possible.", file=sys.stderr)
+        sys.exit(1)
+    T = T[np.ix_(presents, presents)]
+
     # Distance
     print("Calcul de la distance inter-motifs...")
-    D = motif_distance_from_transitions(T)
+    Z = linkage_motifs(T, args.linkage)
 
-    # Linkage (scipy attend la forme condensée)
-    condensed = squareform(D, checks=False)
-    Z = hierarchy.linkage(condensed, method=args.linkage)
-
-    # Labels des feuilles
+    # Labels des feuilles (indices d'origine des motifs)
     leaf_labels = [
         labels_dict.get(i, {}).get("label", f"motif_{i}")
-        for i in range(n_motifs)
+        for i in presents
     ]
     # Couleur de chaque feuille selon la catégorie
     leaf_colors = [
@@ -236,11 +270,13 @@ def main() -> None:
             labels_dict.get(i, {}).get("category", ""),
             "#333333",
         )
-        for i in range(n_motifs)
+        for i in presents
     ]
 
-    # Plot
-    fig, ax = plt.subplots(figsize=args.figsize)
+    # Plot — largeur proportionnelle au nombre de feuilles, sinon les noms
+    # se chevauchent dès 20 motifs.
+    largeur = max(args.figsize[0], 0.45 * len(presents))
+    fig, ax = plt.subplots(figsize=(largeur, args.figsize[1]))
     title = "Communautés de motifs — dendrogramme des transitions"
     if args.group:
         title += f"  ({args.group})"
@@ -257,6 +293,7 @@ def main() -> None:
     )
     ax.set_ylabel(f"Distance ({args.linkage} linkage)")
     ax.set_xlabel("Motif")
+    ax.set_ylim(bottom=0)
 
     # Colorie les labels des feuilles selon leur catégorie
     xticklabels = ax.get_xticklabels()

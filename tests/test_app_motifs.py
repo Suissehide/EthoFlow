@@ -89,7 +89,7 @@ def test_sans_csv_seulement_les_deux_boutons_de_generation(tmp_path, monkeypatch
 
     # Rien de la partie édition ne doit apparaître : ni sélecteur de motif,
     # ni champ label/catégorie, ni tableau.
-    assert list(at.select_slider) == []
+    assert list(at.pills) == []
     assert list(at.selectbox) == []
     assert not any(
         (t.label or "").startswith("Label") for t in at.text_input
@@ -109,14 +109,12 @@ def test_motifs_tries_par_usage_decroissant(tmp_path, monkeypatch):
     ])
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
 
-    sliders = list(at.select_slider)
-    assert len(sliders) == 1
-    slider = sliders[0]
-    # `.options` renvoie déjà le texte formaté (format_func appliqué) : la
-    # première option (motif d'usage max, 42.50 %) doit être motif_id=1,
-    # la dernière (5.00 %) motif_id=0.
-    assert "motif 1" in slider.options[0]
-    assert "motif 0" in slider.options[-1]
+    puces = at.pills(key="motifs_puces")
+    # Les options affichées (format_func appliqué) : la première (usage max,
+    # 42.50 %) est le motif 1, la dernière (5.00 %) le motif 0 ; aucun n'a
+    # de label, le rond vide le dit.
+    assert puces.options[0].startswith("○ 1 · 42.5") and puces.options[-1].startswith("○ 0 · 5.0")
+    assert any("3 motifs · 0 nommé · 3 sans label" in c.value for c in at.caption)
 
 
 def test_categorie_offre_exactement_les_8_valeurs_fermees(tmp_path, monkeypatch):
@@ -370,7 +368,8 @@ def test_plusieurs_sessions_du_meme_motif(tmp_path, monkeypatch):
     ])
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
     assert len(at.get("video")) == 4          # 4 par défaut
-    assert "7 sessions" in at.get("button_group")[0].label
+    clips = [b for b in at.get("button_group") if b.key == "motifs_nb_clips"][0]
+    assert "7 sessions" in clips.label
     at.button(key="motifs_autres_0").click().run()
     assert not at.exception, at.exception
     assert len(at.get("video")) == 4

@@ -607,6 +607,8 @@ def test_echelle_saisie_directe_equivalent_du_set(tmp_path, monkeypatch):
     assert not at.exception, at.exception
 
     assert _pipeline_config(projet)["px_per_cm"] == pytest.approx(12.5)
+    # La valeur enregistrée s'affiche tout de suite, sans autre clic.
+    assert any("12.500 px/cm" in s.value for s in at.success)
 
 
 def test_echelle_valeur_actuelle_affichee_si_deja_configuree(tmp_path, monkeypatch):
@@ -615,7 +617,7 @@ def test_echelle_valeur_actuelle_affichee_si_deja_configuree(tmp_path, monkeypat
         yaml.safe_dump({"kind": "single", "px_per_cm": 4.0}), encoding="utf-8",
     )
     at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
-    textes = [c.value for c in at.caption]
+    textes = [s.value for s in at.success]
     assert any("4.000 px/cm" in t for t in textes), textes
 
 

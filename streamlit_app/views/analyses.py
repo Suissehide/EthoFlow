@@ -365,6 +365,20 @@ def _tab_resultats(projet: Path, axes: list[dict]) -> None:
     axes_connus = [axe["nom"] for axe in axes] or None
     globaux, par_axe, autres = group_analysis_files(fichiers, axes_connus)
 
+    # Tout en un classeur, pour refaire les graphes dans Excel, R ou Prism.
+    import lib.motif_labels as ML
+    from lib.analysis import classeur_excel
+    csvs = [p for p in fichiers if p.suffix.lower() == ".csv"]
+    st.download_button(
+        f"Exporter en Excel ({len(csvs)} tableau{'x' if len(csvs) > 1 else ''} + fiche des motifs)",
+        data=classeur_excel(csvs, ML.path(projet)),
+        file_name=f"{projet.name}_analyses.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="btn_analyses_xlsx", type="primary",
+        help="Une feuille par tableau de résultats, plus la feuille « motifs » "
+             "(noms et catégories saisis dans Nommer les motifs).",
+    )
+
     _aide_lecture()
 
     if globaux:

@@ -45,3 +45,26 @@ def test_keypoint_inconnu_leve_avec_la_liste_des_keypoints(tmp_path):
     assert "paw_front_left" in message
     assert "front_paw_left" in message   # les noms disponibles sont listés
     assert "tail_base" in message
+
+
+def test_axes_figes_sur_l_image_de_la_video(tmp_path):
+    pytest.importorskip("matplotlib")
+    df = _df(["front_paw_left", "nose"])
+    out = tmp_path / "qc.png"
+    assert plot_trajectory_qc(df, df, "front_paw_left", out, frame_size=(640, 480)) is True
+    assert out.stat().st_size > 0
+
+
+def test_taille_image_lue_dans_la_metadata(tmp_path):
+    import yaml
+    from prepare_vame_input_custom import taille_image
+    (tmp_path / "data" / "raw" / "S1").mkdir(parents=True)
+    (tmp_path / "data" / "raw" / "S1" / "metadata.yaml").write_text(
+        yaml.safe_dump({"source_video": "/nulle/part.mp4",
+                        "camera": {"width": 1280, "height": 720}}))
+    assert taille_image(tmp_path, "S1") == (1280, 720)
+    (tmp_path / "data" / "raw" / "S2").mkdir()
+    (tmp_path / "data" / "raw" / "S2" / "metadata.yaml").write_text(
+        yaml.safe_dump({"source_video": "/nulle/part.mp4"}))
+    assert taille_image(tmp_path, "S2") is None      # ni metadata, ni vidéo lisible
+    assert taille_image(tmp_path, "S3") is None      # pas de metadata du tout

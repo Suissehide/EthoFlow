@@ -488,3 +488,12 @@ def test_progression_clips_de_motifs():
     p = parse_progress("[3/30] clips de motifs\n 40%|████ | 400/1000 [00:10<00:15, 40it/s]")
     assert abs(p["valeur"] - 2.4 / 30) < 1e-9
     assert p["texte"].startswith("Clip 3/30 — 40 %")
+
+
+def test_progression_des_rendus_image_par_image():
+    """motif_gif.py et behavior_structure_gif.py écrivent `[i/N] images`."""
+    prog = R.parse_progress("Session : S1\n[12/300] images\n")
+    assert prog["texte"].startswith("Image 12/300") and abs(prog["valeur"] - 11 / 300) < 1e-9
+    # Le manifold réécrit la même ligne avec \r : la dernière compte.
+    prog = R.parse_progress("[1/300] images\r[150/300] images")
+    assert prog["texte"].startswith("Image 150/300")

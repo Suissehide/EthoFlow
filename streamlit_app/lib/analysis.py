@@ -200,3 +200,34 @@ def usage_par_groupe(project: Path, algo: str) -> tuple["pd.DataFrame", list[tup
     df = usage.merge(attributs, on="session", how="left")
     df["motif_nom"] = df["motif"].map(lambda m: AV.motif_display(int(m), labels))
     return df, AV.usable_group_columns(attributs.drop(columns=["session"]))
+
+
+def classeur_excel(csvs: list[Path], motifs: Path | None = None) -> bytes:
+    """Un classeur .xlsx : une feuille par CSV de résultats, plus la fiche
+    des motifs (`motif_labels.csv`) si elle existe — pour refaire les
+    graphes hors de l'app. Un CSV illisible devient une feuille d'une
+    ligne qui le dit, plutôt que de faire échouer tout l'export."""
+    import io
+
+    import pandas as pd
+
+    sources = [(p.stem, p) for p in csvs]
+    if motifs is not None and motifs.is_file():
+        sources.insert(0, ("motifs", motifs))
+    tampon = io.BytesIO()
+    vus: set[str] = set()
+    with pd.ExcelWriter(tampon, engine="openpyxl") as classeur:
+        for nom, chemin in sources:
+            # Excel : 31 caractères max, sans []:*?/\ ; noms uniques.
+            feuille = "".join(c for c in nom if c not in '[]:*?/\\')[:31] or "feuille"
+            base, k = feuille, 2
+            while feuille in vus:
+                feuille = f"{base[:28]}_{k}"
+                k += 1
+            vus.add(feuille)
+            try:
+                df = pd.read_csv(chemin, sep=csv_separator(chemin))
+            except Exception as e:  # noqa: BLE001 — une feuille qui explique vaut mieux qu'un export absent
+                df = pd.DataFrame({"erreur": [f"{chemin.name} : lecture impossible ({e})"]})
+            df.to_excel(classeur, sheet_name=feuille, index=False)
+    return tampon.getvalue()

@@ -262,8 +262,9 @@ def main() -> None:
 
         writer.write(canvas)
 
-        if i % 500 == 0 and i > 0:
-            print(f"  {i}/{n_out} ({100*i/n_out:.0f}%)")
+        if i % 100 == 0 or i == n_out - 1:
+            # Repère `[i/N] images` lu par l'app pour sa barre de progression.
+            print(f"[{i + 1}/{n_out}] images", flush=True)
 
     cap.release()
     writer.release()

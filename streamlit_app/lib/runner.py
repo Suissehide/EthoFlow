@@ -351,6 +351,8 @@ def parse_progress(texte: str) -> dict | None:
         nom = session.group(3).strip()
         if nom == "clips de motifs":   # run_vame.py motif-videos
             morceaux.append(f"Clip {i}/{n}")
+        elif nom == "images":           # motif_gif.py, behavior_structure_gif.py
+            morceaux.append(f"Image {i}/{n}")
         else:
             morceaux.append(f"Session {i}/{n}" + (f" · {nom}" if nom else ""))
     else:

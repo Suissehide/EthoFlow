@@ -198,10 +198,19 @@ def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
     st.markdown(lucide_title("video", f"Session {session_id}"), unsafe_allow_html=True)
 
     videos = V.session_videos(projet, session_id, meta)
-    if videos:
-        libelle = st.radio("Vidéo", list(videos), horizontal=True,
-                           key=f"videos_choix_{session_id}")
+    if len(videos) > 1:
+        # Une session accumule des vidéos au fil du pipeline : la source,
+        # une par arène après le découpage, une annotée après la pose.
+        libelle = st.radio(
+            "Vidéo à afficher", list(videos), horizontal=True,
+            key=f"videos_choix_{session_id}",
+            help="**Source** : la vidéo d'origine. **Arène — …** : les vidéos "
+                 "découpées par arène. **Annotée DLC — …** : la vidéo avec les "
+                 "points dessinés par l'estimation de pose.",
+        )
         _lecteur(videos[libelle], session_id)
+    elif videos:
+        _lecteur(next(iter(videos.values())), session_id)
 
     source = meta.get("source_video")
     chemin = Path(source) if source else None
@@ -644,10 +653,12 @@ def _onglet_echelle(projet: Path) -> None:
 
     actuelle = px_per_cm(projet)
     if actuelle:
-        st.caption(
-            f"Échelle actuellement enregistrée : **{actuelle:.3f} px/cm** "
-            f"(1 px = {10 / actuelle:.2f} mm)."
+        st.success(
+            f"Échelle déjà enregistrée pour ce projet : **{actuelle:.3f} px/cm** "
+            f"(1 px = {10 / actuelle:.2f} mm). Recalibrer ci-dessous la remplace."
         )
+    else:
+        st.warning("Aucune échelle enregistrée pour ce projet.")
 
     source = st.radio(
         "Source de l'image à cliquer",
@@ -731,7 +742,9 @@ def _onglet_echelle(projet: Path) -> None:
                 )
                 if st.button("Enregistrer cette échelle", key="echelle_enregistrer_clics", type="primary"):
                     set_px_per_cm(projet, valeur_calculee)
+                    _reset_echelle_clics()
                     st.toast(f"Échelle enregistrée : {valeur_calculee:.3f} pixels par cm.")
+                    st.rerun()  # la valeur en haut de l'onglet est lue avant l'écriture
     else:
         st.caption(
             "Choisis une source d'image ci-dessus pour calibrer par les "
@@ -754,6 +767,7 @@ def _onglet_echelle(projet: Path) -> None:
     ):
         set_px_per_cm(projet, valeur_directe)
         st.toast(f"Échelle enregistrée : {valeur_directe:.3f} pixels par cm.")
+        st.rerun()
 
 
 # ============================================================

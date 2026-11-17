@@ -38,7 +38,7 @@ class Etape:
 ETAPES: tuple[Etape, ...] = (
     Etape(1, "Projet", "layout-dashboard", "Projet",
           "Vue d'ensemble du projet et de son avancement."),
-    Etape(2, "Données", "file-spreadsheet", "Décrire les animaux",
+    Etape(2, "Données", "file-spreadsheet", "Données",
           "Chaque vidéo devient une session avec ses informations : souris, "
           "groupe, traitement, date. EthoFlow les lit depuis le fichier Excel.",
           scripts=("sync_from_excel.py",), apres="après les données"),

@@ -317,13 +317,13 @@ def _section_sessions(projet: Path) -> None:
 
     st.caption(f"{n_total} session{'s' if n_total > 1 else ''} · "
                f"{n_video_ok} vidéo{'s' if n_video_ok > 1 else ''} trouvée{'s' if n_video_ok > 1 else ''}")
-    # Ligne verte si la vidéo est trouvée, rouge sinon : le statut se voit
+    # Cellule « Vidéo » verte si trouvée, rouge sinon : le statut se voit
     # d'un coup d'œil, sans lire la colonne.
     affiche = df.assign(Vidéo=df["Vidéo"].map({"OK": "trouvée", "manque": "introuvable"}))
     st.dataframe(
-        affiche.style.apply(
-            lambda ligne: ["background-color: #e3f3e8" if ligne["Vidéo"] == "trouvée"
-                           else "background-color: #fbe5e3"] * len(ligne), axis=1),
+        affiche.style.map(
+            lambda v: "background-color: " + ("#e3f3e8" if v == "trouvée" else "#fbe5e3"),
+            subset=["Vidéo"]),
         width="stretch", hide_index=True,
     )
 

@@ -30,6 +30,15 @@ def heure(iso: str | None, fmt: str = "%H:%M") -> str:
         return "—"
 
 
+def periode(debut_iso: str | None, fin_iso: str | None) -> str:
+    """« 17/11 10:02 → 10:41 » ; la date de fin n'est répétée que si elle change."""
+    debut = heure(debut_iso, "%d/%m %H:%M")
+    if not fin_iso:
+        return debut
+    meme_jour = heure(debut_iso, "%d/%m") == heure(fin_iso, "%d/%m")
+    return f"{debut} → {heure(fin_iso, '%H:%M' if meme_jour else '%d/%m %H:%M')}"
+
+
 def temps_restant(debut_iso: str, valeur: float, maintenant: datetime | None = None) -> str | None:
     """« ≈ 18 min » par extrapolation linéaire du temps écoulé, ou None
     tant que la progression est trop faible pour être parlante."""
@@ -60,13 +69,13 @@ def _job_en_cours(projet: Path) -> None:
                 runner.cancel(projet, job.job_id)
                 st.rerun()
         compte = (f"{prog['i'] - 1} / {prog['n']}" if prog.get("n")
-                  else f"{prog['pct']} %" if prog.get("pct") is not None
-                  else f"depuis {heure(job.started_at)}")
+                  else f"{prog['pct']} %" if prog.get("pct") is not None else "")
         reste = temps_restant(job.started_at, valeur) or ""
         st.markdown(
             f'<div class="ef-barre"><div style="width:{100 * valeur:.0f}%"></div></div>'
             f'<div class="ef-job-pied" style="margin-top:10px"><span>{compte}</span>'
-            f"<span>{reste}</span></div>",
+            f"<span>{reste}</span></div>"
+            f'<div class="ef-job-pied"><span>démarré le {heure(job.started_at, "%d/%m à %H:%M")}</span></div>',
             unsafe_allow_html=True)
 
 
@@ -79,7 +88,7 @@ def _historique(projet: Path, sauf: str | None) -> None:
         lignes.append(
             f'<div class="ef-historique-ligne"><span class="ef-dot" style="background:{couleur}"></span>'
             f"<div><b>{escape(job.label)}</b>"
-            f"<span>{ETATS.get(job.state, job.state)} · {heure(job.ended_at or job.started_at, '%d/%m/%Y %H:%M')}</span>"
+            f"<span>{ETATS.get(job.state, job.state)} · {periode(job.started_at, job.ended_at)}</span>"
             "</div></div>")
     if lignes:
         st.markdown(f'<div class="ef-historique">{"".join(lignes[:6])}</div>',

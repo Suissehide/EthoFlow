@@ -62,6 +62,23 @@ _TITRES = {
     "segment": "Découper en motifs",
 }
 
+# Ce que fait chaque sous-étape, écrit sous son titre.
+_DESCRIPTIONS = {
+    "setup": "Rassemble les poses nettoyées et leurs vidéos dans un projet VAME, "
+             "avec les réglages ci-dessous : nombre de motifs, fenêtre temporelle, "
+             "durée d'entraînement.",
+    "align": "Ramène chaque pose dans le repère de l'animal (même orientation, même "
+             "centre) : le modèle compare alors des gestes, pas des positions dans l'arène.",
+    "trainset": "Assemble les sessions alignées en un seul jeu d'entraînement, en "
+                "gardant une partie de côté pour vérifier le modèle.",
+    "train": "Apprend à résumer les séquences de poses. C'est l'étape longue ; le "
+             "modèle est sauvegardé dès sa première amélioration.",
+    "evaluate": "Produit des figures de contrôle (reconstructions, courbes de perte) "
+                "pour juger le modèle avant de découper.",
+    "segment": "Attribue un motif comportemental à chaque image de chaque session, "
+               "avec le nombre de motifs choisi à la création du projet VAME.",
+}
+
 _DUREES = {
     "setup": "quelques secondes",
     "align": "quelques minutes",
@@ -91,6 +108,7 @@ def _entete_etape(cle: str, fait: bool | None) -> None:
         f'<span class="ef-muted">{_DUREES[cle]}</span></p>',
         unsafe_allow_html=True,
     )
+    st.caption(_DESCRIPTIONS[cle])
 
 
 def _etape_du_job(job) -> str | None:
@@ -160,8 +178,6 @@ def _section_setup(projet: Path, etat: dict) -> None:
             "Le projet VAME existe déjà. Le recréer n'est possible qu'en "
             "cochant « Recréer le projet VAME »."
         )
-    else:
-        st.caption("Rassemble les poses nettoyées et leurs vidéos dans un projet VAME.")
 
     # Les quatre hyperparamètres que `run_vame.py setup` demande à l'invite.
     # Un job de l'app tourne sans terminal : ils sont réglés ici et la
@@ -281,9 +297,6 @@ def _section_align(projet: Path, etat: dict) -> None:
             "Au moins une session alignée, pas forcément toutes. Si des "
             "sessions ont été ajoutées depuis, relance l'alignement."
         )
-    else:
-        st.caption("Ramène chaque pose dans le repère de l'animal (même "
-                   "orientation, même centre).")
 
     manque = not etat["setup"]
     cmd = PL.vame_stage(projet, "align")
@@ -302,8 +315,6 @@ def _section_trainset(projet: Path, etat: dict) -> None:
     _entete_etape("trainset", etat["trainset"])
     if etat["trainset"]:
         st.caption("Jeu d'entraînement déjà préparé.")
-    else:
-        st.caption("Assemble les sessions alignées en un jeu d'entraînement.")
 
     manque = not etat["align"]
     cmd = PL.vame_stage(projet, "trainset")
@@ -491,49 +502,12 @@ def _section_segment(projet: Path, etat: dict) -> None:
         st.caption(
             "Au moins une session découpée en motifs, pas forcément toutes."
         )
-    else:
-        st.caption("Attribue un motif comportemental à chaque image.")
-
-    n_actuel = V.n_clusters(projet)
-    st.caption(
-        f"Nombre de motifs actuel : "
-        f"**{n_actuel if n_actuel else 'non défini (VAME prendra 15)'}**."
-    )
-
-    csv_path = V.vame_project(projet) / "motif_labels.csv"
-    if csv_path.exists():
-        st.warning(
-            "Des noms de motifs sont déjà saisis. Ce fichier est **unique "
-            "par projet**, pas par nombre de motifs : changer ce nombre puis "
-            "régénérer les noms efface ce qui a été saisi. Sauvegarde-le "
-            "d'abord si tu changes le nombre de motifs."
-        )
-        try:
-            contenu = csv_path.read_bytes()
-        except OSError:
-            contenu = None
-        if contenu is not None:
-            st.download_button(
-                "Sauvegarder les noms de motifs",
-                data=contenu, file_name="motif_labels_backup.csv",
-                mime="text/csv", key="vame_segment_backup_csv",
-            )
-
-    nouveau_n = st.number_input(
-        "Nombre de motifs pour ce découpage",
-        min_value=2, value=int(n_actuel) if n_actuel else 15, step=1,
-        key="vame_segment_n_clusters",
-        help="Change ce nombre pour essayer une autre finesse de découpage "
-             "sans réentraîner le modèle. C'est autant de motifs à nommer "
-             "ensuite.",
-    )
-    st.caption(
-        "Chaque nombre de motifs a ses propres résultats : rien n'est "
-        "écrasé. Évaluer le modèle avant est conseillé, pas imposé."
-    )
+    st.caption("Évaluer le modèle avant est conseillé, pas imposé.")
 
     manque = not etat["train"]
-    cmd = PL.vame_stage(projet, "segment", n_clusters=int(nouveau_n))
+    # Le nombre de motifs est celui saisi à la création du projet VAME (en
+    # haut de page) ; sans valeur, le script prend son défaut.
+    cmd = PL.vame_stage(projet, "segment", n_clusters=V.n_clusters(projet))
     _job.bouton_lancer(
         projet, "Découper en motifs", cmd, cle="btn_vame_segment",
         disabled=manque,

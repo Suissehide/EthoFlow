@@ -29,6 +29,7 @@ from lib.config import (
 )
 from lib.icons import lucide_data_uri, lucide_title
 from lib.project import dlc_bodyparts
+from lib import schema_souris as SCH
 from lib import sessions as S
 from views import _job
 from views import _widgets
@@ -354,8 +355,6 @@ def _section_inspection(projet: Path) -> None:
         "trous, et la fiabilité de chaque point du corps (sur les poses "
         "nettoyées quand elles existent). Ne modifie rien."
     )
-    if not st.toggle("Afficher le bilan", key="nettoyage_inspection"):
-        return
     signature = tuple(sorted((str(h), h.stat().st_mtime)
                              for h in dlc_output_dir(projet).glob("*/*.h5")))
     # Points écartés du verdict : ceux qu'on ne donnera pas à VAME. Sans ce
@@ -383,9 +382,22 @@ def _section_inspection(projet: Path) -> None:
             help="Part des images où tous les points (hors points ignorés) ont une position. "
                  "C'est elle qui compte pour VAME.")},
     )
+    moyenne = keypoints.mean(axis=1)
     st.caption("Fiabilité de chaque point du corps (% des images), du moins au plus fiable :")
-    st.dataframe(keypoints.loc[keypoints.mean(axis=1).sort_values().index],
-                 width="stretch")
+    tableau = keypoints.loc[moyenne.sort_values().index].assign(Moyenne=moyenne.round(1))
+    st.dataframe(tableau.style.map(SCH.style_cellule), width="stretch")
+
+    # Le même bilan sur une souris : la moyenne du projet en grand, puis
+    # chaque vidéo. Un point rouge se repère plus vite qu'une ligne de tableau.
+    st.markdown(lucide_title("scan-line", "Sur la souris"), unsafe_allow_html=True)
+    colonnes = st.columns([1, 2])
+    colonnes[0].markdown(SCH.svg(moyenne.round(1).to_dict(), "Moyenne de toutes les vidéos",
+                                 largeur=260), unsafe_allow_html=True)
+    with colonnes[1], st.expander(f"Par vidéo ({len(keypoints.columns)})", expanded=True):
+        grille = st.columns(3)
+        for i, session in enumerate(keypoints.columns):
+            grille[i % 3].markdown(SCH.svg(keypoints[session].to_dict(), session, largeur=170),
+                                   unsafe_allow_html=True)
     with st.expander("Comment lire ce bilan"):
         st.markdown(
             "- **Tous les points** : part des images où chaque point du corps a une "

@@ -324,8 +324,14 @@ def clean_dataframe(df: pd.DataFrame, fps: float, px_per_cm: float | None,
 
 def plot_trajectory_qc(df_before: pd.DataFrame, df_after: pd.DataFrame,
                         bodypart: str, out_path, session_id: str = "",
-                        stats: dict | None = None) -> bool:
+                        stats: dict | None = None,
+                        frame_size: tuple[int, int] | None = None) -> bool:
     """Trace la trajectoire avant/après nettoyage — le contrôle de Tony.
+
+    `frame_size` (largeur, hauteur en px) : les axes couvrent toute l'image
+    de la vidéo, au lieu de se serrer sur la trajectoire. Sans ça, l'arène
+    semble changer de taille d'une session à l'autre et une souris qui
+    bouge peu paraît explorer tout l'écran.
 
     « Ce que tu veux voir au final, c'est que tracer la trajectoire de
     l'animal sur toute la vidéo ne montre aucun saut anormal de position
@@ -381,7 +387,11 @@ def plot_trajectory_qc(df_before: pd.DataFrame, df_after: pd.DataFrame,
         ax.set_aspect("equal", adjustable="box")
     # Repère image (y vers le bas). Les axes étant partagés, une seule
     # inversion suffit — l'appliquer aux deux annulerait la première.
-    axes[0].invert_yaxis()
+    if frame_size:
+        axes[0].set_xlim(0, frame_size[0])
+        axes[0].set_ylim(frame_size[1], 0)   # repère image : y vers le bas
+    else:
+        axes[0].invert_yaxis()
     axes[0].set_ylabel("y (px)")
 
     suptitle = f"Contrôle trajectoire — {session_id}" if session_id else \
