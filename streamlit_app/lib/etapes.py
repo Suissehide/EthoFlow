@@ -48,13 +48,14 @@ ETAPES: tuple[Etape, ...] = (
     Etape(4, "Pose (DLC)", "scan-line", "Estimation de pose",
           "Détecte nez, oreilles, pattes et queue image par image. Produit "
           "un fichier de coordonnées par session.",
-          colonne="DLC", scripts=("run_dlc_inference.py",), apres="après la pose"),
+          colonne="DLC", scripts=("run_dlc_inference.py", "relabel_video.py"),
+          apres="après la pose"),
     Etape(5, "Nettoyage", "brush-cleaning", "Nettoyage des poses",
           "Écarte les points peu fiables et répare les petits trous, pour "
           "donner à VAME des trajectoires propres. Facultatif, mais évite "
           "qu'un point mal suivi devienne un faux comportement.",
           colonne="nettoyage",
-          scripts=("prepare_vame_input_custom.py", "assign_arenas.py", "relabel_video.py"),
+          scripts=("prepare_vame_input_custom.py", "assign_arenas.py"),
           apres="après le nettoyage"),
     Etape(6, "VAME", "waypoints", "Segmentation comportementale (VAME)",
           "Apprend un modèle propre à ce projet, puis découpe chaque session "

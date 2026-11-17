@@ -216,10 +216,25 @@ def _section_contenu(projet: Path, chemin_excel: Path | None) -> None:
 def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
     st.markdown(lucide_title("play", "Créer les sessions"), unsafe_allow_html=True)
     st.caption(
-        "Une session par ligne de l'Excel, reliée à sa vidéo. Lance d'abord "
-        "l'aperçu : il n'écrit rien et signale les lignes dont la vidéo est "
-        "introuvable."
+        "Relie chaque ligne de l'Excel à son fichier vidéo. Indique le dossier "
+        "où sont les vidéos : EthoFlow y cherche, pour chaque ligne, le fichier "
+        "dont le nom est la colonne `id` (ligne `970-M1` → fichier "
+        "`970-M1.mp4`). Les noms doivent donc correspondre exactement."
     )
+    with st.expander("Ce que fait « Créer les sessions »"):
+        st.markdown(
+            "- Pour chaque ligne de l'Excel, crée un dossier "
+            "`data/raw/<session>/` dans le projet, avec un fichier "
+            "`metadata.yaml` : les informations de la ligne (souris, groupe, "
+            "traitement…) et le chemin de la vidéo trouvée.\n"
+            "- **Les vidéos ne sont ni copiées ni déplacées** : elles restent "
+            "dans leur dossier, EthoFlow ne retient que leur emplacement.\n"
+            "- Une ligne dont la vidéo est introuvable donne quand même une "
+            "session, marquée « vidéo introuvable » : corrige le nom dans "
+            "l'Excel ou le fichier, puis relance.\n"
+            "- **Aperçu** fait la même recherche sans rien écrire : lance-le "
+            "d'abord pour voir quelles vidéos sont trouvées."
+        )
 
     videos_dir = champ_chemin(
         "Dossier des vidéos",
@@ -280,7 +295,6 @@ def _section_sync(projet: Path, chemin_excel: Path | None) -> None:
     _widgets.details_techniques(cmd_reel, notes=[
         "Aperçu : même commande avec `--dry-run`. Chaque session est écrite "
         "dans `data/raw/<session>/metadata.yaml`."])
-    _job.historique(projet)
 
 
 # ============================================================
@@ -303,8 +317,15 @@ def _section_sessions(projet: Path) -> None:
 
     st.caption(f"{n_total} session{'s' if n_total > 1 else ''} · "
                f"{n_video_ok} vidéo{'s' if n_video_ok > 1 else ''} trouvée{'s' if n_video_ok > 1 else ''}")
-    st.dataframe(df.assign(Vidéo=df["Vidéo"].map({"OK": "trouvée", "manque": "introuvable"})),
-                 width="stretch", hide_index=True)
+    # Ligne verte si la vidéo est trouvée, rouge sinon : le statut se voit
+    # d'un coup d'œil, sans lire la colonne.
+    affiche = df.assign(Vidéo=df["Vidéo"].map({"OK": "trouvée", "manque": "introuvable"}))
+    st.dataframe(
+        affiche.style.apply(
+            lambda ligne: ["background-color: #e3f3e8" if ligne["Vidéo"] == "trouvée"
+                           else "background-color: #fbe5e3"] * len(ligne), axis=1),
+        width="stretch", hide_index=True,
+    )
 
     _section_metadata(projet, df["Session"].tolist())
 
@@ -313,9 +334,9 @@ def _section_sessions(projet: Path) -> None:
             f"{n_total - n_video_ok} session(s) dont la vidéo est introuvable : "
             "retrouve-les depuis la page **Vidéos & calibration**."
         )
-    st.caption(
-        "Étape suivante : la page **Vidéos & calibration**, pour vérifier "
-        "chaque vidéo et régler l'échelle en pixels par cm."
+    _widgets.etape_suivante(
+        "Vidéos & calibration",
+        "vérifier chaque vidéo et régler l'échelle en pixels par cm.",
     )
 
 

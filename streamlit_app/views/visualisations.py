@@ -380,4 +380,3 @@ def render() -> None:
         _tab_dendrogramme(projet)
 
     st.divider()
-    _job.historique(projet)

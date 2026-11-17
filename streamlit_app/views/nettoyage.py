@@ -689,7 +689,6 @@ def render() -> None:
     _section_nettoyage(projet)
     st.divider()
     _job.panneau(projet)
-    _job.historique(projet)
     st.divider()
     _section_resume(projet)
     st.divider()

@@ -547,4 +547,3 @@ def render() -> None:
         _tab_resultats(projet, axes)
 
     st.divider()
-    _job.historique(projet)

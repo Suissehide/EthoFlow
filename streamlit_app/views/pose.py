@@ -24,12 +24,14 @@ from pathlib import Path
 import streamlit as st
 
 import lib.pipeline as PL
+from lib import video as V
 from lib.config import (
     cropped_videos_exist,
     dlc_config_status,
     require_project,
 )
 from lib.icons import lucide_title
+from lib.sessions import list_sessions, load_metadata
 from views import _job, _widgets
 
 # Options du mode d'inférence, dans l'ordre où le README §Étape 5 les
@@ -131,19 +133,28 @@ def _section_options(projet: Path, mode: str) -> dict:
             o["video_adapt_batch_size"] = int(st.number_input(
                 "Lot d'adaptation", min_value=1, max_value=32, value=2,
                 step=1, key="pose_video_adapt_batch_size", width=220,
-                help="2 sur une carte graphique de 16 Go, 4 à 8 sur 24 Go."))
+                help="Images traitées ensemble pendant le ré-entraînement. "
+                     "2 sur une carte graphique de 16 Go, 4 à 8 sur 24 Go."))
         if mode == "custom":
             o["batch_size"] = int(st.number_input(
                 "Images par lot", min_value=1,
-                max_value=128, value=16, step=1, key="pose_batch_size", width=220,
-                help="Images traitées ensemble par la carte graphique. 16 est un bon "
-                     "départ sur une carte de 16 Go ; baisse si sa mémoire sature."))
-            o["fp16"] = st.checkbox(
-                "Calcul en demi-précision :gray[(≈ 2× plus rapide, écart sous le pixel)]",
-                value=False, key="pose_fp16",
-                help="Utilise mieux les cartes graphiques récentes. L'écart sur les "
-                     "positions reste sous le pixel, bien en dessous de la précision "
-                     "du modèle (2 à 3 pixels).")
+                max_value=128, value=16, step=1, key="pose_batch_size", width=220))
+            st.caption(
+                "Nombre d'images que la carte graphique analyse en même temps. "
+                "Ça ne change **pas** le résultat, seulement la vitesse : plus le "
+                "lot est grand, plus c'est rapide, jusqu'à ce que la mémoire de "
+                "la carte soit pleine. Si le job échoue avec « out of memory », "
+                "divise la valeur par deux. 16 convient à une carte de 16 Go."
+            )
+            o["fp16"] = st.checkbox("Calcul en demi-précision", value=False, key="pose_fp16")
+            st.caption(
+                "La carte graphique calcule avec des nombres deux fois plus "
+                "courts (16 bits au lieu de 32) : environ deux fois plus rapide, "
+                "et moitié moins de mémoire, donc un lot plus grand possible. "
+                "Les positions trouvées bougent de moins d'un pixel, négligeable "
+                "face à la précision du modèle (2 à 3 pixels). Sans effet sur "
+                "une carte ancienne (avant les GeForce RTX) : laisse décoché."
+            )
         if not o["video_adapt"] and mode != "custom":
             st.caption("Aucun réglage avancé pour ce modèle.")
     return o
@@ -184,19 +195,6 @@ def _section_lancement(projet: Path, mode: str, o: dict) -> None:
         cle="btn_pose_lancer", disabled=modele_manquant or n == 0, help=aide,
     )
     _job.panneau(projet)
-    with st.expander("Vérifier le résultat avant le nettoyage"):
-        st.markdown(
-            "- Avec « Mon modèle entraîné », aucune vidéo annotée n'est produite. "
-            "Pour voir les points sur la vidéo, il faut les redessiner à partir du "
-            "fichier de poses (quelques dizaines de secondes, sans refaire la pose : "
-            "voir **Détails techniques**).\n"
-            "- Deux vidéos sortent : seuil 0,3 et seuil 0,6. La 0,6 efface les points "
-            "dont le modèle doute, donc elle paraît propre et cache les hésitations. "
-            "Compare les deux.\n"
-            "- Sauts rares et brefs : le nettoyage les répare. Sauts fréquents, ou "
-            "pattes gauche et droite inversées tout le temps : c'est le modèle qu'il "
-            "faut reprendre (Parcours B du README)."
-        )
     _widgets.details_techniques(cmd, notes=[
         f"Mode d'inférence : `{mode}`.",
         "Sorties : `data/dlc-output/<session>/` (un `.h5` de coordonnées par "
@@ -211,9 +209,58 @@ def _section_lancement(projet: Path, mode: str, o: dict) -> None:
     ])
 
 
+def _section_verification(projet: Path) -> None:
+    """Voir les points sur la vidéo d'une session déjà traitée, avant de nettoyer.
+
+    SuperAnimal écrit une vidéo annotée pendant la pose ; « Mon modèle
+    entraîné » n'en écrit pas, elle se redessine depuis le fichier de poses
+    (`relabel_video.py`, quelques dizaines de secondes, sans refaire la
+    pose). Dans les deux cas, la vidéo se regarde sur la page Vidéos &
+    calibration, sélecteur « Vidéo ».
+    """
+    df = list_sessions(projet)
+    faites = list(df.loc[df["DLC"] == "OK", "session_id"]) if not df.empty else []
+    if not faites:
+        return
+    st.markdown(lucide_title("video", "Vérifier le résultat avant le nettoyage"),
+                unsafe_allow_html=True)
+    st.caption(
+        "Regarde les points dessinés sur la vidéo d'une session : sauts rares "
+        "et brefs, le nettoyage les répare ; sauts fréquents ou pattes gauche "
+        "et droite inversées en permanence, c'est le modèle qu'il faut reprendre."
+    )
+    session = st.selectbox("Session traitée", faites, key="pose_verif_session")
+    meta = load_metadata(projet, session) or {}
+    annotees = [n for n in V.session_videos(projet, session, meta) if n.startswith("Annotée")]
+    if annotees:
+        st.caption(f"{len(annotees)} vidéo{'s' if len(annotees) > 1 else ''} annotée"
+                   f"{'s' if len(annotees) > 1 else ''} pour cette session. Avec deux seuils "
+                   "(0,3 et 0,6), compare-les : la 0,6 efface les points dont le modèle "
+                   "doute, elle paraît propre et cache les hésitations.")
+        if st.button("Voir la vidéo annotée", key="btn_pose_voir_video", type="primary"):
+            st.session_state["videos_session_choisie"] = session
+            st.session_state.current_page = "Vidéos & calibration"
+            st.rerun()
+    else:
+        st.caption("Pas encore de vidéo annotée pour cette session : avec « Mon modèle "
+                   "entraîné », les points se redessinent depuis le fichier de poses "
+                   "(quelques dizaines de secondes, sans refaire la pose), à deux "
+                   "seuils de confiance (0,3 et 0,6).")
+        _job.bouton_lancer(
+            projet, "Dessiner les points sur la vidéo",
+            PL.relabel_video(projet, sessions=[session]),
+            cle="btn_pose_relabel", type="secondary",
+            disabled=dlc_config_status(projet)[0] != "ok",
+            help=None if dlc_config_status(projet)[0] == "ok"
+            else "Demande le modèle DLC du projet (voir « Modèle à utiliser »).",
+        )
+
+
 def render() -> None:
     projet = require_project()
     _widgets.entete_etape(projet)
     mode = _section_mode(projet)
     options = _section_options(projet, mode)
     _section_lancement(projet, mode, options)
+    st.divider()
+    _section_verification(projet)

@@ -544,8 +544,7 @@ def _section_segment(projet: Path, etat: dict) -> None:
         "`<N>_hmm_label_<session>.npy` par session (un numéro de motif par "
         "image).",
     ])
-    st.caption("Étape suivante : la page Motifs, pour visionner un clip par "
-               "motif et lui donner un nom.")
+    _widgets.etape_suivante("Motifs", "visionner un clip par motif et lui donner un nom.")
 
 
 # ============================================================
@@ -571,5 +570,3 @@ def render() -> None:
     st.divider()
     _titre_phase(3, "Segmenter")
     _section_segment(projet, etat)
-    st.divider()
-    _job.historique(projet)

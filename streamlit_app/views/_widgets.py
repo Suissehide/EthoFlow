@@ -188,6 +188,16 @@ def verrou_etape(page: str | None = None) -> str | None:
             f"Disponible quand l'étape « {cour['etape'].nom} » sera faite.")
 
 
+def etape_suivante(page: str, texte: str, *, cle: str = "btn_etape_suivante") -> None:
+    """Pied de page d'étape : la phrase « Étape suivante : … » et le bouton
+    qui ouvre cette page. La page reste consultable même si ses lancements
+    sont verrouillés : le bouton ne bloque jamais."""
+    st.caption(f"Étape suivante : {texte}")
+    if st.button(f"Ouvrir : {page}", key=cle):
+        st.session_state.current_page = page
+        st.rerun()
+
+
 def details_techniques(cmd=None, *, notes: list[str] | None = None) -> None:
     """Le jargon (script, env conda, ligne de commande) sort du premier
     niveau et se range ici, replié (handoff : « Détails techniques »)."""

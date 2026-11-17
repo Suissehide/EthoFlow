@@ -84,8 +84,22 @@ def _historique(projet: Path, sauf: str | None) -> None:
     if lignes:
         st.markdown(f'<div class="ef-historique">{"".join(lignes[:6])}</div>',
                     unsafe_allow_html=True)
+        _journaux(projet, sauf)
     else:
         st.caption("Aucun job lancé sur ce projet pour l'instant.")
+
+
+def _journaux(projet: Path, sauf: str | None) -> None:
+    """Le journal d'un job précédent, à la demande (popover : la colonne est étroite)."""
+    jobs = [j for j in runner.history(projet, limit=10) if j.job_id != sauf]
+    if not jobs:
+        return
+    with st.popover("Journaux", key="ef_journaux"):
+        choix = st.selectbox(
+            "Job", jobs, key="ef_journal_job",
+            format_func=lambda j: f"{j.label} · {heure(j.ended_at or j.started_at, '%d/%m %H:%M')}",
+        )
+        st.code(runner.read_log(projet, choix.job_id, tail=200) or "(vide)", language="text")
 
 
 def render(projet: Path, lignes: list[dict]) -> None:

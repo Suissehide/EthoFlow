@@ -216,3 +216,40 @@ def test_decocher_ignorer_refait_toutes_les_sessions(tmp_path, monkeypatch):
     [c for c in at.checkbox if c.key == "pose_skip_existing"][0].set_value(False).run()
     assert not at.exception, at.exception
     assert "--all" not in commande() and "S1" in commande()
+
+
+# ============================================================
+# Vérifier le résultat avant le nettoyage
+# ============================================================
+
+def test_verification_absente_tant_qu_aucune_session_n_a_de_pose(tmp_path, monkeypatch):
+    projet = _projet(tmp_path, modele="ok")
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    assert "pose_verif_session" not in {s.key for s in at.selectbox}
+
+
+def test_verification_propose_de_dessiner_les_points_sans_video_annotee(tmp_path, monkeypatch):
+    projet = _projet(tmp_path, modele="ok")
+    (projet / "data" / "dlc-output" / "S1").mkdir(parents=True)
+    (projet / "data" / "dlc-output" / "S1" / "S1DLC.h5").write_bytes(b"\x00")
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    boutons = {b.key: b for b in at.button}
+    assert "btn_pose_relabel" in boutons and not boutons["btn_pose_relabel"].disabled
+    assert "btn_pose_voir_video" not in boutons
+
+
+def test_verification_ouvre_la_video_annotee_sur_la_page_videos(tmp_path, monkeypatch):
+    projet = _projet(tmp_path, modele="absent")
+    dossier = projet / "data" / "dlc-output" / "S1"
+    dossier.mkdir(parents=True)
+    (dossier / "S1DLC.h5").write_bytes(b"\x00")
+    (dossier / "S1DLC_labeled.mp4").write_bytes(b"\x00")
+
+    at = _lancer_sur_projet(tmp_path, monkeypatch, projet)
+    boutons = {b.key: b for b in at.button}
+    assert "btn_pose_relabel" not in boutons
+    boutons["btn_pose_voir_video"].click().run()
+    assert not at.exception, at.exception
+    assert at.session_state["current_page"] == "Vidéos & calibration"
+    assert at.session_state["videos_session_choisie"] == "S1"

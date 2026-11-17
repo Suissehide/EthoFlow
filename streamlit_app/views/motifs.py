@@ -368,7 +368,6 @@ def render() -> None:
     if not ML.exists(projet):
         _section_generation(projet)
         st.divider()
-        _job.historique(projet)
         return
 
     df = ML.load(projet)
@@ -402,4 +401,3 @@ def render() -> None:
         _tab_table(projet, df)
 
     st.divider()
-    _job.historique(projet)

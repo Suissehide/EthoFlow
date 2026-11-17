@@ -253,3 +253,11 @@ def test_run_dlc_inference_batch_size_et_fp16(project):
     assert "--fp16" in args
     defaut = PL.run_dlc_inference(project, mode="custom", all_sessions=True).args
     assert "--batch-size" not in defaut and "--fp16" not in defaut
+
+
+def test_relabel_video_passe_les_sessions_et_tourne_dans_dlc(tmp_path):
+    cmd = PL.relabel_video(tmp_path, sessions=["S1", "S2"])
+    assert cmd.env == "dlc"
+    argv = PL.to_argv(cmd)
+    assert argv[argv.index("--sessions") + 1:] == ["S1", "S2"]
+    assert "--no-prompt" in argv and "--project-dir" in argv

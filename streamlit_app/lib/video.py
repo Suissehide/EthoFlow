@@ -173,6 +173,17 @@ def distance_from_two_points(p1: tuple[int, int], p2: tuple[int, int]) -> float:
     return float(math.hypot(p2[0] - p1[0], p2[1] - p1[1]))
 
 
+def draw_point(frame: np.ndarray, p: tuple[int, int]) -> np.ndarray:
+    """Marque le premier clic (arène ou échelle) sur une copie de `frame`.
+
+    Sans ça, rien ne change à l'écran entre le premier et le second clic :
+    l'utilisateur ne sait pas si le clic a été pris.
+    """
+    sortie = frame.copy()
+    cv2.circle(sortie, (int(p[0]), int(p[1])), 6, (255, 0, 255), -1, cv2.LINE_AA)
+    return sortie
+
+
 def draw_scale_line(frame: np.ndarray, p1: tuple[int, int], p2: tuple[int, int]) -> np.ndarray:
     """Dessine le segment de calibration d'échelle sur une copie de `frame`.
 

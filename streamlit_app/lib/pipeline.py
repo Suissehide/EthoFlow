@@ -182,6 +182,13 @@ def crop_arenes(project: Path, *, sessions: list[str] | None = None,
     return _cmd("crop_arenes.py", args, "Crop des arènes")
 
 
+def relabel_video(project: Path, *, sessions: list[str]) -> Command:
+    """Redessine les points sur la vidéo depuis le `.h5` (mode custom seulement)."""
+    args = _base(project) + ["--sessions", *sessions]
+    return _cmd("relabel_video.py", args,
+                f"Vidéo annotée : {', '.join(sessions)}")
+
+
 def run_dlc_inference(project: Path, *, mode: str,
                       sessions: list[str] | None = None,
                       all_sessions: bool = False,

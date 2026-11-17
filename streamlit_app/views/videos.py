@@ -25,8 +25,8 @@ testable) :
    (`save_coords_default`/`write_scale`) — la vue ne réimplémente jamais
    la sérialisation YAML.
 
-Quatre onglets : ``Sessions``, ``Crop``, ``Calibration arènes``,
-``Échelle px/cm``.
+Trois onglets : ``Sessions``, ``Calibration arènes`` (calibration au clic,
+puis découpage des vidéos par arène — multi-animaux seulement), ``Échelle``.
 
 Aucune commande n'est exécutée ici : `lib.pipeline` construit,
 `views._job.bouton_lancer` lance via `lib.runner`.
@@ -64,8 +64,7 @@ _TOLERANCE_FPS = 0.5
 
 # `st.video` sur un chemin local charge TOUT le fichier en mémoire
 # (streamlit/runtime/memory_media_file_storage.py, `f.read()`) : au-delà,
-# le lecteur ne s'affiche que sur demande. Le visualiseur frame à frame,
-# lui, ne lit qu'une frame à la fois via OpenCV, quelle que soit la taille.
+# le lecteur ne s'affiche que sur demande.
 _LECTEUR_MAX_OCTETS = 500 * 1024 ** 2
 
 # Largeur d'affichage (px) des images, vidéos et aperçus cliquables : en
@@ -92,58 +91,16 @@ def _probe_cache(chemin: str) -> V.VideoInfo:
     return V.probe(Path(chemin))
 
 
-@st.cache_data(show_spinner=False, max_entries=300)
-def _frame_cache(chemin: str, index: int) -> bytes | None:
-    return V.frame_png_bytes(Path(chemin), index=index, max_width=1280)
-
-
-def _decaler(cle: str, pas: int, n: int) -> None:
-    st.session_state[cle] = max(0, min(n - 1, st.session_state.get(cle, 0) + pas))
-
-
-def _visualiseur(chemin: Path, session_id: str) -> None:
-    """Frame à frame (OpenCV) + lecteur navigateur.
-
-    L'index de frame est partagé entre les vidéos d'une même session (même
-    nombre de frames) : passer de la source à la vidéo annotée garde la
-    même image, pour comparer un keypoint à l'animal réel.
-    """
-    info = _probe_cache(str(chemin))
-    if not info.exists or not info.n_frames:
-        st.warning(f"`{chemin.name}` ne s'ouvre pas avec OpenCV (codec, fichier corrompu).")
-        return
-    n = info.n_frames
-    cle = f"videos_frame_{session_id}"
-    # Borné AVANT de créer le slider : une vidéo plus courte que la
-    # précédente ne doit pas recevoir un index hors bornes.
-    st.session_state[cle] = min(st.session_state.get(cle, 0), n - 1)
-
-    col_prec, col_slider, col_suiv = st.columns([1, 10, 1], vertical_alignment="center")
-    col_prec.button("◀", key=f"{cle}_prec", on_click=_decaler, args=(cle, -1, n),
-                    help="Image précédente")
-    col_suiv.button("▶", key=f"{cle}_suiv", on_click=_decaler, args=(cle, 1, n),
-                    help="Image suivante")
-    with col_slider:
-        index = st.slider("Image", 0, max(n - 1, 1), key=cle,
-                          label_visibility="collapsed", disabled=n < 2)
-
-    t = index / info.fps if info.fps else None
-    png = _frame_cache(str(chemin), index)
-    legende = f"Image {index} / {n - 1}" + (f" — {t:.2f} s" if t is not None else "")
-    if png:
-        st.image(png, caption=legende, width=_LARGEUR_AFFICHAGE)
-    else:
-        st.caption(f"{legende} : image illisible.")
-
+def _lecteur(chemin: Path, session_id: str) -> None:
+    """Lecteur navigateur ; au-delà du seuil, sur demande (fichier chargé en mémoire)."""
     taille = chemin.stat().st_size
     if taille <= _LECTEUR_MAX_OCTETS or st.toggle(
-        f"Lecteur vidéo ({taille / 1024 ** 3:.1f} Go, chargés en mémoire)",
-        key=f"{cle}_lecteur",
+        f"Afficher le lecteur ({taille / 1024 ** 3:.1f} Go, chargés en mémoire)",
+        key=f"videos_lecteur_{session_id}",
     ):
-        st.video(str(chemin), start_time=int(t or 0), width=_LARGEUR_AFFICHAGE)
-        st.caption("Le lecteur démarre à l'image choisie. Une vidéo annotée "
-                   "écrite par OpenCV (codec mp4v) peut ne pas se lire dans le "
-                   "navigateur : le visualiseur ci-dessus, lui, la lit toujours.")
+        st.video(str(chemin), width=_LARGEUR_AFFICHAGE)
+        st.caption("Une vidéo annotée écrite par OpenCV (codec mp4v) peut ne pas se "
+                   "lire dans le navigateur : ouvre-la alors avec VLC.")
 
 
 def _clic_image(apercu, key: str) -> dict | None:
@@ -244,7 +201,7 @@ def _section_video_session(projet: Path, session_id: str, meta: dict) -> None:
     if videos:
         libelle = st.radio("Vidéo", list(videos), horizontal=True,
                            key=f"videos_choix_{session_id}")
-        _visualiseur(videos[libelle], session_id)
+        _lecteur(videos[libelle], session_id)
 
     source = meta.get("source_video")
     chemin = Path(source) if source else None
@@ -425,18 +382,10 @@ def _onglet_sessions(projet: Path) -> None:
 
 
 # ============================================================
-# Onglet Crop — voie B de l'étape 4 (multi uniquement)
+# Découpage — voie B de l'étape 4 (multi uniquement), sous la calibration
 # ============================================================
 
-def _onglet_crop(projet: Path) -> None:
-    if project_kind(projet) != "multi":
-        st.caption(
-            "Un seul animal par vidéo dans ce projet : découper la vidéo par "
-            "arène ne sert à rien ici. L'estimation de pose travaille "
-            "directement sur la vidéo (page **Pose (DLC)**)."
-        )
-        return
-
+def _section_decoupage(projet: Path) -> None:
     st.markdown(lucide_title("clapperboard", "Découper les vidéos par arène"), unsafe_allow_html=True)
     st.caption("Plusieurs animaux par vidéo : deux façons de faire, à choisir avant l'estimation de pose.")
     st.markdown(
@@ -495,7 +444,6 @@ def _onglet_crop(projet: Path) -> None:
         "Coordonnées : celles de chaque session (`arenes[].coords` du "
         "`metadata.yaml`), sinon `default_arenes_coords` de "
         "`configs/pipeline_config.yaml`."])
-    _job.historique(projet)
 
 
 # ============================================================
@@ -559,13 +507,29 @@ def _reset_arenes_clics() -> None:
 
 def _onglet_calibration_arenes(projet: Path) -> None:
     st.markdown(lucide_title("waypoints", "Calibration des arènes"), unsafe_allow_html=True)
+    if project_kind(projet) != "multi":
+        st.caption(
+            "Un seul animal par vidéo dans ce projet : les arènes ne servent "
+            "que lorsque plusieurs animaux sont filmés dans une même vidéo, "
+            "chacun dans son enclos. Rien à faire ici, passe à l'onglet "
+            "**Échelle**."
+        )
+        return
     st.caption(
-        "Deux clics par arène, sur deux coins opposés du rectangle, dans "
-        "l'ordre A1 → A2 → A3 → A4. Ces arènes servent pour toutes les "
-        "sessions du projet qui n'ont pas les leurs. Choisis une image où les "
-        "bords des arènes sont bien visibles."
+        "**Plusieurs animaux par vidéo** : dis à EthoFlow où est chaque enclos "
+        "(arène) dans l'image. Deux clics par arène, sur deux coins opposés du "
+        "rectangle, dans l'ordre A1 → A2 → A3 → A4. Ces arènes servent pour "
+        "toutes les sessions du projet qui n'ont pas les leurs. Choisis une "
+        "image où les bords des arènes sont bien visibles."
     )
+    _section_clics_arenes(projet)
+    st.divider()
+    _section_decoupage(projet)
 
+
+def _section_clics_arenes(projet: Path) -> None:
+    """Les clics, l'ajustement au pixel et l'enregistrement — peut s'arrêter
+    tôt (aucune vidéo lisible) sans priver la page du découpage en dessous."""
     choix = _choisir_frame_session(projet, cle="calib_arenes")
     if choix is None:
         return
@@ -580,6 +544,9 @@ def _onglet_calibration_arenes(projet: Path) -> None:
 
     frame_rgb = V.to_rgb(frame)
     apercu = V.draw_arenas(frame_rgb, coords_actuelles) if coords_actuelles else frame_rgb
+    premier_coin = st.session_state.get("calib_arenes_premier_clic")
+    if premier_coin is not None:
+        apercu = V.draw_point(apercu, premier_coin)
 
     if len(rects) >= len(_LABELS_ARENES):
         st.success(
@@ -600,6 +567,7 @@ def _onglet_calibration_arenes(projet: Path) -> None:
         premier = st.session_state.get("calib_arenes_premier_clic")
         if premier is None:
             st.session_state["calib_arenes_premier_clic"] = point
+            st.rerun()  # affiche le coin cliqué sans attendre le second
         else:
             rect = V.rect_from_two_points(premier, point)
             if rect[2] == 0 or rect[3] == 0:
@@ -713,7 +681,8 @@ def _onglet_echelle(projet: Path) -> None:
 
         points: list[tuple[int, int]] = st.session_state.setdefault("echelle_points", [])
         frame_rgb = V.to_rgb(frame)
-        apercu = V.draw_scale_line(frame_rgb, points[0], points[1]) if len(points) == 2 else frame_rgb
+        apercu = (V.draw_scale_line(frame_rgb, points[0], points[1]) if len(points) == 2
+                  else V.draw_point(frame_rgb, points[0]) if points else frame_rgb)
 
         if len(points) < 2:
             etape = "première" if not points else "seconde"
@@ -725,8 +694,7 @@ def _onglet_echelle(projet: Path) -> None:
                 and valeur.get("unix_time") != st.session_state.get("echelle_dernier_clic")):
             st.session_state["echelle_dernier_clic"] = valeur.get("unix_time")
             points.append((int(valeur["x"]), int(valeur["y"])))
-            if len(points) == 2:
-                st.rerun()  # redessine immédiatement le segment
+            st.rerun()  # redessine immédiatement : le point, puis le segment
 
         if st.button("Recommencer les clics", key="echelle_recommencer", disabled=not points):
             _reset_echelle_clics()
@@ -797,13 +765,11 @@ def render() -> None:
 
     _widgets.entete_etape(projet)
 
-    onglet_sessions, onglet_crop, onglet_calibration_arenes, onglet_echelle = st.tabs(
-        ["Sessions", "Découpage", "Calibration arènes", "Échelle"]
+    onglet_sessions, onglet_calibration_arenes, onglet_echelle = st.tabs(
+        ["Sessions", "Calibration arènes", "Échelle"]
     )
     with onglet_sessions:
         _onglet_sessions(projet)
-    with onglet_crop:
-        _onglet_crop(projet)
     with onglet_calibration_arenes:
         _onglet_calibration_arenes(projet)
     with onglet_echelle:

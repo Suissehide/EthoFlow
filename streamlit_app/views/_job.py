@@ -185,20 +185,3 @@ def panneau(projet: Path, *, lignes: int = 30) -> None:
     with st.expander("Journal complet", expanded=False):
         st.code(runner.read_log(projet, job.job_id) or "(vide)", language="text")
 
-
-
-def historique(projet: Path, limite: int = 10) -> None:
-    """Liste dépliable des jobs précédents, avec leur log complet."""
-    jobs = runner.history(projet, limit=limite)
-    if not jobs:
-        return
-    with st.expander(f"Journaux des jobs précédents ({len(jobs)})", expanded=False):
-        for job in jobs:
-            st.markdown(_ligne_job(job), unsafe_allow_html=True)
-            # Pas d'expander imbriqué (déconseillé par Streamlit) : la
-            # visibilité du log de CE job se pilote par une case à cocher,
-            # à plat dans l'expander parent — lisible même avec dix jobs.
-            if st.checkbox("Voir le journal", key=f"voir_log_{job.job_id}"):
-                st.code(runner.read_log(projet, job.job_id, tail=200) or "(vide)",
-                        language="text")
-            st.divider()
