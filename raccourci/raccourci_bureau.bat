@@ -6,9 +6,9 @@ rem Les chemins passent par des variables d'environnement : pas de souci de
 rem guillemets, d'apostrophes ni de lettre de lecteur cote PowerShell.
 for %%R in ("%~dp0..") do set "ICI=%%~fR\"
 set "CIBLE=%ICI%EthoFlow-Windows.bat"
-set "ICONE=%ICI%scripts\ethoflow.ico"
+set "ICONE=%ICI%raccourci\ethoflow.ico"
 if not exist "%CIBLE%" (
-    echo Erreur : "%CIBLE%" introuvable. Ce script doit rester dans scripts\ du depot EthoFlow.
+    echo Erreur : "%CIBLE%" introuvable. Ce script doit rester dans raccourci\ du depot EthoFlow.
     pause
     exit /b 1
 )
